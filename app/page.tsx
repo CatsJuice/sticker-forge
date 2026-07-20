@@ -4,7 +4,7 @@ import { StickerForgeStudio } from "./StickerForgeStudio";
 export const metadata: Metadata = {
   title: { absolute: "Sticker Forge — Interactive Sticker Maker" },
   description:
-    "Turn text or SVG artwork into a tactile, peelable web sticker with live material and shadow controls.",
+    "Turn text or uploaded images into a tactile, peelable web sticker with live material and shadow controls.",
 };
 
 export default function Home() {

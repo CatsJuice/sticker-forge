@@ -1,10 +1,14 @@
 import * as THREE from "three";
 import {
-  shadowFragmentShader,
-  shadowVertexShader,
+  peelShadowDepthFragmentShader,
+  peelShadowDepthVertexShader,
   stickerFragmentShader,
   stickerVertexShader,
 } from "./shaders";
+import {
+  DEFAULT_PEEL_SOUND_URL,
+  PeelAudioEngine,
+} from "./peel-audio";
 import { prepareArtwork, type PreparedArtwork } from "./source";
 import {
   resolveStickerOptions,
@@ -20,11 +24,16 @@ import {
 export type {
   StickerBackOptions,
   StickerInstance,
+  StickerImageSource,
   StickerOptions,
   StickerOutlineOptions,
   StickerPeelOptions,
   StickerPoint,
+  StickerRichTextBlock,
+  StickerRichTextDocument,
+  StickerRichTextRun,
   StickerShadowOptions,
+  StickerSoundOptions,
   StickerSource,
   StickerState,
   StickerSvgSource,
@@ -34,11 +43,54 @@ export { sanitizeSvgMarkup } from "./source";
 
 const DEFAULT_SOURCE: StickerTextSource = {
   type: "text",
-  text: "PEEL ME",
+  text: "PEEL ME\n@cats_juice",
   color: "#19191d",
   fontFamily: "Arial Rounded MT Bold, Arial Black, sans-serif",
   fontWeight: 900,
+  richText: {
+    blocks: [
+      {
+        align: "center",
+        lineHeight: 1.2,
+        runs: [
+          { text: "PEEL ", color: "#19191d", fontSize: 28, fontWeight: 900 },
+          {
+            text: "ME",
+            color: "rgb(36, 126, 245)",
+            fontSize: 28,
+            fontWeight: 900,
+          },
+        ],
+      },
+      {
+        align: "center",
+        lineHeight: 0.8,
+        runs: [
+          {
+            text: "@cats_juice",
+            color: "#19191d",
+            fontSize: 10,
+            fontWeight: 500,
+          },
+        ],
+      },
+    ],
+  },
 };
+
+const MIN_CURL_ANGLE = 2.55;
+const MAX_CURL_ANGLE = Math.PI;
+const MAX_FRONT_TO_POINTER_RATIO = 1.28;
+const DIRECTION_DEAD_ZONE = 0.004;
+const OUTWARD_DIRECTION_LIMIT = -0.22;
+// Releasing a partially peeled sticker should reattach. The final quarter is
+// reserved for the deliberate, long pull that completes the detachment.
+const SNAP_DETACH_THRESHOLD = 0.74;
+const MAX_STICKER_WIDTH_PX = 760;
+const MAX_STICKER_HEIGHT_PX = 520;
+const ENTRANCE_SCALE_DURATION = 0.72;
+const ENTRANCE_SWEEP_DELAY = 0.06;
+const ENTRANCE_SWEEP_DURATION = 0.42;
 
 type MutableStickerState = {
   ready: boolean;
@@ -76,6 +128,7 @@ function mergePublicOptions(
     shadow: { ...current.shadow, ...patch.shadow },
     peel: { ...current.peel, ...patch.peel },
     back: { ...current.back, ...patch.back },
+    sound: { ...current.sound, ...patch.sound },
   };
 }
 
@@ -86,11 +139,17 @@ class StickerRenderer implements StickerInstance {
   private readonly scene = new THREE.Scene();
   private readonly uniforms: Record<string, THREE.IUniform>;
   private readonly stickerMaterial: THREE.ShaderMaterial;
-  private readonly shadowMaterials: THREE.ShaderMaterial[] = [];
+  private readonly peelAudio = new PeelAudioEngine();
+  private readonly peelShadowDepthMaterial: THREE.ShaderMaterial;
+  private readonly groundShadowGeometry = new THREE.PlaneGeometry(1, 1);
+  private readonly groundShadowMaterial: THREE.ShadowMaterial;
   private readonly stickerMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
-  private readonly shadowMeshes: Array<
-    THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>
-  > = [];
+  private readonly groundShadowMesh: THREE.Mesh<
+    THREE.PlaneGeometry,
+    THREE.ShadowMaterial
+  >;
+  private readonly peelShadowLight = new THREE.DirectionalLight(0xffffff, 1);
+  private readonly peelShadowTarget = new THREE.Object3D();
   private geometry = new THREE.PlaneGeometry(1, 1, 2, 2);
   private texture: THREE.CanvasTexture | null = null;
   private artwork: PreparedArtwork | null = null;
@@ -103,6 +162,7 @@ class StickerRenderer implements StickerInstance {
   private resizeObserver: ResizeObserver | null = null;
   private viewWidth = 2;
   private viewHeight = 2;
+  private viewportHeightPx = 420;
   private meshWidth = 1.6;
   private meshHeight = 0.62;
   private pointerId: number | null = null;
@@ -111,8 +171,18 @@ class StickerRenderer implements StickerInstance {
   private grabDirection = new THREE.Vector2(1, 0);
   private activeDirection = new THREE.Vector2(1, 0);
   private grabExtent = 1.6;
+  private creaseDepth = 0;
+  private basePeelRadius = 0.08;
+  private effectivePeelRadius = 0.08;
+  private grabProjection = 0;
   private springVelocity = 0;
   private springActive = false;
+  private detachedExitActive = false;
+  private detachedExitElapsed = 0;
+  private detachedExitSpin = 0;
+  private entranceActive = false;
+  private entranceElapsed = 0;
+  private readonly entranceAxis = new THREE.Vector2(1, 0);
   private frameRequest = 0;
   private lastFrameTime = 0;
   private state: MutableStickerState = {
@@ -136,6 +206,8 @@ class StickerRenderer implements StickerInstance {
     });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.domElement.style.width = "100%";
     this.renderer.domElement.style.height = "100%";
     this.renderer.domElement.style.display = "block";
@@ -161,9 +233,7 @@ class StickerRenderer implements StickerInstance {
       uPeel: { value: 0 },
       uPeelDepth: { value: 0 },
       uRadius: { value: 0.08 },
-      uInfluence: { value: 0.2 },
       uMaxAngle: { value: 3.55 },
-      uStiffness: { value: this.options.peel.stiffness },
       uWind: { value: this.options.wind },
       uTime: { value: 0 },
       uOrigin: { value: this.grabOrigin.clone() },
@@ -180,12 +250,20 @@ class StickerRenderer implements StickerInstance {
       uShadowBlur: { value: this.options.shadow.blur },
       uShadowDistance: { value: 0.04 },
       uShadowDirection: { value: new THREE.Vector2(0.7, -0.7) },
+      uEntranceSweep: { value: -1 },
+      uEntranceAxis: { value: this.entranceAxis.clone() },
+      uEntranceScaleProgress: { value: -1 },
     };
 
+    const stickerUniforms = {
+      ...THREE.UniformsUtils.clone(THREE.UniformsLib.lights),
+      ...this.uniforms,
+    };
     this.stickerMaterial = new THREE.ShaderMaterial({
-      uniforms: { ...this.uniforms },
+      uniforms: stickerUniforms,
       vertexShader: stickerVertexShader,
       fragmentShader: stickerFragmentShader,
+      lights: true,
       side: THREE.DoubleSide,
       transparent: true,
       depthTest: true,
@@ -194,33 +272,45 @@ class StickerRenderer implements StickerInstance {
     this.stickerMaterial.alphaTest = 0.008;
     this.stickerMesh = new THREE.Mesh(this.geometry, this.stickerMaterial);
     this.stickerMesh.renderOrder = 20;
+    this.stickerMesh.receiveShadow = true;
 
-    const shadowLayers = [
-      { layer: 0.3, weight: 0.4, blur: 0.46 },
-      { layer: 0.64, weight: 0.34, blur: 0.82 },
-      { layer: 1, weight: 0.24, blur: 1.28 },
-    ];
-    for (const descriptor of shadowLayers) {
-      const material = new THREE.ShaderMaterial({
-        uniforms: {
-          ...this.uniforms,
-          uShadowLayer: { value: descriptor.layer },
-          uLayerWeight: { value: descriptor.weight },
-          uBlurScale: { value: descriptor.blur },
-        },
-        vertexShader: shadowVertexShader,
-        fragmentShader: shadowFragmentShader,
-        side: THREE.DoubleSide,
-        transparent: true,
-        depthTest: false,
-        depthWrite: false,
-      });
-      const mesh = new THREE.Mesh(this.geometry, material);
-      mesh.renderOrder = Math.round(descriptor.layer * 10);
-      this.shadowMaterials.push(material);
-      this.shadowMeshes.push(mesh);
-      this.scene.add(mesh);
-    }
+    this.peelShadowDepthMaterial = new THREE.ShaderMaterial({
+      uniforms: { ...this.uniforms },
+      vertexShader: peelShadowDepthVertexShader,
+      fragmentShader: peelShadowDepthFragmentShader,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: true,
+    });
+    this.stickerMesh.castShadow = true;
+    this.stickerMesh.customDepthMaterial = this.peelShadowDepthMaterial;
+
+    this.peelShadowLight.castShadow = true;
+    this.peelShadowLight.shadow.mapSize.set(
+      this.options.quality === "high" ? 2048 : 1024,
+      this.options.quality === "high" ? 2048 : 1024,
+    );
+    this.peelShadowLight.shadow.bias = -0.0001;
+    this.peelShadowLight.shadow.normalBias = 0.0015;
+    this.peelShadowLight.target = this.peelShadowTarget;
+    this.scene.add(this.peelShadowTarget, this.peelShadowLight);
+
+    this.groundShadowMaterial = new THREE.ShadowMaterial({
+      color: colorFrom(this.options.shadow.color, "#191823"),
+      opacity: this.options.shadow.opacity,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.groundShadowMesh = new THREE.Mesh(
+      this.groundShadowGeometry,
+      this.groundShadowMaterial,
+    );
+    this.groundShadowMesh.position.z = -0.012;
+    this.groundShadowMesh.receiveShadow = true;
+    this.groundShadowMesh.renderOrder = 5;
+    this.scene.add(this.groundShadowMesh);
     this.scene.add(this.stickerMesh);
 
     const canvas = this.renderer.domElement;
@@ -228,9 +318,14 @@ class StickerRenderer implements StickerInstance {
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerup", this.onPointerUp);
     canvas.addEventListener("pointercancel", this.onPointerUp);
+    canvas.addEventListener("lostpointercapture", this.onLostPointerCapture);
     canvas.addEventListener("pointerleave", this.onPointerLeave);
     canvas.addEventListener("keydown", this.onKeyDown);
     canvas.addEventListener("webglcontextlost", this.onContextLost);
+    window.addEventListener("pointerup", this.onWindowPointerEnd, true);
+    window.addEventListener("pointercancel", this.onWindowPointerEnd, true);
+    window.addEventListener("blur", this.onWindowBlur);
+    document.addEventListener("visibilitychange", this.onVisibilityChange);
 
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -299,13 +394,32 @@ class StickerRenderer implements StickerInstance {
   }
 
   reset(): void {
+    const activePointerId = this.pointerId;
+    this.pointerId = null;
+    this.state.dragging = false;
+    if (
+      activePointerId !== null &&
+      this.renderer.domElement.hasPointerCapture(activePointerId)
+    ) {
+      this.renderer.domElement.releasePointerCapture(activePointerId);
+    }
     this.springActive = false;
     this.springVelocity = 0;
-    this.state.progress = 0;
-    this.state.dragging = false;
+    this.detachedExitActive = false;
+    this.detachedExitElapsed = 0;
+    this.detachedExitSpin = 0;
+    this.entranceActive = false;
+    this.entranceElapsed = 0;
+    this.stickerMesh.position.set(0, 0, 0);
+    this.stickerMesh.scale.set(1, 1, 1);
+    this.stickerMesh.rotation.z = THREE.MathUtils.degToRad(this.options.tilt);
+    this.uniforms.uEntranceSweep.value = -1;
+    this.uniforms.uEntranceScaleProgress.value = -1;
+    this.peelAudio.reset(0);
+    this.setCreaseDepth(0);
     this.state.pointer = null;
     this.state.grabPoint = null;
-    this.pointerId = null;
+    this.renderer.domElement.style.cursor = "default";
     this.updatePeelUniforms();
     this.emit("peelchange", { amount: 0, progress: 0 });
     this.requestRender();
@@ -321,13 +435,29 @@ class StickerRenderer implements StickerInstance {
       Math.min(window.devicePixelRatio || 1, qualityRatio),
     );
     this.renderer.setSize(width, height, false);
+    this.viewportHeightPx = height;
     this.viewHeight = 2;
     this.viewWidth = (width / height) * this.viewHeight;
+    this.groundShadowMesh.scale.set(
+      this.viewWidth * 1.2,
+      this.viewHeight * 1.2,
+      1,
+    );
     this.camera.left = -this.viewWidth / 2;
     this.camera.right = this.viewWidth / 2;
     this.camera.top = this.viewHeight / 2;
     this.camera.bottom = -this.viewHeight / 2;
     this.camera.updateProjectionMatrix();
+    const shadowCamera = this.peelShadowLight.shadow
+      .camera as THREE.OrthographicCamera;
+    const shadowExtent = Math.max(this.viewWidth, this.viewHeight) * 0.9;
+    shadowCamera.left = -shadowExtent;
+    shadowCamera.right = shadowExtent;
+    shadowCamera.top = shadowExtent;
+    shadowCamera.bottom = -shadowExtent;
+    shadowCamera.near = 0.1;
+    shadowCamera.far = 16;
+    shadowCamera.updateProjectionMatrix();
     if (this.artwork) this.updateMeshGeometry(this.artwork.aspect);
     this.applyOptionsToRenderer();
     this.requestRender();
@@ -359,14 +489,22 @@ class StickerRenderer implements StickerInstance {
     canvas.removeEventListener("pointermove", this.onPointerMove);
     canvas.removeEventListener("pointerup", this.onPointerUp);
     canvas.removeEventListener("pointercancel", this.onPointerUp);
+    canvas.removeEventListener("lostpointercapture", this.onLostPointerCapture);
     canvas.removeEventListener("pointerleave", this.onPointerLeave);
     canvas.removeEventListener("keydown", this.onKeyDown);
     canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    window.removeEventListener("pointerup", this.onWindowPointerEnd, true);
+    window.removeEventListener("pointercancel", this.onWindowPointerEnd, true);
+    window.removeEventListener("blur", this.onWindowBlur);
+    document.removeEventListener("visibilitychange", this.onVisibilityChange);
 
     this.texture?.dispose();
     this.geometry.dispose();
+    this.groundShadowGeometry.dispose();
     this.stickerMaterial.dispose();
-    this.shadowMaterials.forEach((material) => material.dispose());
+    this.peelShadowDepthMaterial.dispose();
+    this.groundShadowMaterial.dispose();
+    this.peelAudio.destroy();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
     canvas.remove();
@@ -396,12 +534,24 @@ class StickerRenderer implements StickerInstance {
     this.reset();
     this.state.ready = true;
     previousTexture?.dispose();
-    this.emit("ready", { width: artwork.width, height: artwork.height });
+    this.emit("ready", {
+      width: artwork.width,
+      height: artwork.height,
+      hasTransparency: artwork.hasTransparency,
+    });
   }
 
   private updateMeshGeometry(aspect: number) {
-    const maxWidth = Math.max(1.1, this.viewWidth * 0.78);
-    const maxHeight = this.viewHeight * 0.58;
+    const worldUnitsPerPixel =
+      this.viewHeight / Math.max(1, this.viewportHeightPx);
+    const maxWidth = Math.min(
+      this.viewWidth * 0.78,
+      MAX_STICKER_WIDTH_PX * worldUnitsPerPixel,
+    );
+    const maxHeight = Math.min(
+      this.viewHeight * 0.58,
+      MAX_STICKER_HEIGHT_PX * worldUnitsPerPixel,
+    );
     let width = maxWidth;
     let height = width / aspect;
     if (height > maxHeight) {
@@ -413,15 +563,15 @@ class StickerRenderer implements StickerInstance {
 
     const longSegments =
       this.options.quality === "high"
-        ? 112
+        ? 240
         : this.options.quality === "medium"
-          ? 72
-          : 40;
-    const segmentsX = clamp(Math.round(longSegments), 28, 128);
+          ? 160
+          : 96;
+    const segmentsX = clamp(Math.round(longSegments), 64, 256);
     const segmentsY = clamp(
       Math.round(longSegments / Math.max(aspect, 0.35)),
-      24,
-      112,
+      56,
+      192,
     );
     const nextGeometry = new THREE.PlaneGeometry(
       this.meshWidth,
@@ -432,9 +582,6 @@ class StickerRenderer implements StickerInstance {
     const previousGeometry = this.geometry;
     this.geometry = nextGeometry;
     this.stickerMesh.geometry = nextGeometry;
-    this.shadowMeshes.forEach((mesh) => {
-      mesh.geometry = nextGeometry;
-    });
     previousGeometry.dispose();
     (this.uniforms.uMeshSize.value as THREE.Vector2).set(
       this.meshWidth,
@@ -444,6 +591,7 @@ class StickerRenderer implements StickerInstance {
     this.grabDirection.set(1, 0);
     this.activeDirection.copy(this.grabDirection);
     this.grabExtent = this.meshWidth;
+    this.setCreaseDepth(0);
     this.applyOptionsToRenderer();
     this.updatePeelUniforms();
   }
@@ -451,9 +599,6 @@ class StickerRenderer implements StickerInstance {
   private applyOptionsToRenderer() {
     const angle = THREE.MathUtils.degToRad(this.options.tilt);
     this.stickerMesh.rotation.z = angle;
-    this.shadowMeshes.forEach((mesh) => {
-      mesh.rotation.z = angle;
-    });
 
     this.uniforms.uBackColor.value = colorFrom(
       this.options.back.color,
@@ -461,24 +606,52 @@ class StickerRenderer implements StickerInstance {
     );
     this.uniforms.uGloss.value = clamp(this.options.back.gloss, 0, 1);
     this.uniforms.uRoughness.value = clamp(this.options.back.roughness, 0, 1);
-    this.uniforms.uStiffness.value = clamp(this.options.peel.stiffness, 0, 1);
     this.uniforms.uWind.value = Math.max(0, this.options.wind);
 
+    const customSoundSource = this.options.sound.src.trim();
+    this.peelAudio.configure({
+      enabled: this.options.sound.enabled,
+      src: customSoundSource || DEFAULT_PEEL_SOUND_URL,
+      volume: this.options.sound.volume,
+      useBuiltInProfile: !customSoundSource,
+    });
+
     const rawAngle = this.options.peel.maxAngle;
-    this.uniforms.uMaxAngle.value =
+    const angleInRadians =
       rawAngle > Math.PI * 2 ? THREE.MathUtils.degToRad(rawAngle) : rawAngle;
+    this.uniforms.uMaxAngle.value = clamp(
+      angleInRadians,
+      MIN_CURL_ANGLE,
+      MAX_CURL_ANGLE,
+    );
     const radius = this.options.peel.radius;
     const rect = this.container.getBoundingClientRect();
-    this.uniforms.uRadius.value =
+    const configuredRadius =
       radius <= 1
         ? Math.max(0.008, Math.min(this.meshWidth, this.meshHeight) * radius)
         : Math.max(0.008, (radius / Math.max(rect.height, 1)) * this.viewHeight);
+    this.basePeelRadius =
+      configuredRadius *
+      THREE.MathUtils.lerp(
+        0.82,
+        1.16,
+        clamp(this.options.peel.stiffness, 0, 1),
+      );
+    this.setCreaseDepth(this.creaseDepth);
 
     this.uniforms.uShadowColor.value = colorFrom(
       this.options.shadow.color,
       "#191823",
     );
     this.uniforms.uShadowOpacity.value = clamp(
+      this.options.shadow.opacity,
+      0,
+      0.9,
+    );
+    this.groundShadowMaterial.color.copy(
+      colorFrom(this.options.shadow.color, "#191823"),
+    );
+    this.groundShadowMaterial.opacity = clamp(
       this.options.shadow.opacity,
       0,
       0.9,
@@ -496,24 +669,115 @@ class StickerRenderer implements StickerInstance {
         Math.max(rect.width || 1, 1)) *
       this.viewWidth;
     const shadowAngle = THREE.MathUtils.degToRad(this.options.shadow.angle);
-    (this.uniforms.uShadowDirection.value as THREE.Vector2)
+    const shadowDirection = this.uniforms.uShadowDirection.value as THREE.Vector2;
+    shadowDirection
       .set(Math.cos(shadowAngle), -Math.sin(shadowAngle))
       .normalize();
+    const shadowDistance = this.uniforms.uShadowDistance.value as number;
+    const lightOffset = 1.6 + shadowDistance * 34;
+    this.peelShadowLight.position.set(
+      -shadowDirection.x * lightOffset,
+      -shadowDirection.y * lightOffset,
+      4.8,
+    );
+    this.peelShadowTarget.position.set(0, 0, 0);
+    this.peelShadowLight.shadow.radius = clamp(
+      this.options.shadow.blur * 0.18,
+      1,
+      7,
+    );
+    const shadowMapSize = this.options.quality === "high" ? 2048 : 1024;
+    this.peelShadowLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
+    this.peelShadowLight.shadow.needsUpdate = true;
   }
 
   private updatePeelUniforms() {
     this.uniforms.uPeel.value = this.state.progress;
-    this.uniforms.uPeelDepth.value = this.state.progress * this.grabExtent * 0.92;
-    this.uniforms.uInfluence.value = THREE.MathUtils.lerp(
-      this.meshHeight * 0.18,
-      Math.hypot(this.meshWidth, this.meshHeight) * 0.72,
-      Math.pow(this.state.progress, 0.58),
-    );
+    this.uniforms.uPeelDepth.value = this.creaseDepth;
+    this.uniforms.uRadius.value = this.effectivePeelRadius;
     (this.uniforms.uOrigin.value as THREE.Vector2).copy(this.grabOrigin);
     (this.uniforms.uPeelDir.value as THREE.Vector2).copy(this.activeDirection);
     const percent = Math.round(clamp(this.state.progress, 0, 1) * 100);
     this.renderer.domElement.setAttribute("aria-valuenow", String(percent));
     this.renderer.domElement.setAttribute("aria-valuetext", `${percent}% peeled`);
+  }
+
+  private projectedGrabDistance(
+    depth: number,
+    radius: number,
+    maxAngle = this.uniforms.uMaxAngle.value as number,
+  ) {
+    if (depth <= 0) return 0;
+    const safeRadius = Math.max(radius, 0.001);
+    const angle = Math.min(depth / safeRadius, maxAngle);
+    const arcLength = safeRadius * maxAngle;
+    let projected = -safeRadius * Math.sin(angle);
+    if (depth > arcLength) {
+      projected -= (depth - arcLength) * Math.cos(maxAngle);
+    }
+    return Math.max(0, depth + projected);
+  }
+
+  private peelModelForDepth(depth: number) {
+    const safeDepth = clamp(depth, 0, Math.max(this.grabExtent, 0.001));
+    if (safeDepth <= 0.000001) {
+      return {
+        depth: 0,
+        radius: this.basePeelRadius,
+        projection: 0,
+      };
+    }
+
+    const baseProjection = this.projectedGrabDistance(
+      safeDepth,
+      this.basePeelRadius,
+    );
+    const minimumProjection = safeDepth / MAX_FRONT_TO_POINTER_RATIO;
+    if (baseProjection >= minimumProjection) {
+      return {
+        depth: safeDepth,
+        radius: this.basePeelRadius,
+        projection: baseProjection,
+      };
+    }
+
+    const adaptiveRadius = safeDepth / MIN_CURL_ANGLE;
+    return {
+      depth: safeDepth,
+      radius: adaptiveRadius,
+      projection: this.projectedGrabDistance(safeDepth, adaptiveRadius),
+    };
+  }
+
+  private setCreaseDepth(depth: number) {
+    const model = this.peelModelForDepth(depth);
+    this.creaseDepth = model.depth;
+    this.effectivePeelRadius = model.radius;
+    this.grabProjection = model.projection;
+    this.state.progress = clamp(
+      this.creaseDepth / Math.max(this.grabExtent, 0.001),
+      0,
+      1,
+    );
+  }
+
+  private solveCreaseDepth(pointerDistance: number) {
+    const target = Math.max(0, pointerDistance);
+    const maximum = this.peelModelForDepth(this.grabExtent);
+    if (target >= maximum.projection) return maximum.depth;
+    if (target <= 0.000001) return 0;
+
+    let low = 0;
+    let high = this.grabExtent;
+    for (let iteration = 0; iteration < 16; iteration += 1) {
+      const middle = (low + high) * 0.5;
+      if (this.peelModelForDepth(middle).projection < target) {
+        low = middle;
+      } else {
+        high = middle;
+      }
+    }
+    return (low + high) * 0.5;
   }
 
   private screenToLocal(clientX: number, clientY: number) {
@@ -554,49 +818,86 @@ class StickerRenderer implements StickerInstance {
       3,
       Math.min(this.artwork.width, this.artwork.height) * 0.13,
     );
-    let minimum = this.sampleAlpha(pixelX, pixelY);
-    let maximum = minimum;
-    for (let index = 0; index < 20; index += 1) {
-      const angle = (index / 20) * Math.PI * 2;
-      const alpha = this.sampleAlpha(
-        pixelX + Math.cos(angle) * radius,
-        pixelY + Math.sin(angle) * radius,
-      );
-      minimum = Math.min(minimum, alpha);
-      maximum = Math.max(maximum, alpha);
+    const searchRadius = Math.ceil(radius);
+    const minimumX = Math.max(0, Math.floor(pixelX - searchRadius));
+    const maximumX = Math.min(
+      this.artwork.width - 1,
+      Math.ceil(pixelX + searchRadius),
+    );
+    const minimumY = Math.max(0, Math.floor(pixelY - searchRadius));
+    const maximumY = Math.min(
+      this.artwork.height - 1,
+      Math.ceil(pixelY + searchRadius),
+    );
+    let nearestX = -1;
+    let nearestY = -1;
+    let nearestDistanceSq = radius * radius + 1;
+    for (let candidateY = minimumY; candidateY <= maximumY; candidateY += 1) {
+      for (let candidateX = minimumX; candidateX <= maximumX; candidateX += 1) {
+        const offsetX = candidateX - pixelX;
+        const offsetY = candidateY - pixelY;
+        const distanceSq = offsetX * offsetX + offsetY * offsetY;
+        if (distanceSq >= nearestDistanceSq || distanceSq > radius * radius) {
+          continue;
+        }
+        const alpha = this.sampleAlpha(candidateX, candidateY);
+        if (alpha < 0.1) continue;
+        const isBoundary =
+          alpha < 0.9 ||
+          this.sampleAlpha(candidateX - 1, candidateY) < 0.1 ||
+          this.sampleAlpha(candidateX + 1, candidateY) < 0.1 ||
+          this.sampleAlpha(candidateX, candidateY - 1) < 0.1 ||
+          this.sampleAlpha(candidateX, candidateY + 1) < 0.1;
+        if (!isBoundary) continue;
+        nearestX = candidateX;
+        nearestY = candidateY;
+        nearestDistanceSq = distanceSq;
+      }
     }
-    if (maximum < 0.12 || minimum > 0.88) return null;
+    if (nearestX < 0 || nearestY < 0) return null;
 
-    const delta = Math.max(2, radius * 0.46);
+    const edgeLocal = new THREE.Vector2(
+      (nearestX / Math.max(this.artwork.width - 1, 1) - 0.5) * this.meshWidth,
+      (0.5 - nearestY / Math.max(this.artwork.height - 1, 1)) * this.meshHeight,
+    );
+    const delta = clamp(radius * 0.14, 1.5, 4.5);
     const gradient = new THREE.Vector2(
-      this.sampleAlpha(pixelX + delta, pixelY) -
-        this.sampleAlpha(pixelX - delta, pixelY),
+      this.sampleAlpha(nearestX + delta, nearestY) -
+        this.sampleAlpha(nearestX - delta, nearestY),
       -(
-        this.sampleAlpha(pixelX, pixelY + delta) -
-        this.sampleAlpha(pixelX, pixelY - delta)
+        this.sampleAlpha(nearestX, nearestY + delta) -
+        this.sampleAlpha(nearestX, nearestY - delta)
       ),
     );
-    if (gradient.lengthSq() < 0.008) gradient.set(-local.x, -local.y);
+    if (gradient.lengthSq() < 0.008) gradient.set(-edgeLocal.x, -edgeLocal.y);
     if (gradient.lengthSq() < 0.0001) gradient.set(1, 0);
     gradient.normalize();
-    return { local: local.clone(), inward: gradient };
+    return { local: edgeLocal, inward: gradient };
   }
 
   private projectionExtent(origin: THREE.Vector2, direction: THREE.Vector2) {
-    const corners = [
-      new THREE.Vector2(-this.meshWidth / 2, -this.meshHeight / 2),
-      new THREE.Vector2(this.meshWidth / 2, -this.meshHeight / 2),
-      new THREE.Vector2(this.meshWidth / 2, this.meshHeight / 2),
-      new THREE.Vector2(-this.meshWidth / 2, this.meshHeight / 2),
-    ];
-    return Math.max(
-      this.meshHeight * 0.35,
-      ...corners.map((corner) => corner.sub(origin).dot(direction)),
-    );
+    if (!this.artwork) return Math.max(this.meshHeight * 0.35, this.meshWidth);
+    let maximum = this.meshHeight * 0.35;
+    for (let index = 0; index < this.artwork.support.length; index += 2) {
+      const localX = (this.artwork.support[index] - 0.5) * this.meshWidth;
+      const localY = (0.5 - this.artwork.support[index + 1]) * this.meshHeight;
+      maximum = Math.max(
+        maximum,
+        (localX - origin.x) * direction.x +
+          (localY - origin.y) * direction.y,
+      );
+    }
+    return Math.max(this.meshHeight * 0.35, maximum + this.meshHeight * 0.025);
   }
 
   private onPointerDown = (event: PointerEvent) => {
-    if (this.destroyed || !this.state.ready || event.button !== 0) return;
+    if (
+      this.destroyed ||
+      !this.state.ready ||
+      this.detachedExitActive ||
+      this.entranceActive ||
+      event.button !== 0
+    ) return;
     const local = this.screenToLocal(event.clientX, event.clientY);
     const hit = this.hitEdge(local);
     if (!hit) return;
@@ -610,15 +911,17 @@ class StickerRenderer implements StickerInstance {
     this.activeDirection.copy(hit.inward);
     this.grabExtent = this.projectionExtent(
       this.grabOrigin,
-      this.activeDirection,
+      this.grabDirection,
     );
+    this.setCreaseDepth(0);
     this.springActive = false;
     this.springVelocity = 0;
     this.state.dragging = true;
-    this.state.progress = Math.max(this.state.progress, 0.018);
     this.state.grabPoint = { x: hit.local.x, y: hit.local.y };
-    this.state.pointer = { x: hit.local.x, y: hit.local.y };
+    this.state.pointer = { x: local.x, y: local.y };
     this.renderer.domElement.style.cursor = "grabbing";
+    this.peelAudio.unlock();
+    this.peelAudio.begin(this.state.progress, event.timeStamp);
     this.updatePeelUniforms();
     this.emit("peelstart", {
       amount: this.state.progress,
@@ -630,6 +933,14 @@ class StickerRenderer implements StickerInstance {
 
   private onPointerMove = (event: PointerEvent) => {
     if (this.destroyed || !this.state.ready) return;
+    if (
+      this.state.dragging &&
+      event.pointerId === this.pointerId &&
+      event.buttons === 0
+    ) {
+      this.finishPointerDrag(event.timeStamp);
+      return;
+    }
     const local = this.screenToLocal(event.clientX, event.clientY);
     if (!this.state.dragging || event.pointerId !== this.pointerId) {
       this.renderer.domElement.style.cursor = this.hitEdge(local)
@@ -641,26 +952,28 @@ class StickerRenderer implements StickerInstance {
     event.preventDefault();
     const drag = local.clone().sub(this.grabStart);
     const distance = drag.length();
-    this.activeDirection.copy(this.grabDirection);
-    if (distance > 0.001) {
+    let pointerDistance = 0;
+    if (distance > DIRECTION_DEAD_ZONE) {
       const candidate = drag.clone().normalize();
-      if (candidate.dot(this.grabDirection) > -0.35) {
-        this.activeDirection
-          .multiplyScalar(0.72)
-          .add(candidate.multiplyScalar(0.28))
-          .normalize();
+      if (candidate.dot(this.grabDirection) >= OUTWARD_DIRECTION_LIMIT) {
+        this.activeDirection.copy(candidate);
+        pointerDistance = distance;
+      } else {
+        this.activeDirection.copy(this.grabDirection);
+        pointerDistance = Math.max(0, drag.dot(this.grabDirection));
       }
+    } else {
+      this.activeDirection.copy(this.grabDirection);
     }
     this.grabExtent = this.projectionExtent(
       this.grabOrigin,
       this.activeDirection,
     );
-    const inwardDistance = Math.max(0, drag.dot(this.activeDirection));
-    const effectiveDistance = inwardDistance * 0.76 + distance * 0.4;
-    this.state.progress = clamp(
-      effectiveDistance / Math.max(this.grabExtent * 0.64, 0.08),
-      0.018,
-      1,
+    this.setCreaseDepth(this.solveCreaseDepth(pointerDistance));
+    this.peelAudio.update(
+      this.state.progress,
+      event.timeStamp,
+      this.activeDirection.x,
     );
     this.state.pointer = { x: local.x, y: local.y };
     this.updatePeelUniforms();
@@ -674,15 +987,60 @@ class StickerRenderer implements StickerInstance {
 
   private onPointerUp = (event: PointerEvent) => {
     if (!this.state.dragging || event.pointerId !== this.pointerId) return;
-    if (this.renderer.domElement.hasPointerCapture(event.pointerId)) {
-      this.renderer.domElement.releasePointerCapture(event.pointerId);
+    this.finishPointerDrag(event.timeStamp);
+  };
+
+  private onWindowPointerEnd = (event: PointerEvent) => {
+    if (!this.state.dragging || event.pointerId !== this.pointerId) return;
+    this.finishPointerDrag(event.timeStamp);
+  };
+
+  private onLostPointerCapture = (event: PointerEvent) => {
+    if (!this.state.dragging || event.pointerId !== this.pointerId) return;
+    this.finishPointerDrag(event.timeStamp);
+  };
+
+  private onWindowBlur = () => {
+    this.finishPointerDrag(performance.now());
+  };
+
+  private onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") {
+      this.finishPointerDrag(performance.now());
     }
+  };
+
+  private finishPointerDrag(timeStamp: number) {
+    if (!this.state.dragging) return;
+    const activePointerId = this.pointerId;
     this.pointerId = null;
     this.state.dragging = false;
+    if (
+      activePointerId !== null &&
+      this.renderer.domElement.hasPointerCapture(activePointerId)
+    ) {
+      this.renderer.domElement.releasePointerCapture(activePointerId);
+    }
     this.renderer.domElement.style.cursor = "grab";
     const release = this.options.peel.release;
+    const shouldDetach =
+      release === "snap" && this.state.progress >= SNAP_DETACH_THRESHOLD;
+    if (shouldDetach) {
+      this.setCreaseDepth(this.grabExtent);
+      this.state.pointer = {
+        x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
+        y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection,
+      };
+      this.updatePeelUniforms();
+      this.peelAudio.update(
+        this.state.progress,
+        timeStamp,
+        this.activeDirection.x,
+      );
+    }
+    this.peelAudio.end(this.state.progress);
     const shouldReset =
-      release === "reset" || (release === "snap" && this.state.progress < 0.68);
+      release === "reset" || (release === "snap" && !shouldDetach);
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
@@ -695,12 +1053,21 @@ class StickerRenderer implements StickerInstance {
       progress: this.state.progress,
       willReset: shouldReset,
     });
+    if (shouldDetach) {
+      if (reducedMotion) {
+        this.reset();
+        return;
+      }
+      this.detachedExitActive = true;
+      this.detachedExitElapsed = 0;
+      this.detachedExitSpin = this.activeDirection.x >= 0 ? -0.42 : 0.42;
+    }
     if (shouldReset && reducedMotion) {
       this.reset();
       return;
     }
     this.requestRender();
-  };
+  }
 
   private onPointerLeave = () => {
     if (!this.state.dragging) this.renderer.domElement.style.cursor = "default";
@@ -712,6 +1079,7 @@ class StickerRenderer implements StickerInstance {
     const decrease = event.key === "ArrowDown" || event.key === "ArrowLeft";
     if (!increase && !decrease && event.key !== " ") return;
     event.preventDefault();
+    this.peelAudio.unlock();
     if (event.key === " ") {
       this.reset();
       return;
@@ -720,11 +1088,24 @@ class StickerRenderer implements StickerInstance {
     this.activeDirection.set(1, 0);
     this.grabDirection.copy(this.activeDirection);
     this.grabExtent = this.meshWidth;
-    this.state.progress = clamp(
-      this.state.progress + (increase ? 0.08 : -0.08),
+    const previousProgress = this.state.progress;
+    const nextProgress = clamp(
+      previousProgress + (increase ? 0.08 : -0.08),
       0,
       1,
     );
+    this.setCreaseDepth(nextProgress * this.grabExtent);
+    this.peelAudio.begin(previousProgress, event.timeStamp - 72);
+    this.peelAudio.update(
+      this.state.progress,
+      event.timeStamp,
+      this.activeDirection.x,
+    );
+    this.peelAudio.end(this.state.progress);
+    this.state.pointer = {
+      x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
+      y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection,
+    };
     this.updatePeelUniforms();
     this.emit("peelchange", {
       amount: this.state.progress,
@@ -743,6 +1124,22 @@ class StickerRenderer implements StickerInstance {
   private requestRender() {
     if (this.destroyed || this.frameRequest) return;
     this.frameRequest = requestAnimationFrame(this.renderFrame);
+  }
+
+  private startEntranceAnimation() {
+    this.reset();
+    this.entranceActive = true;
+    this.entranceElapsed = 0;
+    this.entranceAxis.set(
+      this.meshWidth >= this.meshHeight ? 1 : 0,
+      this.meshWidth >= this.meshHeight ? 0 : -1,
+    );
+    (this.uniforms.uEntranceAxis.value as THREE.Vector2).copy(
+      this.entranceAxis,
+    );
+    this.uniforms.uEntranceSweep.value = -1;
+    this.uniforms.uEntranceScaleProgress.value = 0;
+    this.requestRender();
   }
 
   private renderFrame = (time: number) => {
@@ -765,20 +1162,24 @@ class StickerRenderer implements StickerInstance {
       const stiffness = 132 + clamp(this.options.peel.stiffness, 0, 1) * 146;
       const damping = Math.sqrt(stiffness) * 1.83;
       const acceleration =
-        -stiffness * this.state.progress - damping * this.springVelocity;
+        -stiffness * this.creaseDepth - damping * this.springVelocity;
       this.springVelocity += acceleration * delta;
-      this.state.progress += this.springVelocity * delta;
+      const nextDepth = this.creaseDepth + this.springVelocity * delta;
       if (
-        this.state.progress <= 0.0008 &&
-        Math.abs(this.springVelocity) < 0.018
+        nextDepth <= this.grabExtent * 0.0008 &&
+        Math.abs(this.springVelocity) < this.grabExtent * 0.018
       ) {
-        this.state.progress = 0;
+        this.setCreaseDepth(0);
         this.springVelocity = 0;
         this.springActive = false;
         this.state.pointer = null;
         this.state.grabPoint = null;
       } else {
-        this.state.progress = Math.max(0, this.state.progress);
+        this.setCreaseDepth(Math.max(0, nextDepth));
+        this.state.pointer = {
+          x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
+          y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection,
+        };
       }
       this.updatePeelUniforms();
       this.emit("peelchange", {
@@ -787,11 +1188,59 @@ class StickerRenderer implements StickerInstance {
       });
     }
 
+    if (this.detachedExitActive) {
+      this.detachedExitElapsed += delta;
+      const exitSpeed =
+        Math.max(this.viewWidth, this.viewHeight) *
+        (1.45 + this.detachedExitElapsed * 3.2);
+      this.stickerMesh.position.x +=
+        this.activeDirection.x * exitSpeed * delta;
+      this.stickerMesh.position.y +=
+        this.activeDirection.y * exitSpeed * delta;
+      this.stickerMesh.rotation.z += this.detachedExitSpin * delta;
+      if (this.detachedExitElapsed >= 0.46) {
+        this.startEntranceAnimation();
+        return;
+      }
+    }
+
+    if (this.entranceActive) {
+      this.entranceElapsed += delta;
+      const scaleProgress = clamp(
+        this.entranceElapsed / ENTRANCE_SCALE_DURATION,
+        0,
+        1,
+      );
+      this.uniforms.uEntranceScaleProgress.value = scaleProgress;
+
+      const sweepStart = ENTRANCE_SWEEP_DELAY;
+      const sweepProgress = clamp(
+        (this.entranceElapsed - sweepStart) / ENTRANCE_SWEEP_DURATION,
+        0,
+        1,
+      );
+      this.uniforms.uEntranceSweep.value =
+        this.entranceElapsed < sweepStart ? -1 : sweepProgress;
+
+      if (scaleProgress >= 1 && sweepProgress >= 1) {
+        this.entranceActive = false;
+        this.uniforms.uEntranceScaleProgress.value = -1;
+        this.uniforms.uEntranceSweep.value = -1;
+      }
+    }
+
     this.uniforms.uTime.value = time / 1000;
     this.renderer.render(this.scene, this.camera);
     const windIsAnimating =
       !reducedMotion && this.options.wind > 0.001 && this.state.progress > 0.01;
-    if (this.springActive || windIsAnimating) this.requestRender();
+    if (
+      this.springActive ||
+      this.detachedExitActive ||
+      this.entranceActive ||
+      windIsAnimating
+    ) {
+      this.requestRender();
+    }
   };
 
   private emit(name: string, detail: Record<string, unknown>) {

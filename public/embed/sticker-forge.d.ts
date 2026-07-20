@@ -1,5 +1,26 @@
-/** Text or SVG artwork used to build the sticker texture. */
-export type StickerSource = StickerTextSource | StickerSvgSource;
+/** Text, SVG markup, or browser-decodable image artwork. */
+export type StickerSource =
+  | StickerTextSource
+  | StickerSvgSource
+  | StickerImageSource;
+
+export interface StickerRichTextRun {
+  text: string;
+  color?: string;
+  fontSize?: number;
+  fontWeight?: number | string;
+  underline?: boolean;
+}
+
+export interface StickerRichTextBlock {
+  align?: "left" | "center" | "right";
+  lineHeight?: number;
+  runs: StickerRichTextRun[];
+}
+
+export interface StickerRichTextDocument {
+  blocks: StickerRichTextBlock[];
+}
 
 export interface StickerTextSource {
   type: "text";
@@ -7,12 +28,20 @@ export interface StickerTextSource {
   color?: string;
   fontFamily?: string;
   fontWeight?: number | string;
+  richText?: StickerRichTextDocument;
 }
 
 export interface StickerSvgSource {
   type: "svg";
   /** Raw SVG markup. Sticker Forge always sanitizes it before rasterization. */
   svg: string;
+}
+
+export interface StickerImageSource {
+  type: "image";
+  /** Browser-decodable image URL, typically a data URL from a local upload. */
+  src: string;
+  name?: string;
 }
 
 export interface StickerOutlineOptions {
@@ -36,6 +65,14 @@ export interface StickerBackOptions {
   roughness?: number;
 }
 
+export interface StickerSoundOptions {
+  /** Custom peel-sound URL. Omit it to use the sound bundled with Sticker Forge. */
+  src?: string;
+  /** Master peel-sound volume from 0 to 1. */
+  volume?: number;
+  enabled?: boolean;
+}
+
 export interface StickerPeelOptions {
   /** Curl radius normalized to the sticker's short side. `0.12` means 12%. */
   radius?: number;
@@ -55,6 +92,7 @@ export interface StickerOptions {
   shadow?: StickerShadowOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
+  sound?: StickerSoundOptions;
   /** Flat sticker rotation in degrees. */
   tilt?: number;
   /** Subtle free-edge flutter intensity. */

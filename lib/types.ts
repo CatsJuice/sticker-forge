@@ -1,4 +1,22 @@
-export type StickerSource = StickerTextSource | StickerSvgSource;
+export type StickerSource = StickerTextSource | StickerSvgSource | StickerImageSource;
+
+export interface StickerRichTextRun {
+  text: string;
+  color?: string;
+  fontSize?: number;
+  fontWeight?: number | string;
+  underline?: boolean;
+}
+
+export interface StickerRichTextBlock {
+  align?: "left" | "center" | "right";
+  lineHeight?: number;
+  runs: StickerRichTextRun[];
+}
+
+export interface StickerRichTextDocument {
+  blocks: StickerRichTextBlock[];
+}
 
 export interface StickerTextSource {
   type: "text";
@@ -6,11 +24,19 @@ export interface StickerTextSource {
   color?: string;
   fontFamily?: string;
   fontWeight?: number | string;
+  richText?: StickerRichTextDocument;
 }
 
 export interface StickerSvgSource {
   type: "svg";
   svg: string;
+}
+
+export interface StickerImageSource {
+  type: "image";
+  /** Browser-decodable image URL, typically a data URL from a local upload. */
+  src: string;
+  name?: string;
 }
 
 export interface StickerOutlineOptions {
@@ -32,6 +58,14 @@ export interface StickerBackOptions {
   roughness?: number;
 }
 
+export interface StickerSoundOptions {
+  /** Custom peel-sound URL. Omit or leave empty to use the bundled sound. */
+  src?: string;
+  /** Master peel-sound volume from 0 to 1. */
+  volume?: number;
+  enabled?: boolean;
+}
+
 export interface StickerPeelOptions {
   /** Curl radius, normalized to the sticker's short side when <= 1. */
   radius?: number;
@@ -50,6 +84,7 @@ export interface StickerOptions {
   shadow?: StickerShadowOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
+  sound?: StickerSoundOptions;
   tilt?: number;
   wind?: number;
   quality?: "low" | "medium" | "high";
@@ -92,11 +127,12 @@ export const DEFAULT_STICKER_OPTIONS = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "reset" as const,
+    release: "snap" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+  sound: { src: "", volume: 0.7, enabled: true },
   tilt: -3,
-  wind: 0,
+  wind: 0.25,
   quality: "high" as const,
 };
 
@@ -106,6 +142,7 @@ export type ResolvedStickerOptions = {
   shadow: Required<StickerShadowOptions>;
   peel: Required<StickerPeelOptions>;
   back: Required<StickerBackOptions>;
+  sound: Required<StickerSoundOptions>;
   tilt: number;
   wind: number;
   quality: "low" | "medium" | "high";
@@ -122,6 +159,7 @@ export function resolveStickerOptions(
     shadow: { ...base.shadow, ...patch.shadow },
     peel: { ...base.peel, ...patch.peel },
     back: { ...base.back, ...patch.back },
+    sound: { ...base.sound, ...patch.sound },
     tilt: patch.tilt ?? base.tilt,
     wind: patch.wind ?? base.wind,
     quality: patch.quality ?? base.quality,

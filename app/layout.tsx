@@ -42,13 +42,13 @@ export async function generateMetadata(): Promise<Metadata> {
       template: "%s · Sticker Forge",
     },
     description:
-      "A tactile web sticker maker for text and SVG artwork. Drag an edge to peel it up.",
+      "A tactile web sticker maker for text and uploaded images. Drag an edge to peel it up.",
     applicationName: "Sticker Forge",
-    keywords: ["sticker", "SVG", "WebGL", "interactive", "generator"],
+    keywords: ["sticker", "image", "PNG", "WebGL", "interactive", "generator"],
     openGraph: {
       type: "website",
       title: "Sticker Forge",
-      description: "Turn text or SVG artwork into a sticker you can really peel.",
+      description: "Turn text or uploaded images into a sticker you can really peel.",
       images: [
         {
           url: `${origin}/og.png`,
@@ -61,7 +61,7 @@ export async function generateMetadata(): Promise<Metadata> {
     twitter: {
       card: "summary_large_image",
       title: "Sticker Forge",
-      description: "Turn text or SVG artwork into a sticker you can really peel.",
+      description: "Turn text or uploaded images into a sticker you can really peel.",
       images: [`${origin}/og.png`],
     },
   };

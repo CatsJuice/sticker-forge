@@ -1,6 +1,6 @@
 # Sticker Forge
 
-Sticker Forge turns text or SVG artwork into a tactile WebGL sticker. Grab the
+Sticker Forge turns text or uploaded image artwork into a tactile WebGL sticker. Grab the
 real die-cut edge, drag it inward, and the sticker curls to reveal a satin back
 surface with depth-aware shadowing.
 
@@ -30,6 +30,10 @@ The reusable files are emitted to `public/embed/`:
 - `sticker-forge.iife.js` — a classic script exposing `window.StickerForge`;
 - `sticker-forge.d.ts` — public TypeScript declarations.
 
+The provided peel sound is trimmed, converted to mono, lightly high-passed, and
+inlined into both JavaScript bundles, so it does not need to be copied or hosted
+as a separate asset. The untouched source recording remains in `lib/assets/`.
+
 ## Copy-paste Web Component
 
 Copy both the ES bundle and this markup into any page. The bundle registers the
@@ -57,6 +61,7 @@ exported and returns immediately (`void`).
       maxAngle: 3.55,
       release: "reset",
     },
+    sound: { enabled: true, volume: 0.68 },
     back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
     tilt: -3,
   });
@@ -98,6 +103,7 @@ object; renderer events are dispatched from the target element.
   const sticker = await createSticker(target, {
     source: { type: "text", text: "PEEL ME", color: "#19191d" },
     peel: { radius: 0.12, maxAngle: 3.55 },
+    sound: { enabled: true, volume: 0.68 },
   });
 
   // Call before permanently removing the target in an SPA.
@@ -114,7 +120,18 @@ example.
 Text sources accept `text`, `color`, `fontFamily`, and `fontWeight`. The engine
 waits for the requested browser font before rebuilding the texture.
 
-SVG sources accept raw markup; pre-sanitization by the caller is not required:
+Image sources accept any browser-decodable image URL, including data URLs made
+from PNG, WebP, JPEG, GIF, AVIF, or SVG uploads:
+
+```js
+await sticker.setSource({ type: "image", src: imageDataUrl, name: file.name });
+```
+
+The engine inspects decoded pixel alpha. Transparent images use their alpha
+silhouette for the die-cut outline; fully opaque images use their rectangular
+image boundary.
+
+Legacy SVG sources also accept raw markup; pre-sanitization is not required:
 
 ```js
 await sticker.setSource({ type: "svg", svg: svgMarkup });
@@ -158,6 +175,17 @@ coordinates.
 `peel.radius` is normalized to the sticker's short side (`0.12` means 12%),
 while `peel.maxAngle` is expressed in radians. Shadow direction and `tilt` are
 expressed in degrees; shadow blur/distance and `peel.grabWidth` use CSS pixels.
+
+The bundled recording is treated as an audio sprite rather than a timeline.
+Sticker Forge separates its lift, light crackle, strong tear, and release
+material, compensates their different levels, and drives randomized grains from
+the drag velocity and acceleration. A slow peel is sparse, a fast peel is denser
+and brighter, holding still is silent, and reattaching uses a quieter low-passed
+texture instead of reversed audio. `progress` is used only for the initial lift
+and final release events. Set `sound.enabled` to `false` or `sound.volume` to `0`
+to mute it. Provide `sound.src` to replace the bundled sound with another
+browser-decodable audio URL; custom recordings use a duration-relative generic
+slice profile.
 
 `setOptions()` deep-merges nested option groups. Prefer the awaitable
 `setSource()` when changing artwork; passing `source` through `setOptions()`

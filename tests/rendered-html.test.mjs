@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import vm from "node:vm";
 
@@ -31,15 +31,21 @@ test("server-renders the Sticker Forge studio shell", async () => {
 
   const html = await response.text();
   assert.match(html, /<title>Sticker Forge — Interactive Sticker Maker<\/title>/i);
-  assert.match(html, /STICKER FORGE/);
+  assert.match(html, /aria-label="Sticker Forge"/);
   assert.match(html, /贴纸实验台/);
+  assert.match(html, /href="https:\/\/github\.com\/"/);
   assert.match(html, /复制嵌入代码/);
+  assert.match(html, /富文本贴纸内容/);
+  assert.match(html, /contentEditable="true"/);
   assert.match(html, /data-testid="sticker-stage"/);
+  assert.match(html, /aria-expanded="true"/);
+  assert.doesNotMatch(html, /Live material|WebGL ready|撕起进度|从任意白色轮廓边缘向内拖拽/);
+  assert.doesNotMatch(html, /输入素材，再调到刚刚好的手感/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape/i);
 });
 
 test("ships both standalone bundles and a copyable embed example", async () => {
-  const [example, declarations, iifeSource] = await Promise.all([
+  const [example, declarations, iifeSource, esmSource] = await Promise.all([
     readFile(new URL("../examples/embed.html", import.meta.url), "utf8"),
     readFile(
       new URL("../public/embed/sticker-forge.d.ts", import.meta.url),
@@ -49,13 +55,22 @@ test("ships both standalone bundles and a copyable embed example", async () => {
       new URL("../public/embed/sticker-forge.iife.js", import.meta.url),
       "utf8",
     ),
-    access(new URL("../public/embed/sticker-forge.es.js", import.meta.url)),
+    readFile(
+      new URL("../public/embed/sticker-forge.es.js", import.meta.url),
+      "utf8",
+    ),
   ]);
 
   assert.match(example, /sticker-forge\.iife\.js/);
   assert.match(example, /StickerForge\.createSticker/);
   assert.match(declarations, /interface StickerInstance/);
+  assert.match(declarations, /interface StickerSoundOptions/);
+  assert.match(declarations, /interface StickerRichTextDocument/);
+  assert.match(declarations, /richText\?: StickerRichTextDocument/);
+  assert.match(declarations, /sound\?: StickerSoundOptions/);
   assert.match(declarations, /setSource\(source: StickerSource\): Promise<void>/);
+  assert.match(iifeSource, /data:audio\/mpeg;base64,/);
+  assert.match(esmSource, /data:audio\/mpeg;base64,/);
 
   const esmUrl = new URL("../public/embed/sticker-forge.es.js", import.meta.url);
   esmUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);

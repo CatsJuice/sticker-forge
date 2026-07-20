@@ -1,4 +1,5 @@
 import type {
+  StickerImageSource,
   StickerOutlineOptions,
   StickerSource,
   StickerSvgSource,
@@ -11,6 +12,10 @@ export interface PreparedArtwork {
   height: number;
   aspect: number;
   alpha: Uint8ClampedArray;
+  /** Normalized left/right silhouette extremes for every occupied scanline. */
+  support: Float32Array;
+  /** Whether the decoded source image contained non-opaque pixels. */
+  hasTransparency: boolean;
 }
 
 const MAX_TEXTURE_EDGE = 1536;
@@ -103,10 +108,170 @@ async function loadSvgImage(markup: string): Promise<HTMLImageElement> {
   }
 }
 
+async function loadImage(src: string): Promise<HTMLImageElement> {
+  if (!/^(data:|blob:|https?:|\/)/i.test(src)) {
+    throw new Error("The image URL must use data, blob, HTTP, or HTTPS.");
+  }
+  const image = new Image();
+  image.decoding = "async";
+  if (/^https?:/i.test(src)) image.crossOrigin = "anonymous";
+  image.src = src;
+  await image.decode();
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error("The image has no drawable dimensions.");
+  }
+  return image;
+}
+
+function imageHasTransparency(image: HTMLImageElement): boolean {
+  const maxEdge = 640;
+  const scale = Math.min(
+    1,
+    maxEdge / Math.max(image.naturalWidth, image.naturalHeight),
+  );
+  const width = Math.max(1, Math.round(image.naturalWidth * scale));
+  const height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas 2D is unavailable.");
+  context.clearRect(0, 0, width, height);
+  context.drawImage(image, 0, 0, width, height);
+  const pixels = context.getImageData(0, 0, width, height).data;
+  for (let index = 3; index < pixels.length; index += 4) {
+    if (pixels[index] < 255) return true;
+  }
+  return false;
+}
+
 async function renderTextSource(source: StickerTextSource) {
   const fontFamily =
     source.fontFamily ?? "Arial Rounded MT Bold, Arial Black, sans-serif";
-  const fontWeight = source.fontWeight ?? 900;
+  const defaultWeight = source.fontWeight ?? 900;
+  const richBlocks = source.richText?.blocks.filter((block) => block.runs.length);
+  if (richBlocks?.length) {
+    const probe = document.createElement("canvas").getContext("2d");
+    if (!probe) throw new Error("Canvas 2D is unavailable.");
+    const padding = 128;
+
+    const buildLayout = (scale: number) => {
+      const lines = richBlocks.map((block) => {
+        let width = 0;
+        let ascent = 0;
+        let descent = 0;
+        let maxFontSize = 0;
+        const runs = block.runs.map((run) => {
+          const fontSize = clamp((run.fontSize ?? 28) * scale, 24, 720);
+          maxFontSize = Math.max(maxFontSize, fontSize);
+          const fontWeight = run.fontWeight ?? defaultWeight;
+          probe.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+          const metrics = probe.measureText(run.text || " ");
+          const runAscent =
+            metrics.actualBoundingBoxAscent || Math.max(fontSize * 0.76, 1);
+          const runDescent =
+            metrics.actualBoundingBoxDescent || Math.max(fontSize * 0.2, 1);
+          const runWidth = run.text ? metrics.width : 0;
+          width += runWidth;
+          ascent = Math.max(ascent, runAscent);
+          descent = Math.max(descent, runDescent);
+          return { ...run, fontSize, fontWeight, width: runWidth };
+        });
+        const lineFontSize = maxFontSize || 28 * scale;
+        if (!runs.length || ascent + descent < 1) {
+          ascent = lineFontSize * 0.76;
+          descent = lineFontSize * 0.24;
+        }
+        return {
+          align: block.align ?? "center",
+          runs,
+          width,
+          ascent,
+          descent,
+          height:
+            Math.max(ascent + descent, lineFontSize) *
+            clamp(block.lineHeight ?? 1.2, 0.7, 3),
+        };
+      });
+      return {
+        lines,
+        contentWidth: Math.max(1, ...lines.map((line) => line.width)),
+        contentHeight: lines.reduce((sum, line) => sum + line.height, 0),
+      };
+    };
+
+    let scale = 8;
+    let layout = buildLayout(scale);
+    const widthScale = 1240 / Math.max(layout.contentWidth, 1);
+    const heightScale = 1280 / Math.max(layout.contentHeight, 1);
+    if (widthScale < 1 || heightScale < 1) {
+      scale *= Math.min(widthScale, heightScale);
+      layout = buildLayout(scale);
+    }
+
+    if (document.fonts?.load) {
+      const fonts = new Set<string>();
+      for (const line of layout.lines) {
+        for (const run of line.runs) {
+          fonts.add(`${run.fontWeight} ${run.fontSize}px ${fontFamily}`);
+        }
+      }
+      await Promise.all(
+        [...fonts].map((font) => document.fonts.load(font).catch(() => [])),
+      );
+      layout = buildLayout(scale);
+    }
+
+    const width = clamp(
+      Math.ceil(layout.contentWidth + padding * 2),
+      MIN_TEXTURE_EDGE,
+      MAX_TEXTURE_EDGE,
+    );
+    const height = clamp(
+      Math.ceil(layout.contentHeight + padding * 2),
+      MIN_TEXTURE_EDGE,
+      MAX_TEXTURE_EDGE,
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) throw new Error("Canvas 2D is unavailable.");
+    context.clearRect(0, 0, width, height);
+    context.textBaseline = "alphabetic";
+
+    let top = (height - layout.contentHeight) / 2;
+    for (const line of layout.lines) {
+      const lineLeft =
+        line.align === "left"
+          ? padding
+          : line.align === "right"
+            ? width - padding - line.width
+            : (width - line.width) / 2;
+      const baseline =
+        top + (line.height - line.ascent - line.descent) / 2 + line.ascent;
+      let x = lineLeft;
+      for (const run of line.runs) {
+        context.font = `${run.fontWeight} ${run.fontSize}px ${fontFamily}`;
+        context.fillStyle = run.color ?? source.color ?? "#19191d";
+        context.fillText(run.text, x, baseline);
+        if (run.underline && run.width > 0) {
+          const thickness = Math.max(2, run.fontSize * 0.045);
+          context.fillRect(
+            x,
+            baseline + Math.max(2, run.fontSize * 0.07),
+            run.width,
+            thickness,
+          );
+        }
+        x += run.width;
+      }
+      top += line.height;
+    }
+    return canvas;
+  }
+
+  const fontWeight = defaultWeight;
   let fontSize = 300;
   const probe = document.createElement("canvas").getContext("2d");
   if (!probe) throw new Error("Canvas 2D is unavailable.");
@@ -192,6 +357,40 @@ async function renderSvgSource(source: StickerSvgSource) {
   return canvas;
 }
 
+async function renderImageSource(source: StickerImageSource) {
+  const image = await loadImage(source.src);
+  const hasTransparency = imageHasTransparency(image);
+  const aspect = clamp(image.naturalWidth / image.naturalHeight, 0.15, 8);
+  const contentMax = 1210;
+  const padding = 128;
+  const contentWidth = aspect >= 1 ? contentMax : contentMax * aspect;
+  const contentHeight = aspect >= 1 ? contentMax / aspect : contentMax;
+  const width = clamp(
+    Math.ceil(contentWidth + padding * 2),
+    MIN_TEXTURE_EDGE,
+    MAX_TEXTURE_EDGE,
+  );
+  const height = clamp(
+    Math.ceil(contentHeight + padding * 2),
+    MIN_TEXTURE_EDGE,
+    MAX_TEXTURE_EDGE,
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) throw new Error("Canvas 2D is unavailable.");
+  context.clearRect(0, 0, width, height);
+  context.drawImage(
+    image,
+    padding,
+    padding,
+    width - padding * 2,
+    height - padding * 2,
+  );
+  return { canvas, hasTransparency };
+}
+
 function tintAlpha(source: HTMLCanvasElement, color: string) {
   const canvas = document.createElement("canvas");
   canvas.width = source.width;
@@ -240,10 +439,17 @@ export async function prepareArtwork(
   source: StickerSource,
   outline: Required<StickerOutlineOptions>,
 ): Promise<PreparedArtwork> {
-  const sourceCanvas =
-    source.type === "text"
-      ? await renderTextSource(source)
-      : await renderSvgSource(source);
+  const rendered =
+    source.type === "image"
+      ? await renderImageSource(source)
+      : {
+          canvas:
+            source.type === "text"
+              ? await renderTextSource(source)
+              : await renderSvgSource(source),
+          hasTransparency: true,
+        };
+  const sourceCanvas = rendered.canvas;
   const canvas = addOutline(sourceCanvas, outline);
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Canvas 2D is unavailable.");
@@ -253,11 +459,31 @@ export async function prepareArtwork(
     alpha[targetIndex] = image.data[sourceIndex];
     targetIndex += 1;
   }
+  const support: number[] = [];
+  const alphaThreshold = 0.1 * 255;
+  for (let y = 0; y < canvas.height; y += 1) {
+    const rowOffset = y * canvas.width;
+    let left = -1;
+    let right = -1;
+    for (let x = 0; x < canvas.width; x += 1) {
+      if (alpha[rowOffset + x] < alphaThreshold) continue;
+      if (left < 0) left = x;
+      right = x;
+    }
+    if (left < 0) continue;
+    const normalizedY = y / Math.max(canvas.height - 1, 1);
+    support.push(left / Math.max(canvas.width - 1, 1), normalizedY);
+    if (right !== left) {
+      support.push(right / Math.max(canvas.width - 1, 1), normalizedY);
+    }
+  }
   return {
     canvas,
     width: canvas.width,
     height: canvas.height,
     aspect: canvas.width / canvas.height,
     alpha,
+    support: new Float32Array(support),
+    hasTransparency: rendered.hasTransparency,
   };
 }

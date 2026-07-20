@@ -33,7 +33,10 @@ test("server-renders the Sticker Forge studio shell", async () => {
   assert.match(html, /<title>Sticker Forge — Interactive Sticker Maker<\/title>/i);
   assert.match(html, /aria-label="Sticker Forge"/);
   assert.match(html, /贴纸实验台/);
-  assert.match(html, /href="https:\/\/github\.com\/"/);
+  assert.match(
+    html,
+    /href="https:\/\/github\.com\/CatsJuice\/sticker-forge"/,
+  );
   assert.match(html, /复制嵌入代码/);
   assert.match(html, /富文本贴纸内容/);
   assert.match(html, /contentEditable="true"/);

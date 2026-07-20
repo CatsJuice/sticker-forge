@@ -73,7 +73,7 @@ const DEFAULT_RICH_TEXT = {
     },
   ],
 } satisfies StickerRichTextDocument;
-const GITHUB_URL = "https://github.com/";
+const GITHUB_URL = "https://github.com/CatsJuice/sticker-forge";
 
 const UI = {
   zh: {

@@ -30,6 +30,18 @@ The reusable files are emitted to `public/embed/`:
 - `sticker-forge.iife.js` — a classic script exposing `window.StickerForge`;
 - `sticker-forge.d.ts` — public TypeScript declarations.
 
+## GitHub Pages
+
+Pushes to `main` deploy a static export through the GitHub Pages workflow at
+`.github/workflows/deploy-pages.yml`. Build the same artifact locally with:
+
+```bash
+npm run build:pages
+```
+
+The production Pages site uses `https://sticker.oooo.so`. Its DNS record is a
+`CNAME` for the `sticker` subdomain pointing to `catsjuice.github.io`.
+
 The provided peel sound is trimmed, converted to mono, lightly high-passed, and
 inlined into both JavaScript bundles, so it does not need to be copied or hosted
 as a separate asset. The untouched source recording remains in `lib/assets/`.

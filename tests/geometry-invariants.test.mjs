@@ -206,6 +206,32 @@ test("re-enters a detached sticker with a centered spring and laser sweep", asyn
   assert.match(renderer, /ENTRANCE_SWEEP_DURATION = 0\.42/);
 });
 
+test("highlights only the draggable edge after a missed canvas press", async () => {
+  const [renderer, shader] = await Promise.all([
+    readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(renderer, /if \(!hit\) \{\s*this\.startInteractionHint\(\)/);
+  assert.match(renderer, /INTERACTION_HINT_COLOR = "#615cff"/);
+  assert.match(renderer, /INTERACTION_HINT_DURATION = 0\.9/);
+  assert.match(renderer, /this\.interactionHintActive \|\|/);
+  assert.match(
+    renderer,
+    /uInteractionHintRadius\.value = this\.artwork[\s\S]*?this\.options\.peel\.grabWidth \* textureScale/,
+  );
+  assert.match(shader, /hitArea \* 0\.1 \* uInteractionHint/);
+  assert.match(shader, /float interactionHitArea\(/);
+  assert.match(shader, /float innerLineWidth = max\(2\.0,/);
+  assert.match(shader, /innerEdgeOuter - innerEdgeInner/);
+  assert.match(shader, /float innerEdge =/);
+  assert.match(
+    shader,
+    /max\(edge, innerEdge\) \* dash \* uInteractionHint/,
+  );
+  assert.doesNotMatch(shader, /gl_FragCoord\.y\) \* 0\.72 - uTime/);
+});
+
 test("preserves a rich-text selection before committing a font size", async () => {
   const studio = await readFile(
     new URL("../app/StickerForgeStudio.tsx", import.meta.url),

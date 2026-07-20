@@ -142,6 +142,7 @@ export const stickerVertexShader = /* glsl */ `
 
 export const stickerFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform vec2 uTexel;
   uniform vec3 uBackColor;
   uniform float uGloss;
   uniform float uRoughness;
@@ -149,6 +150,9 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uShadowOpacity;
   uniform float uEntranceSweep;
   uniform vec2 uEntranceAxis;
+  uniform float uInteractionHint;
+  uniform float uInteractionHintRadius;
+  uniform vec3 uInteractionHintColor;
 
   varying vec2 vUv;
   varying vec3 vNormalView;
@@ -167,6 +171,41 @@ export const stickerFragmentShader = /* glsl */ `
     point = fract(point * vec2(123.34, 456.21));
     point += dot(point, point + 45.32);
     return fract(point.x * point.y);
+  }
+
+  float interactionHitArea(vec2 uv, float centerAlpha, float radius) {
+    vec2 hitOffset = uTexel * radius;
+    vec2 diagonalOffset = hitOffset * 0.70710678;
+    float sampledAlpha = min(
+      min(
+        min(
+          texture2D(uMap, uv + vec2(hitOffset.x, 0.0)).a,
+          texture2D(uMap, uv - vec2(hitOffset.x, 0.0)).a
+        ),
+        min(
+          texture2D(uMap, uv + vec2(0.0, hitOffset.y)).a,
+          texture2D(uMap, uv - vec2(0.0, hitOffset.y)).a
+        )
+      ),
+      min(
+        min(
+          texture2D(uMap, uv + diagonalOffset).a,
+          texture2D(uMap, uv - diagonalOffset).a
+        ),
+        min(
+          texture2D(
+            uMap,
+            uv + vec2(diagonalOffset.x, -diagonalOffset.y)
+          ).a,
+          texture2D(
+            uMap,
+            uv + vec2(-diagonalOffset.x, diagonalOffset.y)
+          ).a
+        )
+      )
+    );
+    return smoothstep(0.04, 0.28, centerAlpha)
+      * (1.0 - smoothstep(0.08, 0.72, sampledAlpha));
   }
 
   void main() {
@@ -222,6 +261,57 @@ export const stickerFragmentShader = /* glsl */ `
       );
       color = mix(color, laserColor * 1.18, laserHalo * 0.46);
       color += laserColor * (laserCore * 0.62 + laserHalo * 0.16);
+    }
+
+    if (uInteractionHint > 0.0) {
+      float hitArea = interactionHitArea(
+        vUv,
+        printSample.a,
+        uInteractionHintRadius
+      );
+      float nearbyAlpha = min(
+        min(
+          texture2D(uMap, vUv + vec2(uTexel.x * 3.0, 0.0)).a,
+          texture2D(uMap, vUv - vec2(uTexel.x * 3.0, 0.0)).a
+        ),
+        min(
+          texture2D(uMap, vUv + vec2(0.0, uTexel.y * 3.0)).a,
+          texture2D(uMap, vUv - vec2(0.0, uTexel.y * 3.0)).a
+        )
+      );
+      float edge = smoothstep(0.04, 0.28, printSample.a)
+        * (1.0 - smoothstep(0.08, 0.72, nearbyAlpha));
+      float innerLineWidth = max(2.0, uInteractionHintRadius * 0.09);
+      float innerEdgeOuter = interactionHitArea(
+        vUv,
+        printSample.a,
+        uInteractionHintRadius + innerLineWidth
+      );
+      float innerEdgeInner = interactionHitArea(
+        vUv,
+        printSample.a,
+        max(0.0, uInteractionHintRadius - innerLineWidth)
+      );
+      float innerEdge = clamp(
+        innerEdgeOuter - innerEdgeInner,
+        0.0,
+        1.0
+      ) * (1.0 - edge);
+      float dash = smoothstep(
+        -0.22,
+        0.22,
+        sin((gl_FragCoord.x + gl_FragCoord.y) * 0.72)
+      );
+      color = mix(
+        color,
+        uInteractionHintColor,
+        hitArea * 0.1 * uInteractionHint
+      );
+      color = mix(
+        color,
+        uInteractionHintColor,
+        max(edge, innerEdge) * dash * uInteractionHint
+      );
     }
 
     gl_FragColor = vec4(color, printSample.a);

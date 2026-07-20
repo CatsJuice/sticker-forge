@@ -91,6 +91,8 @@ const MAX_STICKER_HEIGHT_PX = 520;
 const ENTRANCE_SCALE_DURATION = 0.72;
 const ENTRANCE_SWEEP_DELAY = 0.06;
 const ENTRANCE_SWEEP_DURATION = 0.42;
+const INTERACTION_HINT_DURATION = 0.9;
+const INTERACTION_HINT_COLOR = "#615cff";
 
 type MutableStickerState = {
   ready: boolean;
@@ -107,6 +109,11 @@ type EdgeHit = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const progress = clamp((value - edge0) / (edge1 - edge0), 0, 1);
+  return progress * progress * (3 - 2 * progress);
 }
 
 function colorFrom(value: string, fallback: string) {
@@ -182,6 +189,8 @@ class StickerRenderer implements StickerInstance {
   private detachedExitSpin = 0;
   private entranceActive = false;
   private entranceElapsed = 0;
+  private interactionHintActive = false;
+  private interactionHintElapsed = 0;
   private readonly entranceAxis = new THREE.Vector2(1, 0);
   private frameRequest = 0;
   private lastFrameTime = 0;
@@ -253,6 +262,11 @@ class StickerRenderer implements StickerInstance {
       uEntranceSweep: { value: -1 },
       uEntranceAxis: { value: this.entranceAxis.clone() },
       uEntranceScaleProgress: { value: -1 },
+      uInteractionHint: { value: 0 },
+      uInteractionHintRadius: { value: 3 },
+      uInteractionHintColor: {
+        value: colorFrom(INTERACTION_HINT_COLOR, "#615cff"),
+      },
     };
 
     const stickerUniforms = {
@@ -410,11 +424,14 @@ class StickerRenderer implements StickerInstance {
     this.detachedExitSpin = 0;
     this.entranceActive = false;
     this.entranceElapsed = 0;
+    this.interactionHintActive = false;
+    this.interactionHintElapsed = 0;
     this.stickerMesh.position.set(0, 0, 0);
     this.stickerMesh.scale.set(1, 1, 1);
     this.stickerMesh.rotation.z = THREE.MathUtils.degToRad(this.options.tilt);
     this.uniforms.uEntranceSweep.value = -1;
     this.uniforms.uEntranceScaleProgress.value = -1;
+    this.uniforms.uInteractionHint.value = 0;
     this.peelAudio.reset(0);
     this.setCreaseDepth(0);
     this.state.pointer = null;
@@ -662,6 +679,13 @@ class StickerRenderer implements StickerInstance {
     const textureScale = this.artwork
       ? this.artwork.width / Math.max(displayWidth, 1)
       : 1;
+    this.uniforms.uInteractionHintRadius.value = this.artwork
+      ? clamp(
+          this.options.peel.grabWidth * textureScale,
+          3,
+          Math.min(this.artwork.width, this.artwork.height) * 0.13,
+        )
+      : 3;
     this.uniforms.uShadowBlur.value =
       Math.max(0, this.options.shadow.blur) * textureScale * 0.34;
     this.uniforms.uShadowDistance.value =
@@ -900,7 +924,13 @@ class StickerRenderer implements StickerInstance {
     ) return;
     const local = this.screenToLocal(event.clientX, event.clientY);
     const hit = this.hitEdge(local);
-    if (!hit) return;
+    if (!hit) {
+      this.startInteractionHint();
+      return;
+    }
+    this.interactionHintActive = false;
+    this.interactionHintElapsed = 0;
+    this.uniforms.uInteractionHint.value = 0;
     event.preventDefault();
     this.renderer.domElement.focus({ preventScroll: true });
     this.renderer.domElement.setPointerCapture(event.pointerId);
@@ -1126,6 +1156,13 @@ class StickerRenderer implements StickerInstance {
     this.frameRequest = requestAnimationFrame(this.renderFrame);
   }
 
+  private startInteractionHint() {
+    this.interactionHintActive = true;
+    this.interactionHintElapsed = 0;
+    this.uniforms.uInteractionHint.value = 1;
+    this.requestRender();
+  }
+
   private startEntranceAnimation() {
     this.reset();
     this.entranceActive = true;
@@ -1229,6 +1266,27 @@ class StickerRenderer implements StickerInstance {
       }
     }
 
+    if (this.interactionHintActive) {
+      this.interactionHintElapsed += delta;
+      const hintProgress = clamp(
+        this.interactionHintElapsed / INTERACTION_HINT_DURATION,
+        0,
+        1,
+      );
+      if (reducedMotion) {
+        this.uniforms.uInteractionHint.value = hintProgress < 0.72 ? 1 : 0;
+      } else {
+        const fadeIn = smoothstep(0, 0.12, hintProgress);
+        const fadeOut = 1 - smoothstep(0.58, 1, hintProgress);
+        const pulse = 0.9 + Math.sin(hintProgress * Math.PI * 2) * 0.1;
+        this.uniforms.uInteractionHint.value = fadeIn * fadeOut * pulse;
+      }
+      if (hintProgress >= 1) {
+        this.interactionHintActive = false;
+        this.uniforms.uInteractionHint.value = 0;
+      }
+    }
+
     this.uniforms.uTime.value = time / 1000;
     this.renderer.render(this.scene, this.camera);
     const windIsAnimating =
@@ -1237,6 +1295,7 @@ class StickerRenderer implements StickerInstance {
       this.springActive ||
       this.detachedExitActive ||
       this.entranceActive ||
+      this.interactionHintActive ||
       windIsAnimating
     ) {
       this.requestRender();

@@ -142,6 +142,7 @@ export const stickerVertexShader = /* glsl */ `
 
 export const stickerFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform vec2 uTexel;
   uniform vec3 uBackColor;
   uniform float uGloss;
   uniform float uRoughness;
@@ -149,6 +150,8 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uShadowOpacity;
   uniform float uEntranceSweep;
   uniform vec2 uEntranceAxis;
+  uniform float uInteractionHint;
+  uniform vec3 uInteractionHintColor;
 
   varying vec2 vUv;
   varying vec3 vNormalView;
@@ -222,6 +225,30 @@ export const stickerFragmentShader = /* glsl */ `
       );
       color = mix(color, laserColor * 1.18, laserHalo * 0.46);
       color += laserColor * (laserCore * 0.62 + laserHalo * 0.16);
+    }
+
+    if (uInteractionHint > 0.0) {
+      float nearbyAlpha = min(
+        min(
+          texture2D(uMap, vUv + vec2(uTexel.x * 3.0, 0.0)).a,
+          texture2D(uMap, vUv - vec2(uTexel.x * 3.0, 0.0)).a
+        ),
+        min(
+          texture2D(uMap, vUv + vec2(0.0, uTexel.y * 3.0)).a,
+          texture2D(uMap, vUv - vec2(0.0, uTexel.y * 3.0)).a
+        )
+      );
+      float edge = smoothstep(0.04, 0.28, printSample.a)
+        * (1.0 - smoothstep(0.08, 0.72, nearbyAlpha));
+      float dash = smoothstep(
+        -0.22,
+        0.22,
+        sin((gl_FragCoord.x + gl_FragCoord.y) * 0.72 - uTime * 3.2)
+      );
+      float fillOpacity = 0.1 * uInteractionHint;
+      float outlineOpacity = edge * dash * 0.92 * uInteractionHint;
+      color = mix(color, uInteractionHintColor, fillOpacity);
+      color = mix(color, uInteractionHintColor, outlineOpacity);
     }
 
     gl_FragColor = vec4(color, printSample.a);

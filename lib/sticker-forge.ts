@@ -98,7 +98,7 @@ const ENTRANCE_SCALE_DURATION = 0.72;
 const ENTRANCE_SWEEP_DELAY = 0.06;
 const ENTRANCE_SWEEP_DURATION = 0.42;
 const INTERACTION_HINT_DURATION = 0.9;
-const INTERACTION_HINT_COLOR = "#615cff";
+const INTERACTION_HINT_COLOR = "rgb(36, 126, 245)";
 
 type MutableStickerState = {
   ready: boolean;
@@ -274,7 +274,7 @@ class StickerRenderer implements StickerInstance {
       uInteractionHint: { value: 0 },
       uInteractionHintRadius: { value: 3 },
       uInteractionHintColor: {
-        value: colorFrom(INTERACTION_HINT_COLOR, "#615cff"),
+        value: colorFrom(INTERACTION_HINT_COLOR, "rgb(36, 126, 245)"),
       },
     };
 
@@ -831,6 +831,20 @@ class StickerRenderer implements StickerInstance {
     return (low + high) * 0.5;
   }
 
+  private setDetachedDragOffset(localDistance: number) {
+    const distance = Math.max(0, localDistance);
+    const angle = THREE.MathUtils.degToRad(this.options.tilt);
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+    const localX = this.activeDirection.x * distance;
+    const localY = this.activeDirection.y * distance;
+    this.stickerMesh.position.set(
+      localX * cosine - localY * sine,
+      localX * sine + localY * cosine,
+      0,
+    );
+  }
+
   private screenToLocal(clientX: number, clientY: number) {
     const rect = this.renderer.domElement.getBoundingClientRect();
     const normalizedX = ((clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1;
@@ -1037,6 +1051,9 @@ class StickerRenderer implements StickerInstance {
       }
       this.springTargetDepth = 0;
     } else {
+      const maximumPointerDistance = this.peelModelForDepth(
+        this.grabExtent,
+      ).projection;
       const targetDepth = this.solveCreaseDepth(pointerDistance);
       const returnDistance = this.creaseDepth - targetDepth;
       const shouldSmoothReturn =
@@ -1054,6 +1071,11 @@ class StickerRenderer implements StickerInstance {
         this.springTargetDepth = targetDepth;
         this.setCreaseDepth(targetDepth);
       }
+      // Once every point has crossed the crease, the remaining pointer travel
+      // moves the detached sticker instead of being discarded at progress 1.
+      // Converting from sticker-local space keeps the grabbed point under the
+      // pointer even when the sticker has a configured tilt.
+      this.setDetachedDragOffset(pointerDistance - maximumPointerDistance);
     }
     this.peelAudio.update(
       this.state.progress,

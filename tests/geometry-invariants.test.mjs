@@ -201,6 +201,24 @@ test("snaps a sufficiently peeled sticker to full detachment on release", async 
   assert.match(renderer, /release === "snap" && !shouldDetach/);
 });
 
+test("continues moving a sticker after the peel reaches full progress", async () => {
+  const renderer = await readFile(
+    new URL("../lib/sticker-forge.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    renderer,
+    /const maximumPointerDistance = this\.peelModelForDepth\([\s\S]*?this\.grabExtent,[\s\S]*?\)\.projection/,
+  );
+  assert.match(
+    renderer,
+    /this\.setDetachedDragOffset\(pointerDistance - maximumPointerDistance\)/,
+  );
+  assert.match(renderer, /const angle = THREE\.MathUtils\.degToRad\(this\.options\.tilt\)/);
+  assert.match(renderer, /this\.stickerMesh\.position\.set\(/);
+});
+
 test("always terminates pointer dragging when capture or window focus is lost", async () => {
   const renderer = await readFile(
     new URL("../lib/sticker-forge.ts", import.meta.url),
@@ -267,7 +285,7 @@ test("highlights only the draggable edge after a missed canvas press", async () 
   ]);
 
   assert.match(renderer, /if \(!hit\) \{\s*this\.startInteractionHint\(\)/);
-  assert.match(renderer, /INTERACTION_HINT_COLOR = "#615cff"/);
+  assert.match(renderer, /INTERACTION_HINT_COLOR = "rgb\(36, 126, 245\)"/);
   assert.match(renderer, /INTERACTION_HINT_DURATION = 0\.9/);
   assert.match(renderer, /this\.interactionHintActive \|\|/);
   assert.match(

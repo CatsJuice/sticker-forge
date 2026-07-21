@@ -193,6 +193,7 @@ class StickerRenderer implements StickerInstance {
   private springVelocity = 0;
   private springActive = false;
   private springTargetDepth = 0;
+  private dragDetached = false;
   private detachedExitActive = false;
   private detachedExitElapsed = 0;
   private detachedExitSpin = 0;
@@ -443,6 +444,7 @@ class StickerRenderer implements StickerInstance {
     this.springActive = false;
     this.springVelocity = 0;
     this.springTargetDepth = 0;
+    this.dragDetached = false;
     this.detachedExitActive = false;
     this.detachedExitElapsed = 0;
     this.detachedExitSpin = 0;
@@ -831,13 +833,10 @@ class StickerRenderer implements StickerInstance {
     return (low + high) * 0.5;
   }
 
-  private setDetachedDragOffset(localDistance: number) {
-    const distance = Math.max(0, localDistance);
+  private setDetachedDragOffset(localX: number, localY: number) {
     const angle = THREE.MathUtils.degToRad(this.options.tilt);
     const cosine = Math.cos(angle);
     const sine = Math.sin(angle);
-    const localX = this.activeDirection.x * distance;
-    const localY = this.activeDirection.y * distance;
     this.stickerMesh.position.set(
       localX * cosine - localY * sine,
       localX * sine + localY * cosine,
@@ -988,6 +987,7 @@ class StickerRenderer implements StickerInstance {
     this.springActive = false;
     this.springVelocity = 0;
     this.springTargetDepth = 0;
+    this.dragDetached = false;
     this.state.dragging = true;
     this.state.grabPoint = { x: hit.local.x, y: hit.local.y };
     this.state.pointer = { x: local.x, y: local.y };
@@ -1026,56 +1026,107 @@ class StickerRenderer implements StickerInstance {
     const distance = drag.length();
     let pointerDistance = 0;
     let shouldReturnFromInvalidDirection = false;
-    if (distance > DIRECTION_DEAD_ZONE) {
-      const candidate = drag.clone().normalize();
-      if (candidate.dot(this.grabDirection) >= OUTWARD_DIRECTION_LIMIT) {
-        this.activeDirection.copy(candidate);
-        pointerDistance = distance;
-      } else {
-        // Keep the last valid peel direction and let the lifted portion settle
-        // back continuously. Setting pointerDistance to zero here used to make
-        // a deeply peeled sticker become flat in a single frame.
-        shouldReturnFromInvalidDirection = true;
+    if (this.dragDetached) {
+      const returnDirection =
+        distance > DIRECTION_DEAD_ZONE
+          ? drag.clone().normalize()
+          : this.grabDirection;
+      if (
+        returnDirection.dot(this.grabDirection) >= OUTWARD_DIRECTION_LIMIT
+      ) {
+        this.activeDirection.copy(returnDirection);
+        this.grabExtent = this.projectionExtent(
+          this.grabOrigin,
+          this.activeDirection,
+        );
+        const maximumPointerDistance = this.peelModelForDepth(
+          this.grabExtent,
+        ).projection;
+        // Crossing back inside the fully peeled front means the user is
+        // deliberately retracing the peel. Hand control back to the ordinary
+        // spring path so the sticker can reattach continuously.
+        if (distance < maximumPointerDistance) {
+          this.dragDetached = false;
+        }
       }
-    } else {
-      this.activeDirection.copy(this.grabDirection);
     }
-    this.grabExtent = this.projectionExtent(
-      this.grabOrigin,
-      this.activeDirection,
-    );
-    if (shouldReturnFromInvalidDirection) {
-      if (!this.springActive) {
-        this.springActive = true;
-        this.springVelocity = 0;
-      }
-      this.springTargetDepth = 0;
-    } else {
+    if (this.dragDetached) {
+      // Crossing onto the invalid side does not count as retracing the peel.
+      // Keep carrying the detached mesh there instead of starting the return
+      // spring and leaving its translation behind.
       const maximumPointerDistance = this.peelModelForDepth(
         this.grabExtent,
       ).projection;
-      const targetDepth = this.solveCreaseDepth(pointerDistance);
-      const returnDistance = this.creaseDepth - targetDepth;
-      const shouldSmoothReturn =
-        returnDistance > this.grabExtent * MAX_DIRECT_RETURN_STEP_RATIO ||
-        (this.springActive && targetDepth < this.creaseDepth);
-      if (shouldSmoothReturn) {
+      this.springActive = false;
+      this.springVelocity = 0;
+      this.springTargetDepth = this.grabExtent;
+      this.setCreaseDepth(this.grabExtent);
+      this.setDetachedDragOffset(
+        drag.x - this.activeDirection.x * maximumPointerDistance,
+        drag.y - this.activeDirection.y * maximumPointerDistance,
+      );
+    } else {
+      if (distance > DIRECTION_DEAD_ZONE) {
+        const candidate = drag.clone().normalize();
+        if (candidate.dot(this.grabDirection) >= OUTWARD_DIRECTION_LIMIT) {
+          this.activeDirection.copy(candidate);
+          pointerDistance = distance;
+        } else {
+          // Keep the last valid peel direction and let the lifted portion settle
+          // back continuously. Setting pointerDistance to zero here used to make
+          // a deeply peeled sticker become flat in a single frame.
+          shouldReturnFromInvalidDirection = true;
+        }
+      } else {
+        this.activeDirection.copy(this.grabDirection);
+      }
+      this.grabExtent = this.projectionExtent(
+        this.grabOrigin,
+        this.activeDirection,
+      );
+      if (shouldReturnFromInvalidDirection) {
         if (!this.springActive) {
           this.springActive = true;
           this.springVelocity = 0;
         }
-        this.springTargetDepth = targetDepth;
+        this.springTargetDepth = 0;
       } else {
-        this.springActive = false;
-        this.springVelocity = 0;
-        this.springTargetDepth = targetDepth;
-        this.setCreaseDepth(targetDepth);
+        const maximumPointerDistance = this.peelModelForDepth(
+          this.grabExtent,
+        ).projection;
+        const targetDepth = this.solveCreaseDepth(pointerDistance);
+        const returnDistance = this.creaseDepth - targetDepth;
+        const shouldSmoothReturn =
+          returnDistance > this.grabExtent * MAX_DIRECT_RETURN_STEP_RATIO ||
+          (this.springActive && targetDepth < this.creaseDepth);
+        if (shouldSmoothReturn) {
+          if (!this.springActive) {
+            this.springActive = true;
+            this.springVelocity = 0;
+          }
+          this.springTargetDepth = targetDepth;
+        } else {
+          this.springActive = false;
+          this.springVelocity = 0;
+          this.springTargetDepth = targetDepth;
+          this.setCreaseDepth(targetDepth);
+        }
+        // Once every point has crossed the crease, the remaining pointer travel
+        // moves the detached sticker instead of being discarded at progress 1.
+        // Converting from sticker-local space keeps the grabbed point under the
+        // pointer even when the sticker has a configured tilt.
+        const detachedDistance = Math.max(
+          0,
+          pointerDistance - maximumPointerDistance,
+        );
+        this.setDetachedDragOffset(
+          this.activeDirection.x * detachedDistance,
+          this.activeDirection.y * detachedDistance,
+        );
+        if (this.state.progress >= 1 - Number.EPSILON) {
+          this.dragDetached = true;
+        }
       }
-      // Once every point has crossed the crease, the remaining pointer travel
-      // moves the detached sticker instead of being discarded at progress 1.
-      // Converting from sticker-local space keeps the grabbed point under the
-      // pointer even when the sticker has a configured tilt.
-      this.setDetachedDragOffset(pointerDistance - maximumPointerDistance);
     }
     this.peelAudio.update(
       this.state.progress,
@@ -1130,8 +1181,18 @@ class StickerRenderer implements StickerInstance {
     }
     this.renderer.domElement.style.cursor = "grab";
     const release = this.options.peel.release;
+    const releaseProgress = this.springActive
+      ? Math.min(
+          this.state.progress,
+          clamp(
+            this.springTargetDepth / Math.max(this.grabExtent, 0.001),
+            0,
+            1,
+          ),
+        )
+      : this.state.progress;
     const shouldDetach =
-      release === "snap" && this.state.progress >= SNAP_DETACH_THRESHOLD;
+      release === "snap" && releaseProgress >= SNAP_DETACH_THRESHOLD;
     if (shouldDetach) {
       this.setCreaseDepth(this.grabExtent);
       this.state.pointer = {

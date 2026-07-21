@@ -197,6 +197,14 @@ test("snaps a sufficiently peeled sticker to full detachment on release", async 
 
   assert.match(types, /release: "snap" as const/);
   assert.match(renderer, /SNAP_DETACH_THRESHOLD = 0\.74/);
+  assert.match(
+    renderer,
+    /const releaseProgress = this\.springActive[\s\S]*?this\.springTargetDepth \/ Math\.max\(this\.grabExtent, 0\.001\)/,
+  );
+  assert.match(
+    renderer,
+    /release === "snap" && releaseProgress >= SNAP_DETACH_THRESHOLD/,
+  );
   assert.match(renderer, /if \(shouldDetach\) \{\s*this\.setCreaseDepth\(this\.grabExtent\)/);
   assert.match(renderer, /release === "snap" && !shouldDetach/);
 });
@@ -213,10 +221,35 @@ test("continues moving a sticker after the peel reaches full progress", async ()
   );
   assert.match(
     renderer,
-    /this\.setDetachedDragOffset\(pointerDistance - maximumPointerDistance\)/,
+    /this\.setDetachedDragOffset\(\s*this\.activeDirection\.x \* detachedDistance,\s*this\.activeDirection\.y \* detachedDistance,/,
   );
   assert.match(renderer, /const angle = THREE\.MathUtils\.degToRad\(this\.options\.tilt\)/);
   assert.match(renderer, /this\.stickerMesh\.position\.set\(/);
+});
+
+test("distinguishes retracing a detached peel from crossing its invalid side", async () => {
+  const renderer = await readFile(
+    new URL("../lib/sticker-forge.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(renderer, /private dragDetached = false/);
+  assert.match(
+    renderer,
+    /returnDirection\.dot\(this\.grabDirection\) >= OUTWARD_DIRECTION_LIMIT/,
+  );
+  assert.match(
+    renderer,
+    /if \(distance < maximumPointerDistance\) \{\s*this\.dragDetached = false/,
+  );
+  assert.match(
+    renderer,
+    /this\.setCreaseDepth\(this\.grabExtent\);[\s\S]*?drag\.x - this\.activeDirection\.x \* maximumPointerDistance,[\s\S]*?drag\.y - this\.activeDirection\.y \* maximumPointerDistance/,
+  );
+  assert.match(
+    renderer,
+    /if \(this\.state\.progress >= 1 - Number\.EPSILON\) \{\s*this\.dragDetached = true/,
+  );
 });
 
 test("always terminates pointer dragging when capture or window focus is lost", async () => {

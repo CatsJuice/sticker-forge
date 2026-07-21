@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- gallery thumbnails are private, pre-sized R2 assets */
-
 import {
   useRef,
   useState,
@@ -10,6 +8,7 @@ import {
 } from "react";
 import type { GalleryItem } from "@/lib/gallery-types";
 import type { GalleryEntryOrigin } from "./GalleryCanvas";
+import { GalleryPreviewImage } from "./GalleryPreviewImage";
 import { useSpringValue } from "./gallery-spring";
 
 type GalleryFolderProps = {
@@ -106,14 +105,14 @@ export function GalleryFolder({
               transform: `translate3d(0, ${-lift * openProgress}px, ${index}px) rotate(${restingRotation * (1 - openProgress)}deg) scale(${0.86 + openProgress * 0.14})`,
             } as CSSProperties;
             return (
-              <img
+              <GalleryPreviewImage
                 key={item.id}
+                itemId={item.id}
                 ref={(element) => {
                   if (element) previewRefs.current.set(item.id, element);
                   else previewRefs.current.delete(item.id);
                 }}
                 className="gallery-folder-preview"
-                src={item.previewUrl}
                 alt=""
                 draggable={false}
                 style={style}

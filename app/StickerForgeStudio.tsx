@@ -19,6 +19,11 @@ import type {
 } from "@/lib/sticker-forge";
 import { sanitizeSvgMarkup } from "@/lib/sticker-forge";
 import { createGalleryPreview } from "@/lib/gallery-preview";
+import {
+  createGalleryItem,
+  deleteGalleryItem,
+  listGalleryItems,
+} from "@/lib/gallery-storage";
 import type {
   CreateGalleryPayload,
   GalleryItem,
@@ -428,7 +433,7 @@ function galleryLayoutFor(
   };
 }
 
-const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-defaults-v1";
+const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-indexeddb-defaults-v1";
 const DEFAULT_GALLERY_SEED_LOCK_KEY = `${DEFAULT_GALLERY_SEED_KEY}-lock`;
 
 function galleryTitleFor(source: StickerSource): string {
@@ -460,16 +465,7 @@ async function createStoredGalleryItem(
       preview.suggestedHeight,
     ),
   };
-  const response = await fetch("/api/gallery", {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!response.ok) throw new Error("Gallery create request failed");
-  const result = (await response.json()) as { item?: GalleryItem };
-  if (!result.item) throw new Error("Gallery item missing from response");
-  return result.item;
+  return createGalleryItem(payload);
 }
 
 function RangeRow({
@@ -607,12 +603,7 @@ export function StickerForgeStudio() {
     let cancelled = false;
     const loadGallery = async () => {
       try {
-        const response = await fetch("/api/gallery", {
-          credentials: "same-origin",
-        });
-        if (!response.ok) throw new Error("Gallery request failed");
-        const payload = (await response.json()) as { items?: GalleryItem[] };
-        let nextItems = payload.items ?? [];
+        let nextItems = await listGalleryItems();
         const lockToken = String(Date.now());
         let shouldSeedDefaults = nextItems.length === 0;
         let ownsSeedLock = false;
@@ -661,16 +652,11 @@ export function StickerForgeStudio() {
             try {
               window.localStorage.setItem(DEFAULT_GALLERY_SEED_KEY, "done");
             } catch {
-              // D1/R2 remain the source of truth if local preference storage fails.
+              // IndexedDB remains the source of truth if preference storage fails.
             }
           } catch (error) {
             await Promise.allSettled(
-              created.map((item) =>
-                fetch(`/api/gallery/${encodeURIComponent(item.id)}`, {
-                  method: "DELETE",
-                  credentials: "same-origin",
-                }),
-              ),
+              created.map((item) => deleteGalleryItem(item.id)),
             );
             throw error;
           } finally {

@@ -1,13 +1,5 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "entries": [
-    {
-      "idx": 0,
-      "version": "6",
-      "when": 1784630136492,
-      "tag": "0000_rainy_proemial_gods",
-      "breakpoints": true
-    }
-  ]
+  "entries": []
 }

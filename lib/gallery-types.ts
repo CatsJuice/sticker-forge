@@ -15,8 +15,6 @@ export interface GalleryItem {
   createdAt: number;
   sourceType: StickerSource["type"];
   title: string;
-  previewUrl: string;
-  assetUrl: string;
   previewWidth: number;
   previewHeight: number;
   baseTilt: number;

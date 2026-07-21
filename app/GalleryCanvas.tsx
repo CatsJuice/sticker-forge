@@ -1,7 +1,5 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- authenticated R2 previews are already resized and must stay cookie-scoped */
-
 import {
   useCallback,
   useEffect,
@@ -17,7 +15,13 @@ import type {
   GalleryItem,
   GalleryLayout,
 } from "@/lib/gallery-types";
+import {
+  deleteGalleryItem,
+  getGalleryAsset,
+  updateGalleryLayout,
+} from "@/lib/gallery-storage";
 import type { StickerInstance, StickerOptions } from "@/lib/sticker-forge";
+import { GalleryPreviewImage } from "./GalleryPreviewImage";
 import { useSpringValue, useSpringVector } from "./gallery-spring";
 
 export type GalleryEntryOrigin = {
@@ -247,11 +251,7 @@ function useGalleryAssets(priorityIds: string[]) {
         }
         inFlightRef.current.add(id);
         try {
-          const response = await fetch(`/api/gallery/${encodeURIComponent(id)}/asset`, {
-            credentials: "same-origin",
-          });
-          if (!response.ok) throw new Error("Asset request failed");
-          const asset = (await response.json()) as GalleryAsset;
+          const asset = await getGalleryAsset(id);
           if (disposedRef.current) return;
           setAssets((current) => {
             const next = { ...current, [id]: asset };
@@ -590,9 +590,9 @@ function GalleryItemView({
       onPointerCancelCapture={(event) => finishGesture(event, true)}
     >
       <div className="gallery-preview-rotation">
-        <img
+        <GalleryPreviewImage
+          itemId={item.id}
           className="gallery-item-preview"
-          src={item.previewUrl}
           alt={item.title}
           draggable={false}
           data-hidden={entryHidden || (rendererReady && !resizePreviewMode)}
@@ -691,9 +691,9 @@ function GalleryEntryGhost({
   if (settled) return null;
   const [left, top, width, height, rotation, opacity] = values;
   return (
-    <img
+    <GalleryPreviewImage
+      itemId={item.id}
       className="gallery-entry-ghost"
-      src={item.previewUrl}
       alt=""
       style={{
         left,
@@ -894,20 +894,12 @@ export function GalleryCanvas({
   const persistLayout = useCallback(
     async (id: string, layout: GalleryLayout, version: number) => {
       try {
-        const response = await fetch(`/api/gallery/${encodeURIComponent(id)}`, {
-          method: "PATCH",
-          credentials: "same-origin",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ layout }),
-        });
-        if (!response.ok) throw new Error("Layout request failed");
-        const payload = (await response.json()) as { item?: GalleryItem };
-        if (
-          payload.item &&
-          layoutVersionRef.current.get(id) === version
-        ) {
+        const item = await updateGalleryLayout(id, layout);
+        if (layoutVersionRef.current.get(id) === version) {
           updateItems((current) =>
-            current.map((item) => (item.id === id ? payload.item! : item)),
+            current.map((currentItem) =>
+              currentItem.id === id ? item : currentItem,
+            ),
             true,
           );
         }
@@ -965,11 +957,7 @@ export function GalleryCanvas({
     if (!id || deleting) return;
     setDeleting(true);
     try {
-      const response = await fetch(`/api/gallery/${encodeURIComponent(id)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      });
-      if (!response.ok) throw new Error("Delete request failed");
+      await deleteGalleryItem(id);
       updateItems((current) => current.filter((item) => item.id !== id), true);
       setSelectedId((selected) => (selected === id ? null : selected));
       setDeleteCandidate(null);

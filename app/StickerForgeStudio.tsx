@@ -18,6 +18,17 @@ import type {
   StickerSource,
 } from "@/lib/sticker-forge";
 import { sanitizeSvgMarkup } from "@/lib/sticker-forge";
+import { createGalleryPreview } from "@/lib/gallery-preview";
+import type {
+  CreateGalleryPayload,
+  GalleryItem,
+  GalleryLayout,
+} from "@/lib/gallery-types";
+import {
+  GalleryCanvas,
+  type GalleryEntryOrigin,
+} from "./GalleryCanvas";
+import { GalleryFolder } from "./GalleryFolder";
 
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
@@ -137,6 +148,12 @@ const UI = {
     shadowBlur: "阴影柔度",
     backGloss: "背面光泽",
     copy: "复制嵌入代码",
+    export: "导出",
+    addToGallery: "添加到 Gallery",
+    addingToGallery: "正在保存…",
+    addedToGallery: "已添加到 Gallery",
+    galleryLoadFailed: "Gallery 暂时无法加载",
+    galleryAddFailed: "无法添加到 Gallery，请稍后重试",
     copied: "✓ 已复制代码",
     copiedAnnouncement: "嵌入代码已复制",
     resetSticker: "重置贴纸",
@@ -199,6 +216,12 @@ const UI = {
     shadowBlur: "Shadow softness",
     backGloss: "Back gloss",
     copy: "Copy embed code",
+    export: "Export",
+    addToGallery: "Add to Gallery",
+    addingToGallery: "Saving…",
+    addedToGallery: "Added to Gallery",
+    galleryLoadFailed: "Gallery is temporarily unavailable",
+    galleryAddFailed: "Could not add to Gallery. Try again in a moment.",
     copied: "✓ Code copied",
     copiedAnnouncement: "Embed code copied",
     resetSticker: "Reset sticker",
@@ -388,6 +411,23 @@ function stringifyForInlineScript(value: unknown, space?: number): string {
   );
 }
 
+function galleryLayoutFor(
+  index: number,
+  visualWidth: number,
+  visualHeight: number,
+): GalleryLayout {
+  const angle = index * Math.PI * (3 - Math.sqrt(5));
+  const radius = index === 0 ? 0 : 84 + Math.sqrt(index) * 92;
+  return {
+    x: Math.cos(angle) * radius,
+    y: Math.sin(angle) * radius,
+    width: Math.min(760, Math.max(190, visualWidth / 0.72)),
+    height: Math.min(560, Math.max(140, visualHeight / 0.54)),
+    rotation: ((index * 17) % 25) - 12,
+    zIndex: index + 1,
+  };
+}
+
 function RangeRow({
   id,
   label,
@@ -498,6 +538,13 @@ export function StickerForgeStudio() {
   const [sourceMessage, setSourceMessage] = useState("");
   const [copied, setCopied] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
+  const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryLoading, setGalleryLoading] = useState(true);
+  const [galleryAdding, setGalleryAdding] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
+    Record<string, GalleryEntryOrigin>
+  >({});
   const t = UI[locale];
 
   useEffect(() => {
@@ -511,6 +558,32 @@ export function StickerForgeStudio() {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
     window.localStorage.setItem("sticker-forge-locale", locale);
   }, [locale]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadGallery = async () => {
+      try {
+        const response = await fetch("/api/gallery", {
+          credentials: "same-origin",
+        });
+        if (!response.ok) throw new Error("Gallery request failed");
+        const payload = (await response.json()) as { items?: GalleryItem[] };
+        if (!cancelled) setGalleryItems(payload.items ?? []);
+      } catch {
+        if (!cancelled) {
+          setSourceMessage((message) =>
+            message || UI.zh.galleryLoadFailed,
+          );
+        }
+      } finally {
+        if (!cancelled) setGalleryLoading(false);
+      }
+    };
+    void loadGallery();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const host = stageRef.current;
@@ -972,6 +1045,53 @@ export function StickerForgeStudio() {
       window.setTimeout(() => setCopied(false), 1800);
     } catch {
       setSourceMessage(t.copyBlocked);
+    }
+  };
+
+  const addCurrentStickerToGallery = async () => {
+    if (galleryAdding || galleryLoading) return;
+    setGalleryAdding(true);
+    try {
+      const source = sourceRef.current;
+      const currentSettings = settingsRef.current;
+      const preview = await createGalleryPreview(source, currentSettings.outline);
+      const nextGalleryIndex = galleryItems.reduce(
+        (largest, item) => Math.max(largest, item.layout.zIndex),
+        0,
+      );
+      const payload: CreateGalleryPayload = {
+        source,
+        options: currentSettings,
+        previewDataUrl: preview.dataUrl,
+        previewWidth: preview.previewWidth,
+        previewHeight: preview.previewHeight,
+        title:
+          source.type === "text"
+            ? source.text.split(/\r?\n/, 1)[0]?.trim().slice(0, 120)
+            : source.type === "image"
+              ? source.name
+              : "SVG Sticker",
+        layout: galleryLayoutFor(
+          nextGalleryIndex,
+          preview.suggestedWidth,
+          preview.suggestedHeight,
+        ),
+      };
+      const response = await fetch("/api/gallery", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) throw new Error("Gallery create request failed");
+      const result = (await response.json()) as { item?: GalleryItem };
+      if (!result.item) throw new Error("Gallery item missing from response");
+      setGalleryItems((items) => [result.item!, ...items]);
+      setSourceMessage(t.addedToGallery);
+    } catch {
+      setSourceMessage(t.galleryAddFailed);
+    } finally {
+      setGalleryAdding(false);
     }
   };
 
@@ -1505,15 +1625,53 @@ export function StickerForgeStudio() {
 
           <div className="controls-footer">
             <button
-              className="primary-button"
+              className="primary-button export-button"
               type="button"
               data-copied={copied}
               onClick={copyEmbedCode}
+              aria-label={`${t.export} — ${t.copy}`}
+              title={t.copy}
             >
-              {copied ? t.copied : t.copy}
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 15v5h14v-5" />
+              </svg>
+              <span>{copied ? t.copied : t.export}</span>
+            </button>
+            <button
+              className="primary-button gallery-add-button"
+              type="button"
+              disabled={galleryAdding || galleryLoading}
+              onClick={() => void addCurrentStickerToGallery()}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 7.5h5l2-2h9v13H4zM12 10v5m-2.5-2.5h5" />
+              </svg>
+              <span>{galleryAdding ? t.addingToGallery : t.addToGallery}</span>
             </button>
           </div>
         </aside>
+      {!galleryOpen ? (
+        <GalleryFolder
+          items={galleryItems}
+          locale={locale}
+          loading={galleryLoading}
+          onOpen={(origins) => {
+            setGalleryEntryOrigins(origins);
+            setGalleryOpen(true);
+          }}
+        />
+      ) : (
+        <GalleryCanvas
+          items={galleryItems}
+          locale={locale}
+          entryOrigins={galleryEntryOrigins}
+          onItemsChange={setGalleryItems}
+          onClose={() => {
+            setGalleryOpen(false);
+            setGalleryEntryOrigins({});
+          }}
+        />
+      )}
       <span className="sr-only" aria-live="polite">
         {copied ? t.copiedAnnouncement : sourceMessage || t.localOnly}
       </span>

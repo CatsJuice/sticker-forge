@@ -1032,7 +1032,11 @@ export function GalleryCanvas({
       aria-label={t.title}
       tabIndex={-1}
       style={{
-        opacity: presence,
+        // Fading the entire transparent WebGL layer on entry washes every
+        // sticker into the nearly identical editor background. Entry motion is
+        // carried by the spring scale and sticker flights; opacity is reserved
+        // for the requested close fade.
+        opacity: closing ? presence : 1,
         transform: `scale(${0.986 + presence * 0.014})`,
         pointerEvents: "auto",
       }}

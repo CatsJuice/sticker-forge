@@ -10,6 +10,7 @@ test("renders the gallery through one shared WebGL canvas", async () => {
 
   assert.match(gallery, /className="gallery-shared-canvas"/);
   assert.doesNotMatch(gallery, /createSticker|InteractiveSticker|gallery-live-sticker/);
+  assert.match(gallery, /opacity: closing \? presence : 1/);
   assert.match(renderer, /One WebGL renderer\/context for the whole infinite gallery canvas/);
   assert.equal((renderer.match(/new THREE\.WebGLRenderer\(/g) ?? []).length, 1);
   assert.match(renderer, /records = new Map<string, RenderRecord>/);

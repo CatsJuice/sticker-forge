@@ -20,7 +20,7 @@ import {
   getGalleryAsset,
   updateGalleryLayout,
 } from "@/lib/gallery-storage";
-import type { StickerInstance, StickerOptions } from "@/lib/sticker-forge";
+import { GalleryRenderer } from "@/lib/gallery-renderer";
 import { GalleryPreviewImage } from "./GalleryPreviewImage";
 import { useSpringValue, useSpringVector } from "./gallery-spring";
 
@@ -81,7 +81,7 @@ const MAX_VISIBLE_PREVIEWS = 320;
 const INTERACTIVE_ZOOM_THRESHOLD = 0.24;
 const INTERACTIVE_SCREEN_SIZE = 86;
 const MAX_ASSET_CACHE = 28;
-const MAX_ASSET_PREFETCH = 12;
+const MAX_ASSET_PREFETCH = 24;
 const COPY = {
   zh: {
     title: "贴纸画廊",
@@ -151,44 +151,6 @@ function isItemVisible(
     item.layout.y + itemHalfHeight >= view.y - halfHeight - margin &&
     item.layout.y - itemHalfHeight <= view.y + halfHeight + margin
   );
-}
-
-type RendererJob = {
-  cancelled: boolean;
-  run: () => Promise<void>;
-};
-
-const rendererJobs: RendererJob[] = [];
-let rendererQueueBusy = false;
-
-async function drainRendererQueue() {
-  if (rendererQueueBusy) return;
-  rendererQueueBusy = true;
-  try {
-    while (rendererJobs.length) {
-      const job = rendererJobs.shift();
-      if (!job || job.cancelled) continue;
-      await job.run();
-      await new Promise<void>((resolve) => {
-        if (typeof window.requestIdleCallback === "function") {
-          window.requestIdleCallback(() => resolve(), { timeout: 80 });
-        } else {
-          window.setTimeout(resolve, 0);
-        }
-      });
-    }
-  } finally {
-    rendererQueueBusy = false;
-  }
-}
-
-function scheduleRenderer(run: () => Promise<void>) {
-  const job: RendererJob = { cancelled: false, run };
-  rendererJobs.push(job);
-  void drainRendererQueue();
-  return () => {
-    job.cancelled = true;
-  };
 }
 
 function useElementSize<T extends HTMLElement>() {
@@ -328,91 +290,31 @@ function useGalleryAssets(priorityIds: string[]) {
   return { assets, enqueue };
 }
 
-function InteractiveSticker({
-  asset,
-  placementRotation,
-  onReadyChange,
-}: {
-  asset: GalleryAsset;
-  placementRotation: number;
-  onReadyChange: (ready: boolean) => void;
-}) {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const controllerRef = useRef<StickerInstance | null>(null);
-  const rotationRef = useRef(placementRotation);
-
-  useEffect(() => {
-    rotationRef.current = placementRotation;
-  }, [placementRotation]);
-
-  useEffect(() => {
-    let disposed = false;
-    const cancel = scheduleRenderer(async () => {
-      const host = hostRef.current;
-      if (!host || disposed) return;
-      try {
-        const { createSticker } = await import("@/lib/sticker-forge");
-        const options: StickerOptions = {
-          ...asset.options,
-          source: asset.source,
-          quality: "low",
-          tilt: (asset.options.tilt ?? 0) + rotationRef.current,
-        };
-        const controller = await createSticker(host, options);
-        if (disposed) {
-          controller.destroy();
-          return;
-        }
-        controllerRef.current = controller;
-        onReadyChange(true);
-      } catch {
-        if (!disposed) onReadyChange(false);
-      }
-    });
-
-    return () => {
-      disposed = true;
-      cancel();
-      onReadyChange(false);
-      controllerRef.current?.destroy();
-      controllerRef.current = null;
-    };
-  }, [asset, onReadyChange]);
-
-  useEffect(() => {
-    controllerRef.current?.setOptions({
-      tilt: (asset.options.tilt ?? 0) + placementRotation,
-    });
-  }, [asset.options.tilt, placementRotation]);
-
-  return <div ref={hostRef} className="gallery-live-sticker" />;
-}
-
 function GalleryItemView({
   item,
-  asset,
-  interactive,
+  rendererReady,
+  loading,
   selected,
   zoom,
   onSelect,
   onGestureStart,
+  onLayoutPreview,
   onLayoutChange,
   onRequestDelete,
   entryHidden,
 }: {
   item: GalleryItem;
-  asset?: GalleryAsset;
-  interactive: boolean;
+  rendererReady: boolean;
+  loading: boolean;
   selected: boolean;
   zoom: number;
   onSelect: (id: string) => void;
   onGestureStart: (id: string) => void;
+  onLayoutPreview: (id: string, layout: GalleryLayout) => void;
   onLayoutChange: (id: string, layout: GalleryLayout, commit: boolean) => void;
   onRequestDelete: (id: string) => void;
   entryHidden: boolean;
 }) {
-  const [rendererReady, setRendererReady] = useState(false);
-  const [resizePreviewMode, setResizePreviewMode] = useState(false);
   const [displayLayout, setDisplayLayout] = useState(item.layout);
   const gestureRef = useRef<ItemGesture | null>(null);
   const latestLayoutRef = useRef(item.layout);
@@ -435,13 +337,13 @@ function GalleryItemView({
     const gesture = gestureRef.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     gestureRef.current = null;
-    if (gesture.kind === "resize") setResizePreviewMode(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     if (cancelled) {
       latestLayoutRef.current = gesture.startLayout;
       setDisplayLayout(gesture.startLayout);
+      onLayoutPreview(item.id, gesture.startLayout);
       return;
     }
     onLayoutChange(item.id, latestLayoutRef.current, true);
@@ -463,6 +365,7 @@ function GalleryItemView({
       };
       latestLayoutRef.current = next;
       setDisplayLayout(next);
+      onLayoutPreview(item.id, next);
       return;
     }
 
@@ -482,6 +385,7 @@ function GalleryItemView({
       };
       latestLayoutRef.current = next;
       setDisplayLayout(next);
+      onLayoutPreview(item.id, next);
       return;
     }
 
@@ -498,6 +402,7 @@ function GalleryItemView({
     };
     latestLayoutRef.current = next;
     setDisplayLayout(next);
+    onLayoutPreview(item.id, next);
   };
 
   const startMove = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -532,7 +437,6 @@ function GalleryItemView({
     const host = event.currentTarget.closest<HTMLElement>(".gallery-item");
     const rect = host?.getBoundingClientRect();
     if (!rect) return;
-    setResizePreviewMode(true);
     onGestureStart(item.id);
     const centerX = rect.left + rect.width / 2;
     const centerY = rect.top + rect.height / 2;
@@ -589,26 +493,10 @@ function GalleryItemView({
       onPointerUpCapture={(event) => finishGesture(event)}
       onPointerCancelCapture={(event) => finishGesture(event, true)}
     >
-      <div className="gallery-preview-rotation">
-        <GalleryPreviewImage
-          itemId={item.id}
-          className="gallery-item-preview"
-          alt={item.title}
-          draggable={false}
-          data-hidden={entryHidden || (rendererReady && !resizePreviewMode)}
-        />
-      </div>
-      {interactive && asset && !resizePreviewMode ? (
-        <InteractiveSticker
-          asset={asset}
-          placementRotation={displayLayout.rotation}
-          onReadyChange={setRendererReady}
-        />
-      ) : null}
-      {interactive && asset && !rendererReady && !resizePreviewMode ? (
+      {!entryHidden && loading && !rendererReady ? (
         <span className="gallery-loading-ring" aria-hidden="true" />
       ) : null}
-      {selected && (rendererReady || resizePreviewMode) ? (
+      {selected && rendererReady ? (
         <div className="gallery-selection-frame" aria-label={item.title}>
           <span className="gallery-rotation-stem" aria-hidden="true" />
           <button
@@ -752,6 +640,7 @@ export function GalleryCanvas({
   const [items, setItems] = useState(initialItems);
   const itemsRef = useRef(items);
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, zoom: 1 });
+  const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -768,6 +657,8 @@ export function GalleryCanvas({
   );
   const closedRef = useRef(false);
   const overlayRef = useRef<HTMLElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const rendererRef = useRef<GalleryRenderer | null>(null);
   const confirmCancelRef = useRef<HTMLButtonElement>(null);
   const layoutVersionRef = useRef(new Map<string, number>());
   const layoutSaveChainsRef = useRef(new Map<string, Promise<void>>());
@@ -777,6 +668,7 @@ export function GalleryCanvas({
     startClientY: number;
     startView: ViewState;
   } | null>(null);
+  const peelPointerRef = useRef<number | null>(null);
   const { value: presence, settled: presenceSettled } = useSpringValue(
     closing ? 0 : 1,
     {
@@ -850,7 +742,7 @@ export function GalleryCanvas({
     ) {
       return new Set<string>();
     }
-    const maxRenderers = viewport.width < 720 ? 3 : 5;
+    const maxRenderers = viewport.width < 720 ? 10 : 18;
     const candidates = visibleItems
       .filter(
         (item) =>
@@ -877,6 +769,36 @@ export function GalleryCanvas({
     viewport.width,
     visibleItems,
   ]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const renderer = new GalleryRenderer(canvas, setLiveIds);
+    rendererRef.current = renderer;
+    return () => {
+      rendererRef.current = null;
+      renderer.destroy();
+    };
+  }, []);
+
+  useEffect(() => {
+    rendererRef.current?.resize(viewport.width, viewport.height);
+  }, [viewport.height, viewport.width]);
+
+  useEffect(() => {
+    rendererRef.current?.setView(view);
+  }, [view]);
+
+  useEffect(() => {
+    rendererRef.current?.sync(
+      visibleItems.map((item) => ({
+        item,
+        asset: assets[item.id],
+        interactive: interactiveIds.has(item.id),
+        hidden: entryPendingIds.has(item.id),
+      })),
+    );
+  }, [assets, entryPendingIds, interactiveIds, visibleItems]);
 
   const updateItems = useCallback(
     (
@@ -943,6 +865,10 @@ export function GalleryCanvas({
     [queueLayoutSave, updateItems],
   );
 
+  const handleLayoutPreview = useCallback((id: string, layout: GalleryLayout) => {
+    rendererRef.current?.updateLayout(id, layout);
+  }, []);
+
   const handleEntrySettled = useCallback((id: string) => {
     setEntryPendingIds((current) => {
       if (!current.has(id)) return current;
@@ -971,7 +897,21 @@ export function GalleryCanvas({
   const startPan = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    if (target.closest(".gallery-item") || target.closest("[data-gallery-ui]")) {
+    if (target.closest("[data-gallery-ui]")) {
+      return;
+    }
+    if (target.closest(".gallery-item")) {
+      const peeledId = rendererRef.current?.startPeel(
+        event.clientX,
+        event.clientY,
+        event.pointerId,
+        event.timeStamp,
+      );
+      if (!peeledId) return;
+      event.preventDefault();
+      setSelectedId(peeledId);
+      peelPointerRef.current = event.pointerId;
+      event.currentTarget.setPointerCapture(event.pointerId);
       return;
     }
     event.preventDefault();
@@ -986,6 +926,16 @@ export function GalleryCanvas({
   };
 
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (peelPointerRef.current === event.pointerId) {
+      event.preventDefault();
+      rendererRef.current?.movePeel(
+        event.clientX,
+        event.clientY,
+        event.pointerId,
+        event.timeStamp,
+      );
+      return;
+    }
     const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) return;
     event.preventDefault();
@@ -1001,6 +951,14 @@ export function GalleryCanvas({
   };
 
   const finishPan = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (peelPointerRef.current === event.pointerId) {
+      rendererRef.current?.endPeel(event.pointerId, event.timeStamp);
+      peelPointerRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
     if (panRef.current?.pointerId !== event.pointerId) return;
     panRef.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -1096,17 +1054,19 @@ export function GalleryCanvas({
         onWheel={handleWheel}
       >
         <div className="gallery-grid" aria-hidden="true" />
+        <canvas ref={canvasRef} className="gallery-shared-canvas" aria-hidden="true" />
         <div className="gallery-world" style={worldStyle}>
           {visibleItems.map((item) => (
             <GalleryItemView
               key={item.id}
               item={item}
-              asset={assets[item.id]}
-              interactive={interactiveIds.has(item.id)}
+              rendererReady={liveIds.has(item.id)}
+              loading={interactiveIds.has(item.id)}
               selected={selectedId === item.id}
               zoom={view.zoom}
               onSelect={setSelectedId}
               onGestureStart={handleGestureStart}
+              onLayoutPreview={handleLayoutPreview}
               onLayoutChange={handleLayoutChange}
               onRequestDelete={setDeleteCandidate}
               entryHidden={entryPendingIds.has(item.id)}

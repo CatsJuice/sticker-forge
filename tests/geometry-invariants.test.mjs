@@ -2,6 +2,20 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
+test("renders the gallery through one shared WebGL canvas", async () => {
+  const [gallery, renderer] = await Promise.all([
+    readFile(new URL("../app/GalleryCanvas.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/gallery-renderer.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(gallery, /className="gallery-shared-canvas"/);
+  assert.doesNotMatch(gallery, /createSticker|InteractiveSticker|gallery-live-sticker/);
+  assert.match(renderer, /One WebGL renderer\/context for the whole infinite gallery canvas/);
+  assert.equal((renderer.match(/new THREE\.WebGLRenderer\(/g) ?? []).length, 1);
+  assert.match(renderer, /records = new Map<string, RenderRecord>/);
+  assert.match(renderer, /new THREE\.CanvasTexture\(artwork\.canvas\)/);
+});
+
 test("keeps text outlines faithful to the artwork alpha", async () => {
   const [source, renderer] = await Promise.all([
     readFile(new URL("../lib/source.ts", import.meta.url), "utf8"),

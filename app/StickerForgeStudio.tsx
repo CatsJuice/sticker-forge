@@ -428,6 +428,50 @@ function galleryLayoutFor(
   };
 }
 
+const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-defaults-v1";
+const DEFAULT_GALLERY_SEED_LOCK_KEY = `${DEFAULT_GALLERY_SEED_KEY}-lock`;
+
+function galleryTitleFor(source: StickerSource): string {
+  if (source.type === "text") {
+    return source.text.split(/\r?\n/, 1)[0]?.trim().slice(0, 120) || "Sticker";
+  }
+  if (source.type === "image") {
+    return source.name?.trim().slice(0, 120) || "Image Sticker";
+  }
+  return "SVG Sticker";
+}
+
+async function createStoredGalleryItem(
+  source: StickerSource,
+  options: StudioSettings,
+  layoutIndex: number,
+): Promise<GalleryItem> {
+  const preview = await createGalleryPreview(source, options.outline);
+  const payload: CreateGalleryPayload = {
+    source,
+    options,
+    previewDataUrl: preview.dataUrl,
+    previewWidth: preview.previewWidth,
+    previewHeight: preview.previewHeight,
+    title: galleryTitleFor(source),
+    layout: galleryLayoutFor(
+      layoutIndex,
+      preview.suggestedWidth,
+      preview.suggestedHeight,
+    ),
+  };
+  const response = await fetch("/api/gallery", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Gallery create request failed");
+  const result = (await response.json()) as { item?: GalleryItem };
+  if (!result.item) throw new Error("Gallery item missing from response");
+  return result.item;
+}
+
 function RangeRow({
   id,
   label,
@@ -568,7 +612,84 @@ export function StickerForgeStudio() {
         });
         if (!response.ok) throw new Error("Gallery request failed");
         const payload = (await response.json()) as { items?: GalleryItem[] };
-        if (!cancelled) setGalleryItems(payload.items ?? []);
+        let nextItems = payload.items ?? [];
+        const lockToken = String(Date.now());
+        let shouldSeedDefaults = nextItems.length === 0;
+        let ownsSeedLock = false;
+        try {
+          const alreadySeeded =
+            window.localStorage.getItem(DEFAULT_GALLERY_SEED_KEY) === "done";
+          const lockStartedAt = Number(
+            window.localStorage.getItem(DEFAULT_GALLERY_SEED_LOCK_KEY),
+          );
+          const lockIsFresh =
+            Number.isFinite(lockStartedAt) && Date.now() - lockStartedAt < 120_000;
+          shouldSeedDefaults = !alreadySeeded && !lockIsFresh;
+          if (shouldSeedDefaults) {
+            window.localStorage.setItem(DEFAULT_GALLERY_SEED_LOCK_KEY, lockToken);
+            ownsSeedLock = true;
+          }
+        } catch {
+          // If browser storage is unavailable, seed only a genuinely empty gallery.
+        }
+
+        if (shouldSeedDefaults) {
+          const created: GalleryItem[] = [];
+          const firstLayoutIndex = nextItems.reduce(
+            (largest, item) => Math.max(largest, item.layout.zIndex),
+            0,
+          );
+          const defaultSources: StickerSource[] = [
+            initialSource,
+            {
+              type: "image",
+              src: DEFAULT_IMAGE_SRC,
+              name: "Default Image",
+            },
+          ];
+          try {
+            for (const [offset, source] of defaultSources.entries()) {
+              created.push(
+                await createStoredGalleryItem(
+                  source,
+                  DEFAULT_SETTINGS,
+                  firstLayoutIndex + offset,
+                ),
+              );
+            }
+            nextItems = [...created].reverse().concat(nextItems);
+            try {
+              window.localStorage.setItem(DEFAULT_GALLERY_SEED_KEY, "done");
+            } catch {
+              // D1/R2 remain the source of truth if local preference storage fails.
+            }
+          } catch (error) {
+            await Promise.allSettled(
+              created.map((item) =>
+                fetch(`/api/gallery/${encodeURIComponent(item.id)}`, {
+                  method: "DELETE",
+                  credentials: "same-origin",
+                }),
+              ),
+            );
+            throw error;
+          } finally {
+            if (ownsSeedLock) {
+              try {
+                if (
+                  window.localStorage.getItem(DEFAULT_GALLERY_SEED_LOCK_KEY) ===
+                  lockToken
+                ) {
+                  window.localStorage.removeItem(DEFAULT_GALLERY_SEED_LOCK_KEY);
+                }
+              } catch {
+                // The lock expires naturally if browser storage becomes unavailable.
+              }
+            }
+          }
+        }
+
+        if (!cancelled) setGalleryItems(nextItems);
       } catch {
         if (!cancelled) {
           setSourceMessage((message) =>
@@ -583,7 +704,7 @@ export function StickerForgeStudio() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [initialSource]);
 
   useEffect(() => {
     const host = stageRef.current;
@@ -1054,39 +1175,16 @@ export function StickerForgeStudio() {
     try {
       const source = sourceRef.current;
       const currentSettings = settingsRef.current;
-      const preview = await createGalleryPreview(source, currentSettings.outline);
       const nextGalleryIndex = galleryItems.reduce(
         (largest, item) => Math.max(largest, item.layout.zIndex),
         0,
       );
-      const payload: CreateGalleryPayload = {
+      const item = await createStoredGalleryItem(
         source,
-        options: currentSettings,
-        previewDataUrl: preview.dataUrl,
-        previewWidth: preview.previewWidth,
-        previewHeight: preview.previewHeight,
-        title:
-          source.type === "text"
-            ? source.text.split(/\r?\n/, 1)[0]?.trim().slice(0, 120)
-            : source.type === "image"
-              ? source.name
-              : "SVG Sticker",
-        layout: galleryLayoutFor(
-          nextGalleryIndex,
-          preview.suggestedWidth,
-          preview.suggestedHeight,
-        ),
-      };
-      const response = await fetch("/api/gallery", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) throw new Error("Gallery create request failed");
-      const result = (await response.json()) as { item?: GalleryItem };
-      if (!result.item) throw new Error("Gallery item missing from response");
-      setGalleryItems((items) => [result.item!, ...items]);
+        currentSettings,
+        nextGalleryIndex,
+      );
+      setGalleryItems((items) => [item, ...items]);
       setSourceMessage(t.addedToGallery);
     } catch {
       setSourceMessage(t.galleryAddFailed);

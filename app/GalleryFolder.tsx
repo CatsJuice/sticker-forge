@@ -22,13 +22,9 @@ type GalleryFolderProps = {
 const COPY = {
   zh: {
     open: "打开贴纸画廊",
-    empty: "画廊还是空的",
-    count: (count: number) => `${count} 张已保存`,
   },
   en: {
     open: "Open sticker gallery",
-    empty: "Gallery is empty",
-    count: (count: number) => `${count} saved`,
   },
 } as const;
 
@@ -85,11 +81,6 @@ export function GalleryFolder({
       onBlur={handleBlur}
       onClick={handleOpen}
     >
-      <span className="gallery-folder-label">
-        <strong>Gallery</strong>
-        <small>{loading ? "…" : items.length ? t.count(items.length) : t.empty}</small>
-      </span>
-
       <span className="gallery-folder-art" aria-hidden="true">
         <svg className="gallery-folder-back" viewBox="0 0 270 198">
           <rect x="14.5" y="1.72" width="241" height="186" rx="22" fill="#59B0D8" />
@@ -108,7 +99,7 @@ export function GalleryFolder({
         <span className="gallery-folder-previews">
           {previews.map((item, index) => {
             const restingRotation = (index % 3 - 1) * 4;
-            const lift = 34 + index * 18;
+            const lift = 17 + index * 9;
             const style = {
               zIndex: 20 - index,
               opacity: 0.76 + openProgress * 0.24,

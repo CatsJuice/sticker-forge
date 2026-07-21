@@ -319,6 +319,53 @@ export const stickerFragmentShader = /* glsl */ `
   }
 `;
 
+export const residueVertexShader = /* glsl */ `
+  uniform float uPeelDepth;
+  uniform vec2 uOrigin;
+  uniform vec2 uPeelDir;
+  uniform vec2 uMeshSize;
+
+  varying vec2 vResidueUv;
+  varying float vResidueReveal;
+
+  void main() {
+    vResidueUv = uv;
+    vec2 direction = normalize(uPeelDir + vec2(0.00001));
+    float along = dot(position.xy - uOrigin, direction);
+    float revealFeather = max(min(uMeshSize.x, uMeshSize.y) * 0.012, 0.004);
+    float peeledArea = 1.0 - smoothstep(
+      uPeelDepth - revealFeather,
+      uPeelDepth + revealFeather,
+      along
+    );
+    vResidueReveal = peeledArea * step(0.00001, uPeelDepth);
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+export const residueFragmentShader = /* glsl */ `
+  uniform sampler2D uMap;
+
+  varying vec2 vResidueUv;
+  varying float vResidueReveal;
+
+  float residueNoise(vec2 point) {
+    point = fract(point * vec2(127.1, 311.7));
+    point += dot(point, point + 19.19);
+    return fract(point.x * point.y);
+  }
+
+  void main() {
+    float artworkAlpha = texture2D(uMap, vResidueUv).a;
+    if (artworkAlpha < 0.018 || vResidueReveal < 0.001) discard;
+
+    float grain = mix(0.82, 1.0, residueNoise(vResidueUv * 760.0));
+    float residueAlpha = artworkAlpha * vResidueReveal * grain * 0.085;
+    gl_FragColor = vec4(vec3(0.34), residueAlpha);
+    #include <colorspace_fragment>
+  }
+`;
+
 export const peelShadowDepthVertexShader = /* glsl */ `
   ${deformation}
 

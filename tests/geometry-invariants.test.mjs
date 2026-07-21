@@ -342,6 +342,22 @@ test("projects shadows in the sticker material without a receiver seam", async (
   assert.match(renderer, /shadow\.normalBias = 0\.0015/);
 });
 
+test("leaves a faint static residue beneath the peeled sticker", async () => {
+  const [shader, renderer] = await Promise.all([
+    readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(shader, /export const residueVertexShader/);
+  assert.match(shader, /vResidueReveal = peeledArea \* step\(0\.00001, uPeelDepth\)/);
+  assert.match(shader, /artworkAlpha \* vResidueReveal \* grain \* 0\.085/);
+  assert.match(shader, /gl_FragColor = vec4\(vec3\(0\.34\), residueAlpha\)/);
+  assert.match(renderer, /this\.residueMesh\.position\.z = -0\.006/);
+  assert.match(renderer, /this\.scene\.add\(this\.residueMesh\)/);
+  assert.match(renderer, /this\.residueMesh\.geometry = nextGeometry/);
+  assert.match(renderer, /this\.residueMesh\.rotation\.z = angle/);
+});
+
 test("drives processed peel foley from motion instead of absolute progress", async () => {
   const [audioController, renderer, asset] = await Promise.all([
     readFile(new URL("../lib/peel-audio.ts", import.meta.url), "utf8"),

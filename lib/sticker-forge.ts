@@ -2,6 +2,8 @@ import * as THREE from "three";
 import {
   peelShadowDepthFragmentShader,
   peelShadowDepthVertexShader,
+  residueFragmentShader,
+  residueVertexShader,
   stickerFragmentShader,
   stickerVertexShader,
 } from "./shaders";
@@ -146,11 +148,13 @@ class StickerRenderer implements StickerInstance {
   private readonly scene = new THREE.Scene();
   private readonly uniforms: Record<string, THREE.IUniform>;
   private readonly stickerMaterial: THREE.ShaderMaterial;
+  private readonly residueMaterial: THREE.ShaderMaterial;
   private readonly peelAudio = new PeelAudioEngine();
   private readonly peelShadowDepthMaterial: THREE.ShaderMaterial;
   private readonly groundShadowGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly groundShadowMaterial: THREE.ShadowMaterial;
   private readonly stickerMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private readonly residueMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly groundShadowMesh: THREE.Mesh<
     THREE.PlaneGeometry,
     THREE.ShadowMaterial
@@ -288,6 +292,19 @@ class StickerRenderer implements StickerInstance {
     this.stickerMesh.renderOrder = 20;
     this.stickerMesh.receiveShadow = true;
 
+    this.residueMaterial = new THREE.ShaderMaterial({
+      uniforms: { ...this.uniforms },
+      vertexShader: residueVertexShader,
+      fragmentShader: residueFragmentShader,
+      transparent: true,
+      depthTest: true,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.residueMesh = new THREE.Mesh(this.geometry, this.residueMaterial);
+    this.residueMesh.position.z = -0.006;
+    this.residueMesh.renderOrder = 10;
+
     this.peelShadowDepthMaterial = new THREE.ShaderMaterial({
       uniforms: { ...this.uniforms },
       vertexShader: peelShadowDepthVertexShader,
@@ -325,6 +342,7 @@ class StickerRenderer implements StickerInstance {
     this.groundShadowMesh.receiveShadow = true;
     this.groundShadowMesh.renderOrder = 5;
     this.scene.add(this.groundShadowMesh);
+    this.scene.add(this.residueMesh);
     this.scene.add(this.stickerMesh);
 
     const canvas = this.renderer.domElement;
@@ -519,6 +537,7 @@ class StickerRenderer implements StickerInstance {
     this.geometry.dispose();
     this.groundShadowGeometry.dispose();
     this.stickerMaterial.dispose();
+    this.residueMaterial.dispose();
     this.peelShadowDepthMaterial.dispose();
     this.groundShadowMaterial.dispose();
     this.peelAudio.destroy();
@@ -599,6 +618,7 @@ class StickerRenderer implements StickerInstance {
     const previousGeometry = this.geometry;
     this.geometry = nextGeometry;
     this.stickerMesh.geometry = nextGeometry;
+    this.residueMesh.geometry = nextGeometry;
     previousGeometry.dispose();
     (this.uniforms.uMeshSize.value as THREE.Vector2).set(
       this.meshWidth,
@@ -616,6 +636,7 @@ class StickerRenderer implements StickerInstance {
   private applyOptionsToRenderer() {
     const angle = THREE.MathUtils.degToRad(this.options.tilt);
     this.stickerMesh.rotation.z = angle;
+    this.residueMesh.rotation.z = angle;
 
     this.uniforms.uBackColor.value = colorFrom(
       this.options.back.color,

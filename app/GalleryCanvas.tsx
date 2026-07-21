@@ -88,11 +88,6 @@ const COPY = {
     deleteBody: "这个操作无法撤销；编辑器中的当前贴纸不会受影响。",
     cancel: "取消",
     confirmDelete: "确认删除",
-    loading: "正在按顺序唤醒贴纸",
-    previewMode: "预览模式",
-    interactive: "可交互",
-    hint: "拖动画布 · 滚轮缩放 · 拖贴纸中心移动 · 边缘可撕开",
-    loadFailed: "有些贴纸暂时无法加载",
     saveFailed: "位置保存失败，请稍后重试",
     deleteFailed: "删除失败，请稍后重试",
     zoomIn: "放大",
@@ -109,11 +104,6 @@ const COPY = {
       "This cannot be undone. The current sticker in the editor will stay untouched.",
     cancel: "Cancel",
     confirmDelete: "Delete",
-    loading: "Waking stickers one by one",
-    previewMode: "Preview mode",
-    interactive: "Interactive",
-    hint: "Drag canvas · wheel to zoom · drag sticker centre to move · peel any edge",
-    loadFailed: "Some stickers could not be loaded",
     saveFailed: "Could not save the placement. Try again in a moment.",
     deleteFailed: "Could not delete the sticker. Try again in a moment.",
     zoomIn: "Zoom in",
@@ -335,7 +325,7 @@ function useGalleryAssets(priorityIds: string[]) {
     };
   }, []);
 
-  return { assets, failedIds, enqueue };
+  return { assets, enqueue };
 }
 
 function InteractiveSticker({
@@ -845,7 +835,7 @@ export function GalleryCanvas({
     () => visibleItems.map((item) => item.id),
     [visibleItems],
   );
-  const { assets, failedIds, enqueue } = useGalleryAssets(previewPriorityIds);
+  const { assets, enqueue } = useGalleryAssets(previewPriorityIds);
 
   useEffect(
     () => enqueue(visibleIds.slice(0, MAX_ASSET_PREFETCH)),
@@ -1086,10 +1076,6 @@ export function GalleryCanvas({
   const worldStyle = {
     transform: `translate3d(${viewport.width / 2 - view.x * view.zoom}px, ${viewport.height / 2 - view.y * view.zoom}px, 0) scale(${view.zoom})`,
   } as CSSProperties;
-  const priorityLoaded = previewPriorityIds.every(
-    (id) => assets[id] || failedIds.has(id),
-  );
-
   return (
     <section
       ref={overlayRef}
@@ -1154,19 +1140,6 @@ export function GalleryCanvas({
           <span>{t.count(items.length)}</span>
         </header>
 
-        <div className="gallery-load-status" data-gallery-ui data-loaded={priorityLoaded}>
-          <span className="gallery-load-dot" aria-hidden="true" />
-          <span>
-            {failedIds.size
-              ? t.loadFailed
-              : priorityLoaded
-                ? view.zoom < INTERACTIVE_ZOOM_THRESHOLD
-                  ? t.previewMode
-                  : t.interactive
-                : t.loading}
-          </span>
-        </div>
-
         <div className="gallery-view-controls" data-gallery-ui>
           <button type="button" onClick={() => zoomBy(1 / 1.28)} aria-label={t.zoomOut}>
             −
@@ -1184,9 +1157,11 @@ export function GalleryCanvas({
           </button>
         </div>
 
-        <p className="gallery-hint" data-gallery-ui>
-          {statusMessage || t.hint}
-        </p>
+        {statusMessage ? (
+          <span className="sr-only" aria-live="polite">
+            {statusMessage}
+          </span>
+        ) : null}
 
         <button
           className="gallery-exit-button"

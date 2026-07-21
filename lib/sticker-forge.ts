@@ -550,11 +550,11 @@ class StickerRenderer implements StickerInstance {
     this.artwork = artwork;
     const nextTexture = new THREE.CanvasTexture(artwork.canvas);
     nextTexture.colorSpace = THREE.SRGBColorSpace;
-    nextTexture.minFilter = THREE.LinearFilter;
+    nextTexture.minFilter = THREE.LinearMipmapLinearFilter;
     nextTexture.magFilter = THREE.LinearFilter;
     nextTexture.generateMipmaps = true;
     nextTexture.anisotropy = Math.min(
-      4,
+      8,
       this.renderer.capabilities.getMaxAnisotropy(),
     );
     nextTexture.needsUpdate = true;

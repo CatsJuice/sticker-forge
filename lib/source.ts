@@ -404,6 +404,124 @@ function tintAlpha(source: HTMLCanvasElement, color: string) {
   return canvas;
 }
 
+const DISTANCE_INFINITY = 1_000_000_000_000;
+
+function distanceTransform1D(
+  source: Float32Array,
+  sourceOffset: number,
+  sourceStride: number,
+  target: Float32Array,
+  targetOffset: number,
+  targetStride: number,
+  length: number,
+  parabolas: Int32Array,
+  boundaries: Float64Array,
+) {
+  let envelopeIndex = 0;
+  parabolas[0] = 0;
+  boundaries[0] = Number.NEGATIVE_INFINITY;
+  boundaries[1] = Number.POSITIVE_INFINITY;
+
+  for (let position = 1; position < length; position += 1) {
+    let previous = parabolas[envelopeIndex];
+    let intersection =
+      (source[sourceOffset + position * sourceStride] + position * position -
+        (source[sourceOffset + previous * sourceStride] + previous * previous)) /
+      (2 * position - 2 * previous);
+    while (intersection <= boundaries[envelopeIndex]) {
+      envelopeIndex -= 1;
+      previous = parabolas[envelopeIndex];
+      intersection =
+        (source[sourceOffset + position * sourceStride] + position * position -
+          (source[sourceOffset + previous * sourceStride] + previous * previous)) /
+        (2 * position - 2 * previous);
+    }
+    envelopeIndex += 1;
+    parabolas[envelopeIndex] = position;
+    boundaries[envelopeIndex] = intersection;
+    boundaries[envelopeIndex + 1] = Number.POSITIVE_INFINITY;
+  }
+
+  envelopeIndex = 0;
+  for (let position = 0; position < length; position += 1) {
+    while (boundaries[envelopeIndex + 1] < position) envelopeIndex += 1;
+    const nearest = parabolas[envelopeIndex];
+    const delta = position - nearest;
+    target[targetOffset + position * targetStride] =
+      delta * delta + source[sourceOffset + nearest * sourceStride];
+  }
+}
+
+/** Expands an alpha silhouette with a continuous round Euclidean offset. */
+function expandAlpha(source: HTMLCanvasElement, radius: number) {
+  const width = source.width;
+  const height = source.height;
+  const sourceContext = source.getContext("2d", { willReadFrequently: true });
+  if (!sourceContext) throw new Error("Canvas 2D is unavailable.");
+  const sourcePixels = sourceContext.getImageData(0, 0, width, height).data;
+  const size = width * height;
+  const seeds = new Float32Array(size);
+  const rowDistances = new Float32Array(size);
+  let hasSeed = false;
+
+  for (let pixel = 0; pixel < size; pixel += 1) {
+    const occupied = sourcePixels[pixel * 4 + 3] >= 128;
+    seeds[pixel] = occupied ? 0 : DISTANCE_INFINITY;
+    hasSeed ||= occupied;
+  }
+
+  const maxLength = Math.max(width, height);
+  const parabolas = new Int32Array(maxLength);
+  const boundaries = new Float64Array(maxLength + 1);
+  if (hasSeed) {
+    for (let y = 0; y < height; y += 1) {
+      distanceTransform1D(
+        seeds,
+        y * width,
+        1,
+        rowDistances,
+        y * width,
+        1,
+        width,
+        parabolas,
+        boundaries,
+      );
+    }
+    for (let x = 0; x < width; x += 1) {
+      distanceTransform1D(
+        rowDistances,
+        x,
+        width,
+        seeds,
+        x,
+        width,
+        height,
+        parabolas,
+        boundaries,
+      );
+    }
+  }
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas 2D is unavailable.");
+  const mask = context.createImageData(width, height);
+  for (let pixel = 0; pixel < size; pixel += 1) {
+    const coverage = hasSeed
+      ? clamp(radius + 0.5 - Math.sqrt(seeds[pixel]), 0, 1)
+      : 0;
+    const offset = pixel * 4;
+    mask.data[offset] = 255;
+    mask.data[offset + 1] = 255;
+    mask.data[offset + 2] = 255;
+    mask.data[offset + 3] = Math.round(coverage * 255);
+  }
+  context.putImageData(mask, 0, 0);
+  return canvas;
+}
+
 function addOutline(
   source: HTMLCanvasElement,
   outline: Required<StickerOutlineOptions>,
@@ -416,20 +534,8 @@ function addOutline(
 
   const radius = clamp(outline.width * 2.35, 0, 112);
   if (radius > 0.25) {
-    const mask = tintAlpha(source, outline.color);
-    const rings = Math.max(1, Math.min(12, Math.ceil(radius / 7)));
-    const directions = radius > 48 ? 32 : 24;
-    for (let ring = 1; ring <= rings; ring += 1) {
-      const distance = (radius * ring) / rings;
-      for (let index = 0; index < directions; index += 1) {
-        const angle = (index / directions) * Math.PI * 2;
-        context.drawImage(
-          mask,
-          Math.cos(angle) * distance,
-          Math.sin(angle) * distance,
-        );
-      }
-    }
+    const expandedAlpha = expandAlpha(source, radius);
+    context.drawImage(tintAlpha(expandedAlpha, outline.color), 0, 0);
   }
   context.drawImage(source, 0, 0);
   return canvas;

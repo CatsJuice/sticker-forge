@@ -3,13 +3,17 @@ import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
 test("keeps text outlines faithful to the artwork alpha", async () => {
-  const source = await readFile(
-    new URL("../lib/source.ts", import.meta.url),
-    "utf8",
-  );
+  const [source, renderer] = await Promise.all([
+    readFile(new URL("../lib/source.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+  ]);
 
   assert.doesNotMatch(source, /connectTextBacking|firstOpaque|lastOpaque/);
   assert.match(source, /const canvas = addOutline\(sourceCanvas, outline\)/);
+  assert.match(source, /function distanceTransform1D\(/);
+  assert.match(source, /const expandedAlpha = expandAlpha\(source, radius\)/);
+  assert.doesNotMatch(source, /const rings =|const directions =/);
+  assert.match(renderer, /nextTexture\.minFilter = THREE\.LinearMipmapLinearFilter/);
 });
 
 test("supports uploaded images and derives transparent silhouettes from alpha", async () => {

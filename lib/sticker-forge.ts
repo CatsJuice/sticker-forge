@@ -1165,6 +1165,7 @@ class StickerRenderer implements StickerInstance {
 
   private startEntranceAnimation() {
     this.reset();
+    this.peelAudio.playReappear();
     this.entranceActive = true;
     this.entranceElapsed = 0;
     this.entranceAxis.set(

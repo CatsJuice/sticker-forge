@@ -305,7 +305,7 @@ export const stickerFragmentShader = /* glsl */ `
       color = mix(
         color,
         uInteractionHintColor,
-        hitArea * 0.1 * uInteractionHint
+        hitArea * 0.28 * uInteractionHint
       );
       color = mix(
         color,

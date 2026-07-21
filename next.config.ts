@@ -6,7 +6,7 @@ const isGitHubPages = process.env.GITHUB_PAGES === "true";
 const pagesWebpackConfig: Pick<NextConfig, "webpack"> = {
   webpack(config) {
     config.module.rules.push({
-      test: /\.mp3$/i,
+      test: /\.(?:mp3|wav)$/i,
       resourceQuery: /inline/,
       type: "javascript/auto",
       use: [path.resolve("build/inline-audio-loader.cjs")],

@@ -1,4 +1,5 @@
 import defaultPeelSoundUrl from "./assets/elevenlabs-sticker-peel-foley.mp3?inline";
+import reappearSoundUrl from "./assets/sticker-reappear.wav?inline";
 
 export const DEFAULT_PEEL_SOUND_URL = defaultPeelSoundUrl;
 
@@ -21,7 +22,13 @@ type AudioWindow = Window & {
   webkitAudioContext?: AudioContextConstructor;
 };
 
-type CueKind = "lift" | "texture" | "reattach" | "accent" | "finish";
+type CueKind =
+  | "lift"
+  | "texture"
+  | "reattach"
+  | "accent"
+  | "finish"
+  | "reappear";
 type SliceBankName = "micro" | "body" | "accent";
 
 type AudioSlice = {
@@ -228,6 +235,7 @@ export class PeelAudioEngine {
   private volume = 0.7;
   private useBuiltInProfile = false;
   private buffer: AudioBuffer | null = null;
+  private reappearBuffer: AudioBuffer | null = null;
   private profile: SampleProfile | null = null;
   private loadRevision = 0;
   private masterGain: GainNode | null = null;
@@ -287,6 +295,7 @@ export class PeelAudioEngine {
       return;
     }
     if (!this.buffer) this.preload();
+    if (!this.reappearBuffer) this.preloadReappear();
   }
 
   unlock() {
@@ -299,6 +308,7 @@ export class PeelAudioEngine {
       });
     }
     if (!this.buffer) this.preload();
+    if (!this.reappearBuffer) this.preloadReappear();
   }
 
   begin(progress: number, timestamp = nowMilliseconds()) {
@@ -492,6 +502,53 @@ export class PeelAudioEngine {
     this.stopVoices(new Set<CueKind>(["texture", "reattach"]), 0.016);
   }
 
+  playReappear() {
+    if (!this.enabled || this.destroyed) return;
+    const context = getSharedAudioContext();
+    const buffer = this.reappearBuffer;
+    if (!context || !buffer || this.activeVoices.size >= MAX_ACTIVE_VOICES) {
+      if (!buffer) this.preloadReappear();
+      return;
+    }
+
+    const when = context.currentTime + 0.002;
+    const duration = buffer.duration;
+    const source = context.createBufferSource();
+    const voiceGain = context.createGain();
+    const peakGain = 0.82;
+    const attack = Math.min(0.004, duration * 0.12);
+    const release = Math.min(0.025, duration * 0.2);
+
+    source.buffer = buffer;
+    voiceGain.gain.setValueAtTime(0, when);
+    voiceGain.gain.linearRampToValueAtTime(peakGain, when + attack);
+    voiceGain.gain.setValueAtTime(
+      peakGain,
+      Math.max(when + attack, when + duration - release),
+    );
+    voiceGain.gain.linearRampToValueAtTime(0, when + duration);
+    source.connect(voiceGain);
+    voiceGain.connect(this.ensureOutput(context));
+
+    const nodes: AudioNode[] = [source, voiceGain];
+    const voice: ActiveVoice = {
+      source,
+      gain: voiceGain,
+      nodes,
+      kind: "reappear",
+    };
+    this.activeVoices.add(voice);
+    source.addEventListener(
+      "ended",
+      () => {
+        this.activeVoices.delete(voice);
+        for (const node of nodes) node.disconnect();
+      },
+      { once: true },
+    );
+    source.start(when);
+  }
+
   reset(progress = 0) {
     this.clearHoldTimer();
     this.gestureActive = false;
@@ -524,6 +581,7 @@ export class PeelAudioEngine {
     this.masterGain = null;
     this.compressor = null;
     this.buffer = null;
+    this.reappearBuffer = null;
     this.profile = null;
   }
 
@@ -539,6 +597,19 @@ export class PeelAudioEngine {
           ? BUILT_IN_PROFILE
           : genericProfile(buffer.duration);
         this.sliceBags = { micro: [], body: [], accent: [] };
+      })
+      .catch(() => {
+        // Sound is progressive enhancement and never blocks sticker rendering.
+      });
+  }
+
+  private preloadReappear() {
+    const context = getSharedAudioContext();
+    if (!context || !this.enabled || this.destroyed) return;
+    void loadAudioBuffer(reappearSoundUrl, context)
+      .then((buffer) => {
+        if (this.destroyed) return;
+        this.reappearBuffer = buffer;
       })
       .catch(() => {
         // Sound is progressive enhancement and never blocks sticker rendering.

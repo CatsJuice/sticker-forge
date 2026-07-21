@@ -1,5 +1,8 @@
 module.exports = function inlineAudioLoader(source) {
-  const dataUrl = `data:audio/mpeg;base64,${source.toString("base64")}`;
+  const mimeType = this.resourcePath.toLowerCase().endsWith(".wav")
+    ? "audio/wav"
+    : "audio/mpeg";
+  const dataUrl = `data:${mimeType};base64,${source.toString("base64")}`;
   return `export default ${JSON.stringify(dataUrl)};`;
 };
 

@@ -457,22 +457,22 @@ input[type="color"] {
 }
 
 .toolbar-number-control {
-  width: 52px;
-  padding: 0 4px 0 5px;
+  width: 68px;
+  padding: 0 3px 0 6px;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
 }
 
 .line-height-control {
-  width: 57px;
+  width: 72px;
 }
 
 .number-control-symbol {
   flex: 0 0 auto;
   color: #77767d;
-  font-size: 10px;
-  font-weight: 760;
+  font-size: 15px;
+  font-weight: 780;
   line-height: 1;
 }
 
@@ -484,13 +484,48 @@ input[type="color"] {
   outline: 0;
   color: inherit;
   background: transparent;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   text-align: right;
 }
 
-.toolbar-number-control input::-webkit-inner-spin-button {
-  margin-left: 1px;
+.number-preset-select {
+  position: relative;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: #77767d;
+}
+
+.number-preset-chevron {
+  width: 12px;
+  height: 12px;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.number-preset-select select {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.toolbar-number-control:focus-within {
+  border-color: rgba(97, 92, 255, 0.3);
+  color: var(--ink);
+  background: #fff;
 }
 
 .toolbar-divider {

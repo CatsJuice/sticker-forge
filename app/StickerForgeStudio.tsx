@@ -49,6 +49,9 @@ type StudioSettings = {
 const DEFAULT_INK = "#19191d";
 const DEFAULT_ACCENT = "rgb(36, 126, 245)";
 const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
+const DEFAULT_IMAGE_SRC = "/default-image.svg";
+const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
+const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
 const DEFAULT_RICH_TEXT = {
   blocks: [
     {
@@ -96,7 +99,9 @@ const UI = {
     bold: "加粗",
     underline: "下划线",
     fontSize: "字号",
+    fontSizePresets: "字号预设",
     lineHeight: "行高",
+    lineHeightPresets: "行高预设",
     alignment: "对齐方式",
     alignLeft: "左对齐",
     alignCenter: "居中对齐",
@@ -156,7 +161,9 @@ const UI = {
     bold: "Bold",
     underline: "Underline",
     fontSize: "Font size",
+    fontSizePresets: "Font size presets",
     lineHeight: "Line height",
+    lineHeightPresets: "Line height presets",
     alignment: "Alignment",
     alignLeft: "Align left",
     alignCenter: "Align center",
@@ -252,6 +259,30 @@ function editorLineHeight(element: HTMLElement): number {
     return Math.min(3, Math.max(0.7, lineHeight / fontSize));
   }
   return 1.2;
+}
+
+function editorBlockFontSize(element: HTMLElement): number {
+  const children = element.querySelectorAll<HTMLElement>("*");
+  let maxFontSize = children.length
+    ? 0
+    : Number.parseFloat(getComputedStyle(element).fontSize) || 28;
+  children.forEach((child) => {
+    const fontSize = Number.parseFloat(getComputedStyle(child).fontSize);
+    if (Number.isFinite(fontSize)) maxFontSize = Math.max(maxFontSize, fontSize);
+  });
+  return maxFontSize || 28;
+}
+
+function setEditorBlockLineHeight(element: HTMLElement, lineHeight: number) {
+  const nextLineHeight = Math.min(3, Math.max(0.7, lineHeight));
+  element.dataset.lineHeight = String(nextLineHeight);
+  element.style.lineHeight = `${editorBlockFontSize(element) * nextLineHeight}px`;
+}
+
+function normalizeEditorLineHeights(root: HTMLDivElement) {
+  Array.from(root.children)
+    .filter((node): node is HTMLElement => /^(DIV|P)$/.test(node.tagName))
+    .forEach((block) => setEditorBlockLineHeight(block, editorLineHeight(block)));
 }
 
 function readRichTextEditor(
@@ -421,6 +452,18 @@ function AlignmentIcon({ align }: { align: "left" | "center" | "right" }) {
   );
 }
 
+function DropdownChevron() {
+  return (
+    <svg
+      className="number-preset-chevron"
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <path d="m4 6 4 4 4-4" />
+    </svg>
+  );
+}
+
 export function StickerForgeStudio() {
   const initialSource = useMemo(
     () => makeTextSource(DEFAULT_TEXT, DEFAULT_INK, DEFAULT_RICH_TEXT),
@@ -430,6 +473,7 @@ export function StickerForgeStudio() {
   const richEditorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
   const selectionOffsetsRef = useRef<{ start: number; end: number } | null>(null);
+  const applyingEditorStyleRef = useRef(false);
   const controllerRef = useRef<StickerController | null>(null);
   const textTimerRef = useRef<number | null>(null);
   const sourceRevisionRef = useRef(0);
@@ -444,7 +488,7 @@ export function StickerForgeStudio() {
   const [editorLineHeightValue, setEditorLineHeightValue] = useState("1.2");
   const [editorAlign, setEditorAlign] =
     useState<"left" | "center" | "right">("center");
-  const [imageDataUrl, setImageDataUrl] = useState("");
+  const [imageDataUrl, setImageDataUrl] = useState(DEFAULT_IMAGE_SRC);
   const [imageName, setImageName] = useState("");
   const [settings, setSettings] =
     useState<StudioSettings>(DEFAULT_SETTINGS);
@@ -628,14 +672,17 @@ export function StickerForgeStudio() {
       selection.anchorNode instanceof Element
         ? selection.anchorNode
         : selection.anchorNode?.parentElement;
-    if (anchorElement instanceof HTMLElement) {
+    if (anchorElement instanceof HTMLElement && !applyingEditorStyleRef.current) {
       const anchorStyle = getComputedStyle(anchorElement);
+      const anchorBlock = anchorElement.closest<HTMLElement>("div, p");
       setEditorAlign(editorAlignment(anchorStyle.textAlign));
       const anchorFontSize = Number.parseFloat(anchorStyle.fontSize);
       if (Number.isFinite(anchorFontSize)) {
         setEditorFontSize(String(Math.round(anchorFontSize)));
       }
-      setEditorLineHeightValue(editorLineHeight(anchorElement).toFixed(1));
+      setEditorLineHeightValue(
+        editorLineHeight(anchorBlock && editor?.contains(anchorBlock) ? anchorBlock : anchorElement).toFixed(1),
+      );
     }
   };
 
@@ -666,6 +713,7 @@ export function StickerForgeStudio() {
   const syncRichEditor = () => {
     const editor = richEditorRef.current;
     if (!editor) return;
+    normalizeEditorLineHeights(editor);
     const next = readRichTextEditor(editor, inkColor);
     setText(next.text);
     setRichText(next.document);
@@ -690,86 +738,102 @@ export function StickerForgeStudio() {
     const nextSize = Math.min(240, Math.max(8, fontSize));
     const savedRange = selectionRef.current?.cloneRange() ?? null;
     const savedOffsets = selectionOffsetsRef.current;
-    setEditorFontSize(String(nextSize));
-    editor.focus({ preventScroll: true });
-    restoreEditorSelection(savedRange);
-    if (savedOffsets && savedOffsets.end > savedOffsets.start) {
-      const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
-      const selectedNodes: Array<{
-        node: Text;
-        start: number;
-        end: number;
-      }> = [];
-      let textOffset = 0;
-      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-        const textNode = node as Text;
-        const nodeStart = textOffset;
-        const nodeEnd = nodeStart + textNode.data.length;
-        const start = Math.max(0, savedOffsets.start - nodeStart);
-        const end = Math.min(textNode.data.length, savedOffsets.end - nodeStart);
-        if (
-          start < end &&
-          savedOffsets.start < nodeEnd &&
-          savedOffsets.end > nodeStart
-        ) {
-          selectedNodes.push({ node: textNode, start, end });
+    applyingEditorStyleRef.current = true;
+    try {
+      editor.focus({ preventScroll: true });
+      restoreEditorSelection(savedRange);
+      if (savedOffsets && savedOffsets.end > savedOffsets.start) {
+        const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+        const selectedNodes: Array<{
+          node: Text;
+          start: number;
+          end: number;
+        }> = [];
+        let textOffset = 0;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const textNode = node as Text;
+          const nodeStart = textOffset;
+          const nodeEnd = nodeStart + textNode.data.length;
+          const start = Math.max(0, savedOffsets.start - nodeStart);
+          const end = Math.min(textNode.data.length, savedOffsets.end - nodeStart);
+          if (
+            start < end &&
+            savedOffsets.start < nodeEnd &&
+            savedOffsets.end > nodeStart
+          ) {
+            selectedNodes.push({ node: textNode, start, end });
+          }
+          textOffset = nodeEnd;
         }
-        textOffset = nodeEnd;
+        const wrapped: HTMLSpanElement[] = [];
+        selectedNodes.reverse().forEach(({ node, start, end }) => {
+          if (end < node.data.length) node.splitText(end);
+          const selectedNode = start > 0 ? node.splitText(start) : node;
+          const span = document.createElement("span");
+          span.style.fontSize = `${nextSize}px`;
+          selectedNode.parentNode?.insertBefore(span, selectedNode);
+          span.appendChild(selectedNode);
+          wrapped.push(span);
+        });
+        wrapped.reverse();
+        if (wrapped.length) {
+          const nextRange = document.createRange();
+          nextRange.setStartBefore(wrapped[0]);
+          nextRange.setEndAfter(wrapped[wrapped.length - 1]);
+          const selection = window.getSelection();
+          selection?.removeAllRanges();
+          selection?.addRange(nextRange);
+          selectionRef.current = nextRange.cloneRange();
+        }
+      } else {
+        document.execCommand("styleWithCSS", false, "true");
+        document.execCommand("fontSize", false, "7");
       }
-      const wrapped: HTMLSpanElement[] = [];
-      selectedNodes.reverse().forEach(({ node, start, end }) => {
-        if (end < node.data.length) node.splitText(end);
-        const selectedNode = start > 0 ? node.splitText(start) : node;
-        const span = document.createElement("span");
-        span.style.fontSize = `${nextSize}px`;
-        selectedNode.parentNode?.insertBefore(span, selectedNode);
-        span.appendChild(selectedNode);
-        wrapped.push(span);
-      });
-      wrapped.reverse();
-      if (wrapped.length) {
-        const nextRange = document.createRange();
-        nextRange.setStartBefore(wrapped[0]);
-        nextRange.setEndAfter(wrapped[wrapped.length - 1]);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(nextRange);
-        selectionRef.current = nextRange.cloneRange();
-      }
-    } else {
-      document.execCommand("styleWithCSS", false, "true");
-      document.execCommand("fontSize", false, "7");
+      syncRichEditor();
+    } finally {
+      window.setTimeout(() => {
+        applyingEditorStyleRef.current = false;
+        setEditorFontSize(String(nextSize));
+      }, 0);
     }
-    syncRichEditor();
-    setEditorFontSize(String(nextSize));
   };
 
   const changeEditorLineHeight = (lineHeight: number) => {
     const editor = richEditorRef.current;
     if (!editor) return;
     const nextLineHeight = Math.min(3, Math.max(0.7, lineHeight));
-    setEditorLineHeightValue(nextLineHeight.toFixed(1));
-    editor.focus({ preventScroll: true });
-    restoreEditorSelection();
-    const range = selectionRef.current;
-    const blockElements = Array.from(editor.children).filter(
-      (node): node is HTMLElement => /^(DIV|P)$/.test(node.tagName),
-    );
-    const selectedBlocks = range
-      ? blockElements.filter((block) => {
-          try {
-            return range.intersectsNode(block);
-          } catch {
-            return false;
-          }
-        })
-      : [];
-    const targets = selectedBlocks.length ? selectedBlocks : [editor];
-    targets.forEach((target) => {
-      target.style.lineHeight = String(nextLineHeight);
-      target.dataset.lineHeight = String(nextLineHeight);
-    });
-    syncRichEditor();
+    applyingEditorStyleRef.current = true;
+    try {
+      editor.focus({ preventScroll: true });
+      restoreEditorSelection();
+      const range = selectionRef.current;
+      const blockElements = Array.from(editor.children).filter(
+        (node): node is HTMLElement => /^(DIV|P)$/.test(node.tagName),
+      );
+      const selectedBlocks = range
+        ? blockElements.filter((block) => {
+            try {
+              return range.intersectsNode(block);
+            } catch {
+              return false;
+            }
+          })
+        : [];
+      const targets = selectedBlocks.length
+        ? selectedBlocks
+        : blockElements.length
+          ? blockElements
+          : [editor];
+      targets.forEach((target) => {
+        setEditorBlockLineHeight(target, nextLineHeight);
+      });
+      syncRichEditor();
+    } finally {
+      window.setTimeout(() => {
+        applyingEditorStyleRef.current = false;
+        setEditorLineHeightValue(nextLineHeight.toFixed(1));
+      }, 0);
+    }
   };
 
   const handleRichInput = () => {
@@ -853,10 +917,6 @@ export function StickerForgeStudio() {
       void applySource(makeTextSource(text, inkColor, richText ?? undefined));
     } else if (imageDataUrl) {
       void applySource({ type: "image", src: imageDataUrl, name: imageName });
-    } else {
-      clearPendingText();
-      sourceRevisionRef.current += 1;
-      setSourceMessage(t.uploadFirst);
     }
   };
 
@@ -864,7 +924,7 @@ export function StickerForgeStudio() {
     setText(DEFAULT_TEXT);
     setInkColor(DEFAULT_INK);
     setSourceMode("text");
-    setImageDataUrl("");
+    setImageDataUrl(DEFAULT_IMAGE_SRC);
     setImageName("");
     setRichText(DEFAULT_RICH_TEXT);
     setEditorFontSize("28");
@@ -877,16 +937,20 @@ export function StickerForgeStudio() {
     controllerRef.current?.setOptions(DEFAULT_SETTINGS);
     if (richEditorRef.current) {
       richEditorRef.current.innerHTML =
-        '<div style="text-align:center;line-height:1.2"><span style="color:#19191d;font-size:28px;font-weight:900">PEEL </span><span style="color:rgb(36, 126, 245);font-size:28px;font-weight:900">ME</span></div><div style="text-align:center;line-height:0.8"><span style="color:#19191d;font-size:10px;font-weight:500">@cats_juice</span></div>';
+        '<div data-line-height="1.2" style="text-align:center;line-height:33.6px"><span style="color:#19191d;font-size:28px;font-weight:900">PEEL </span><span style="color:rgb(36, 126, 245);font-size:28px;font-weight:900">ME</span></div><div data-line-height="0.8" style="text-align:center;line-height:8px"><span style="color:#19191d;font-size:10px;font-weight:500">@cats_juice</span></div>';
     }
     void applySource(makeTextSource(DEFAULT_TEXT, DEFAULT_INK, DEFAULT_RICH_TEXT));
   };
 
   const buildEmbedSnippet = () => {
     const origin = window.location.origin;
+    const imageSource =
+      imageDataUrl === DEFAULT_IMAGE_SRC
+        ? `${origin}${DEFAULT_IMAGE_SRC}`
+        : imageDataUrl;
     const source: StickerSource =
-      sourceMode === "image" && imageDataUrl
-        ? { type: "image", src: imageDataUrl, name: imageName }
+      sourceMode === "image" && imageSource
+        ? { type: "image", src: imageSource, name: imageName }
         : makeTextSource(text, inkColor, richText ?? undefined);
 
     return `<script type="module" src="${origin}/embed/sticker-forge.es.js"></script>
@@ -1066,15 +1130,13 @@ export function StickerForgeStudio() {
                       >
                         <span className="underline-glyph">U</span>
                       </button>
-                      <label className="toolbar-number-control" title={t.fontSize}>
+                      <div className="toolbar-number-control" title={t.fontSize}>
                         <span className="sr-only">{t.fontSize}</span>
                         <span className="number-control-symbol" aria-hidden="true">A</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           aria-label={t.fontSize}
-                          min="8"
-                          max="240"
-                          step="1"
                           value={editorFontSize}
                           onMouseDown={rememberEditorSelection}
                           onChange={(event) => setEditorFontSize(event.target.value)}
@@ -1086,19 +1148,38 @@ export function StickerForgeStudio() {
                           onKeyDown={(event) => {
                             if (event.key !== "Enter") return;
                             event.preventDefault();
+                          }}
+                          onKeyUp={(event) => {
+                            if (event.key !== "Enter") return;
                             event.currentTarget.blur();
                           }}
                         />
-                      </label>
-                      <label className="toolbar-number-control line-height-control" title={t.lineHeight}>
+                        <span className="number-preset-select">
+                          <select
+                            aria-label={t.fontSizePresets}
+                            value=""
+                            onMouseDown={rememberEditorSelection}
+                            onChange={(event) => {
+                              const nextSize = Number(event.currentTarget.value);
+                              setEditorFontSize(String(nextSize));
+                              changeEditorFontSize(nextSize);
+                            }}
+                          >
+                            <option value="" disabled>{t.fontSizePresets}</option>
+                            {FONT_SIZE_PRESETS.map((size) => (
+                              <option key={size} value={size}>{size}</option>
+                            ))}
+                          </select>
+                          <DropdownChevron />
+                        </span>
+                      </div>
+                      <div className="toolbar-number-control line-height-control" title={t.lineHeight}>
                         <span className="sr-only">{t.lineHeight}</span>
                         <span className="number-control-symbol" aria-hidden="true">↕</span>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="decimal"
                           aria-label={t.lineHeight}
-                          min="0.7"
-                          max="3"
-                          step="0.1"
                           value={editorLineHeightValue}
                           onMouseDown={rememberEditorSelection}
                           onChange={(event) =>
@@ -1112,12 +1193,31 @@ export function StickerForgeStudio() {
                           onKeyDown={(event) => {
                             if (event.key !== "Enter") return;
                             event.preventDefault();
-                            changeEditorLineHeight(
-                              Number(event.currentTarget.value) || 1.2,
-                            );
+                          }}
+                          onKeyUp={(event) => {
+                            if (event.key !== "Enter") return;
+                            event.currentTarget.blur();
                           }}
                         />
-                      </label>
+                        <span className="number-preset-select">
+                          <select
+                            aria-label={t.lineHeightPresets}
+                            value=""
+                            onMouseDown={rememberEditorSelection}
+                            onChange={(event) => {
+                              const nextLineHeight = Number(event.currentTarget.value);
+                              setEditorLineHeightValue(String(nextLineHeight));
+                              changeEditorLineHeight(nextLineHeight);
+                            }}
+                          >
+                            <option value="" disabled>{t.lineHeightPresets}</option>
+                            {LINE_HEIGHT_PRESETS.map((lineHeight) => (
+                              <option key={lineHeight} value={lineHeight}>{lineHeight}</option>
+                            ))}
+                          </select>
+                          <DropdownChevron />
+                        </span>
+                      </div>
                       <span className="toolbar-divider" aria-hidden="true" />
                       <div
                         className="alignment-group"
@@ -1173,7 +1273,10 @@ export function StickerForgeStudio() {
                       onMouseUp={rememberEditorSelection}
                       onFocus={rememberEditorSelection}
                     >
-                      <div style={{ textAlign: "center", lineHeight: 1.2 }}>
+                      <div
+                        data-line-height="1.2"
+                        style={{ textAlign: "center", lineHeight: "33.6px" }}
+                      >
                         <span
                           style={{
                             color: DEFAULT_INK,
@@ -1193,7 +1296,10 @@ export function StickerForgeStudio() {
                           ME
                         </span>
                       </div>
-                      <div style={{ textAlign: "center", lineHeight: 0.8 }}>
+                      <div
+                        data-line-height="0.8"
+                        style={{ textAlign: "center", lineHeight: "8px" }}
+                      >
                         <span
                           style={{
                             color: DEFAULT_INK,

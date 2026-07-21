@@ -32,6 +32,21 @@ test("supports uploaded images and derives transparent silhouettes from alpha", 
   assert.match(declarations, /export interface StickerImageSource/);
 });
 
+test("uses the bundled image artwork before a user uploads a replacement", async () => {
+  const studio = await readFile(
+    new URL("../app/StickerForgeStudio.tsx", import.meta.url),
+    "utf8",
+  );
+  const asset = await stat(
+    new URL("../public/default-image.svg", import.meta.url),
+  );
+
+  assert.match(studio, /const DEFAULT_IMAGE_SRC = "\/default-image\.svg"/);
+  assert.match(studio, /useState\(DEFAULT_IMAGE_SRC\)/);
+  assert.match(studio, /setImageDataUrl\(DEFAULT_IMAGE_SRC\)/);
+  assert.ok(asset.size > 1_000);
+});
+
 test("renders rich text runs with preserved line and inline styles", async () => {
   const source = await readFile(
     new URL("../lib/source.ts", import.meta.url),
@@ -180,12 +195,15 @@ test("flies a fully detached sticker out instead of freezing the folded mesh", a
 });
 
 test("re-enters a detached sticker with a centered spring and laser sweep", async () => {
-  const [renderer, shader] = await Promise.all([
+  const [renderer, shader, reappearAsset] = await Promise.all([
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+    stat(new URL("../lib/assets/sticker-reappear.wav", import.meta.url)),
   ]);
 
+  assert.ok(reappearAsset.size > 10_000);
   assert.match(renderer, /private startEntranceAnimation\(\)/);
+  assert.match(renderer, /this\.peelAudio\.playReappear\(\)/);
   assert.match(renderer, /this\.meshWidth >= this\.meshHeight \? 1 : 0/);
   assert.match(renderer, /this\.meshWidth >= this\.meshHeight \? 0 : -1/);
   assert.match(renderer, /this\.uniforms\.uEntranceScaleProgress\.value = 0/);
@@ -220,7 +238,7 @@ test("highlights only the draggable edge after a missed canvas press", async () 
     renderer,
     /uInteractionHintRadius\.value = this\.artwork[\s\S]*?this\.options\.peel\.grabWidth \* textureScale/,
   );
-  assert.match(shader, /hitArea \* 0\.1 \* uInteractionHint/);
+  assert.match(shader, /hitArea \* 0\.28 \* uInteractionHint/);
   assert.match(shader, /float interactionHitArea\(/);
   assert.match(shader, /float innerLineWidth = max\(2\.0,/);
   assert.match(shader, /innerEdgeOuter - innerEdgeInner/);
@@ -245,7 +263,46 @@ test("preserves a rich-text selection before committing a font size", async () =
   assert.match(studio, /document\.createTreeWalker\(editor, NodeFilter\.SHOW_TEXT\)/);
   assert.match(studio, /savedOffsets\.end > savedOffsets\.start/);
   assert.match(studio, /span\.style\.fontSize = `\$\{nextSize\}px`/);
-  assert.match(studio, /if \(event\.key !== "Enter"\) return;\s*event\.preventDefault\(\);\s*event\.currentTarget\.blur\(\)/);
+  assert.match(studio, /applyingEditorStyleRef\.current = true/);
+  assert.match(studio, /applyingEditorStyleRef\.current = false/);
+  assert.match(
+    studio,
+    /onKeyDown=\{\(event\) => \{\s*if \(event\.key !== "Enter"\) return;\s*event\.preventDefault\(\);\s*\}\}\s*onKeyUp=\{\(event\) => \{\s*if \(event\.key !== "Enter"\) return;\s*event\.currentTarget\.blur\(\)/,
+  );
+});
+
+test("offers editable font-size and line-height fields with preset menus", async () => {
+  const [studio, styles] = await Promise.all([
+    readFile(new URL("../app/StickerForgeStudio.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(studio, /const FONT_SIZE_PRESETS = \[/);
+  assert.match(studio, /const LINE_HEIGHT_PRESETS = \[/);
+  assert.match(studio, /aria-label=\{t\.fontSizePresets\}/);
+  assert.match(studio, /aria-label=\{t\.lineHeightPresets\}/);
+  assert.match(studio, /inputMode="numeric"/);
+  assert.match(studio, /inputMode="decimal"/);
+  assert.match(studio, /function DropdownChevron\(\)/);
+  assert.match(studio, /<path d="m4 6 4 4 4-4" \/>/);
+  assert.doesNotMatch(studio, /⌄/);
+  assert.match(styles, /\.number-control-symbol \{[^}]*font-size: 15px;/s);
+  assert.match(styles, /\.number-preset-select select \{/);
+  assert.match(styles, /\.number-preset-chevron \{[^}]*width: 12px;[^}]*height: 12px;/s);
+});
+
+test("renders editor line height against each line's actual font size", async () => {
+  const studio = await readFile(
+    new URL("../app/StickerForgeStudio.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(studio, /function editorBlockFontSize\(element: HTMLElement\)/);
+  assert.match(studio, /editorBlockFontSize\(element\) \* nextLineHeight/);
+  assert.match(studio, /normalizeEditorLineHeights\(editor\)/);
+  assert.match(studio, /data-line-height="0\.8"/);
+  assert.match(studio, /lineHeight: "8px"/);
+  assert.match(studio, /anchorElement\.closest<HTMLElement>\("div, p"\)/);
 });
 
 test("projects shadows in the sticker material without a receiver seam", async () => {

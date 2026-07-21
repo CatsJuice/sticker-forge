@@ -85,6 +85,10 @@ const MAX_CURL_ANGLE = Math.PI;
 const MAX_FRONT_TO_POINTER_RATIO = 1.28;
 const DIRECTION_DEAD_ZONE = 0.004;
 const OUTWARD_DIRECTION_LIMIT = -0.22;
+// Small backwards movements remain directly coupled to the pointer. Larger
+// drops are eased so sparse/coalesced pointer events cannot flatten the peel
+// in one rendered frame.
+const MAX_DIRECT_RETURN_STEP_RATIO = 0.035;
 // Releasing a partially peeled sticker should reattach. The final quarter is
 // reserved for the deliberate, long pull that completes the detachment.
 const SNAP_DETACH_THRESHOLD = 0.74;
@@ -188,6 +192,7 @@ class StickerRenderer implements StickerInstance {
   private grabProjection = 0;
   private springVelocity = 0;
   private springActive = false;
+  private springTargetDepth = 0;
   private detachedExitActive = false;
   private detachedExitElapsed = 0;
   private detachedExitSpin = 0;
@@ -437,6 +442,7 @@ class StickerRenderer implements StickerInstance {
     }
     this.springActive = false;
     this.springVelocity = 0;
+    this.springTargetDepth = 0;
     this.detachedExitActive = false;
     this.detachedExitElapsed = 0;
     this.detachedExitSpin = 0;
@@ -967,6 +973,7 @@ class StickerRenderer implements StickerInstance {
     this.setCreaseDepth(0);
     this.springActive = false;
     this.springVelocity = 0;
+    this.springTargetDepth = 0;
     this.state.dragging = true;
     this.state.grabPoint = { x: hit.local.x, y: hit.local.y };
     this.state.pointer = { x: local.x, y: local.y };
@@ -1004,14 +1011,17 @@ class StickerRenderer implements StickerInstance {
     const drag = local.clone().sub(this.grabStart);
     const distance = drag.length();
     let pointerDistance = 0;
+    let shouldReturnFromInvalidDirection = false;
     if (distance > DIRECTION_DEAD_ZONE) {
       const candidate = drag.clone().normalize();
       if (candidate.dot(this.grabDirection) >= OUTWARD_DIRECTION_LIMIT) {
         this.activeDirection.copy(candidate);
         pointerDistance = distance;
       } else {
-        this.activeDirection.copy(this.grabDirection);
-        pointerDistance = Math.max(0, drag.dot(this.grabDirection));
+        // Keep the last valid peel direction and let the lifted portion settle
+        // back continuously. Setting pointerDistance to zero here used to make
+        // a deeply peeled sticker become flat in a single frame.
+        shouldReturnFromInvalidDirection = true;
       }
     } else {
       this.activeDirection.copy(this.grabDirection);
@@ -1020,7 +1030,31 @@ class StickerRenderer implements StickerInstance {
       this.grabOrigin,
       this.activeDirection,
     );
-    this.setCreaseDepth(this.solveCreaseDepth(pointerDistance));
+    if (shouldReturnFromInvalidDirection) {
+      if (!this.springActive) {
+        this.springActive = true;
+        this.springVelocity = 0;
+      }
+      this.springTargetDepth = 0;
+    } else {
+      const targetDepth = this.solveCreaseDepth(pointerDistance);
+      const returnDistance = this.creaseDepth - targetDepth;
+      const shouldSmoothReturn =
+        returnDistance > this.grabExtent * MAX_DIRECT_RETURN_STEP_RATIO ||
+        (this.springActive && targetDepth < this.creaseDepth);
+      if (shouldSmoothReturn) {
+        if (!this.springActive) {
+          this.springActive = true;
+          this.springVelocity = 0;
+        }
+        this.springTargetDepth = targetDepth;
+      } else {
+        this.springActive = false;
+        this.springVelocity = 0;
+        this.springTargetDepth = targetDepth;
+        this.setCreaseDepth(targetDepth);
+      }
+    }
     this.peelAudio.update(
       this.state.progress,
       event.timeStamp,
@@ -1095,9 +1129,15 @@ class StickerRenderer implements StickerInstance {
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
+    if (!shouldReset) {
+      this.springActive = false;
+      this.springVelocity = 0;
+      this.springTargetDepth = this.creaseDepth;
+    }
     if (shouldReset && !reducedMotion) {
       this.springActive = true;
       this.springVelocity = 0;
+      this.springTargetDepth = 0;
     }
     this.emit("peelend", {
       amount: this.state.progress,
@@ -1213,32 +1253,58 @@ class StickerRenderer implements StickerInstance {
       "(prefers-reduced-motion: reduce)",
     ).matches;
     if (this.springActive && reducedMotion) {
-      this.reset();
-      return;
+      if (this.state.dragging) {
+        this.setCreaseDepth(this.springTargetDepth);
+        this.springVelocity = 0;
+        this.springActive = false;
+        this.updatePeelUniforms();
+        this.emit("peelchange", {
+          amount: this.state.progress,
+          progress: this.state.progress,
+        });
+      } else {
+        this.reset();
+        return;
+      }
     }
 
     if (this.springActive) {
       const stiffness = 132 + clamp(this.options.peel.stiffness, 0, 1) * 146;
       const damping = Math.sqrt(stiffness) * 1.83;
-      const acceleration =
-        -stiffness * this.creaseDepth - damping * this.springVelocity;
-      this.springVelocity += acceleration * delta;
-      const nextDepth = this.creaseDepth + this.springVelocity * delta;
+      // Integrate in small fixed steps. A single delayed 50 ms frame with the
+      // old Euler step could consume nearly the whole return animation and
+      // still look like an instant reset.
+      let remainingSpringTime = delta;
+      let nextDepth = this.creaseDepth;
+      while (remainingSpringTime > 0) {
+        const springStep = Math.min(remainingSpringTime, 1 / 120);
+        const acceleration =
+          -stiffness * (nextDepth - this.springTargetDepth) -
+          damping * this.springVelocity;
+        this.springVelocity += acceleration * springStep;
+        nextDepth += this.springVelocity * springStep;
+        remainingSpringTime -= springStep;
+      }
       if (
-        nextDepth <= this.grabExtent * 0.0008 &&
+        Math.abs(nextDepth - this.springTargetDepth) <=
+          this.grabExtent * 0.0008 &&
         Math.abs(this.springVelocity) < this.grabExtent * 0.018
       ) {
-        this.setCreaseDepth(0);
+        this.setCreaseDepth(this.springTargetDepth);
         this.springVelocity = 0;
         this.springActive = false;
-        this.state.pointer = null;
-        this.state.grabPoint = null;
+        if (!this.state.dragging && this.springTargetDepth === 0) {
+          this.state.pointer = null;
+          this.state.grabPoint = null;
+        }
       } else {
         this.setCreaseDepth(Math.max(0, nextDepth));
-        this.state.pointer = {
-          x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
-          y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection,
-        };
+        if (!this.state.dragging) {
+          this.state.pointer = {
+            x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
+            y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection,
+          };
+        }
       }
       this.updatePeelUniforms();
       this.emit("peelchange", {

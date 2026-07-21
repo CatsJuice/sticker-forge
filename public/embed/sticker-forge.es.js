@@ -16760,7 +16760,7 @@ var yi = {
       fontWeight: 500
     }]
   }] }
-}, bs = 2.55, Yf = Math.PI, Kf = 1.28, qf = 4e-3, Jf = -0.22, Zf = 0.74, jf = 760, $f = 520, eu = 0.72, tu = 0.06, iu = 0.42, nu = 0.9, Au = "#615cff";
+}, bs = 2.55, Yf = Math.PI, Kf = 1.28, qf = 4e-3, Jf = -0.22, Zf = 0.035, jf = 0.74, $f = 760, eu = 520, tu = 0.72, iu = 0.06, nu = 0.42, Au = 0.9, ru = "#615cff";
 function tt(e, t, i) {
   return Math.min(i, Math.max(t, e));
 }
@@ -16801,9 +16801,9 @@ function Rs(e, t) {
     }
   };
 }
-var ru = class {
+var su = class {
   constructor(e, t = {}) {
-    this.camera = new mA(-1, 1, 1, -1, 0.01, 10), this.scene = new al(), this.peelAudio = new If(), this.groundShadowGeometry = new Dn(1, 1), this.peelShadowLight = new zl(16777215, 1), this.peelShadowTarget = new It(), this.geometry = new Dn(1, 1, 2, 2), this.texture = null, this.artwork = null, this.source = yi, this.requestedSource = yi, this.sourceRevision = 0, this.sourceRebuildTimer = null, this.destroyed = !1, this.resizeObserver = null, this.viewWidth = 2, this.viewHeight = 2, this.viewportHeightPx = 420, this.meshWidth = 1.6, this.meshHeight = 0.62, this.pointerId = null, this.grabOrigin = new Re(-0.8, 0), this.grabStart = new Re(), this.grabDirection = new Re(1, 0), this.activeDirection = new Re(1, 0), this.grabExtent = 1.6, this.creaseDepth = 0, this.basePeelRadius = 0.08, this.effectivePeelRadius = 0.08, this.grabProjection = 0, this.springVelocity = 0, this.springActive = !1, this.detachedExitActive = !1, this.detachedExitElapsed = 0, this.detachedExitSpin = 0, this.entranceActive = !1, this.entranceElapsed = 0, this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.entranceAxis = new Re(1, 0), this.frameRequest = 0, this.lastFrameTime = 0, this.state = {
+    this.camera = new mA(-1, 1, 1, -1, 0.01, 10), this.scene = new al(), this.peelAudio = new If(), this.groundShadowGeometry = new Dn(1, 1), this.peelShadowLight = new zl(16777215, 1), this.peelShadowTarget = new It(), this.geometry = new Dn(1, 1, 2, 2), this.texture = null, this.artwork = null, this.source = yi, this.requestedSource = yi, this.sourceRevision = 0, this.sourceRebuildTimer = null, this.destroyed = !1, this.resizeObserver = null, this.viewWidth = 2, this.viewHeight = 2, this.viewportHeightPx = 420, this.meshWidth = 1.6, this.meshHeight = 0.62, this.pointerId = null, this.grabOrigin = new Re(-0.8, 0), this.grabStart = new Re(), this.grabDirection = new Re(1, 0), this.activeDirection = new Re(1, 0), this.grabExtent = 1.6, this.creaseDepth = 0, this.basePeelRadius = 0.08, this.effectivePeelRadius = 0.08, this.grabProjection = 0, this.springVelocity = 0, this.springActive = !1, this.springTargetDepth = 0, this.detachedExitActive = !1, this.detachedExitElapsed = 0, this.detachedExitSpin = 0, this.entranceActive = !1, this.entranceElapsed = 0, this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.entranceAxis = new Re(1, 0), this.frameRequest = 0, this.lastFrameTime = 0, this.state = {
       ready: !1,
       dragging: !1,
       progress: 0,
@@ -16822,7 +16822,7 @@ var ru = class {
         this.startInteractionHint();
         return;
       }
-      this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.uniforms.uInteractionHint.value = 0, A.preventDefault(), this.renderer.domElement.focus({ preventScroll: !0 }), this.renderer.domElement.setPointerCapture(A.pointerId), this.pointerId = A.pointerId, this.grabOrigin.copy(s.local), this.grabStart.copy(s.local), this.grabDirection.copy(s.inward), this.activeDirection.copy(s.inward), this.grabExtent = this.projectionExtent(this.grabOrigin, this.grabDirection), this.setCreaseDepth(0), this.springActive = !1, this.springVelocity = 0, this.state.dragging = !0, this.state.grabPoint = {
+      this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.uniforms.uInteractionHint.value = 0, A.preventDefault(), this.renderer.domElement.focus({ preventScroll: !0 }), this.renderer.domElement.setPointerCapture(A.pointerId), this.pointerId = A.pointerId, this.grabOrigin.copy(s.local), this.grabStart.copy(s.local), this.grabDirection.copy(s.inward), this.activeDirection.copy(s.inward), this.grabExtent = this.projectionExtent(this.grabOrigin, this.grabDirection), this.setCreaseDepth(0), this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = 0, this.state.dragging = !0, this.state.grabPoint = {
         x: s.local.x,
         y: s.local.y
       }, this.state.pointer = {
@@ -16846,12 +16846,18 @@ var ru = class {
       }
       A.preventDefault();
       const s = r.clone().sub(this.grabStart), a = s.length();
-      let l = 0;
+      let l = 0, o = !1;
       if (a > qf) {
-        const o = s.clone().normalize();
-        o.dot(this.grabDirection) >= Jf ? (this.activeDirection.copy(o), l = a) : (this.activeDirection.copy(this.grabDirection), l = Math.max(0, s.dot(this.grabDirection)));
+        const c = s.clone().normalize();
+        c.dot(this.grabDirection) >= Jf ? (this.activeDirection.copy(c), l = a) : o = !0;
       } else this.activeDirection.copy(this.grabDirection);
-      this.grabExtent = this.projectionExtent(this.grabOrigin, this.activeDirection), this.setCreaseDepth(this.solveCreaseDepth(l)), this.peelAudio.update(this.state.progress, A.timeStamp, this.activeDirection.x), this.state.pointer = {
+      if (this.grabExtent = this.projectionExtent(this.grabOrigin, this.activeDirection), o)
+        this.springActive || (this.springActive = !0, this.springVelocity = 0), this.springTargetDepth = 0;
+      else {
+        const c = this.solveCreaseDepth(l);
+        this.creaseDepth - c > this.grabExtent * Zf || this.springActive && c < this.creaseDepth ? (this.springActive || (this.springActive = !0, this.springVelocity = 0), this.springTargetDepth = c) : (this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = c, this.setCreaseDepth(c));
+      }
+      this.peelAudio.update(this.state.progress, A.timeStamp, this.activeDirection.x), this.state.pointer = {
         x: r.x,
         y: r.y
       }, this.updatePeelUniforms(), this.emit("peelchange", {
@@ -16898,18 +16904,26 @@ var ru = class {
       const r = this.lastFrameTime ? Math.min((A - this.lastFrameTime) / 1e3, 1 / 20) : 1 / 60;
       this.lastFrameTime = A;
       const s = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      if (this.springActive && s) {
+      if (this.springActive && s) if (this.state.dragging)
+        this.setCreaseDepth(this.springTargetDepth), this.springVelocity = 0, this.springActive = !1, this.updatePeelUniforms(), this.emit("peelchange", {
+          amount: this.state.progress,
+          progress: this.state.progress
+        });
+      else {
         this.reset();
         return;
       }
       if (this.springActive) {
-        const l = 132 + tt(this.options.peel.stiffness, 0, 1) * 146, o = Math.sqrt(l) * 1.83, c = -l * this.creaseDepth - o * this.springVelocity;
-        this.springVelocity += c * r;
-        const u = this.creaseDepth + this.springVelocity * r;
-        u <= this.grabExtent * 8e-4 && Math.abs(this.springVelocity) < this.grabExtent * 0.018 ? (this.setCreaseDepth(0), this.springVelocity = 0, this.springActive = !1, this.state.pointer = null, this.state.grabPoint = null) : (this.setCreaseDepth(Math.max(0, u)), this.state.pointer = {
+        const l = 132 + tt(this.options.peel.stiffness, 0, 1) * 146, o = Math.sqrt(l) * 1.83;
+        let c = r, u = this.creaseDepth;
+        for (; c > 0; ) {
+          const h = Math.min(c, 0.008333333333333333), p = -l * (u - this.springTargetDepth) - o * this.springVelocity;
+          this.springVelocity += p * h, u += this.springVelocity * h, c -= h;
+        }
+        Math.abs(u - this.springTargetDepth) <= this.grabExtent * 8e-4 && Math.abs(this.springVelocity) < this.grabExtent * 0.018 ? (this.setCreaseDepth(this.springTargetDepth), this.springVelocity = 0, this.springActive = !1, !this.state.dragging && this.springTargetDepth === 0 && (this.state.pointer = null, this.state.grabPoint = null)) : (this.setCreaseDepth(Math.max(0, u)), this.state.dragging || (this.state.pointer = {
           x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
           y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection
-        }), this.updatePeelUniforms(), this.emit("peelchange", {
+        })), this.updatePeelUniforms(), this.emit("peelchange", {
           amount: this.state.progress,
           progress: this.state.progress
         });
@@ -16924,14 +16938,14 @@ var ru = class {
       }
       if (this.entranceActive) {
         this.entranceElapsed += r;
-        const l = tt(this.entranceElapsed / eu, 0, 1);
+        const l = tt(this.entranceElapsed / tu, 0, 1);
         this.uniforms.uEntranceScaleProgress.value = l;
-        const o = tu, c = tt((this.entranceElapsed - o) / iu, 0, 1);
+        const o = iu, c = tt((this.entranceElapsed - o) / nu, 0, 1);
         this.uniforms.uEntranceSweep.value = this.entranceElapsed < o ? -1 : c, l >= 1 && c >= 1 && (this.entranceActive = !1, this.uniforms.uEntranceScaleProgress.value = -1, this.uniforms.uEntranceSweep.value = -1);
       }
       if (this.interactionHintActive) {
         this.interactionHintElapsed += r;
-        const l = tt(this.interactionHintElapsed / nu, 0, 1);
+        const l = tt(this.interactionHintElapsed / Au, 0, 1);
         if (s) this.uniforms.uInteractionHint.value = l < 0.72 ? 1 : 0;
         else {
           const o = Is(0, 0.12, l), c = 1 - Is(0.58, 1, l), u = 0.9 + Math.sin(l * Math.PI * 2) * 0.1;
@@ -16972,7 +16986,7 @@ var ru = class {
       uEntranceScaleProgress: { value: -1 },
       uInteractionHint: { value: 0 },
       uInteractionHintRadius: { value: 3 },
-      uInteractionHintColor: { value: xi(Au, "#615cff") }
+      uInteractionHintColor: { value: xi(ru, "#615cff") }
     };
     const i = {
       ...ua.clone(se.lights),
@@ -17037,7 +17051,7 @@ var ru = class {
   }
   reset() {
     const e = this.pointerId;
-    this.pointerId = null, this.state.dragging = !1, e !== null && this.renderer.domElement.hasPointerCapture(e) && this.renderer.domElement.releasePointerCapture(e), this.springActive = !1, this.springVelocity = 0, this.detachedExitActive = !1, this.detachedExitElapsed = 0, this.detachedExitSpin = 0, this.entranceActive = !1, this.entranceElapsed = 0, this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.stickerMesh.position.set(0, 0, 0), this.stickerMesh.scale.set(1, 1, 1), this.stickerMesh.rotation.z = Qi.degToRad(this.options.tilt), this.uniforms.uEntranceSweep.value = -1, this.uniforms.uEntranceScaleProgress.value = -1, this.uniforms.uInteractionHint.value = 0, this.peelAudio.reset(0), this.setCreaseDepth(0), this.state.pointer = null, this.state.grabPoint = null, this.renderer.domElement.style.cursor = "default", this.updatePeelUniforms(), this.emit("peelchange", {
+    this.pointerId = null, this.state.dragging = !1, e !== null && this.renderer.domElement.hasPointerCapture(e) && this.renderer.domElement.releasePointerCapture(e), this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = 0, this.detachedExitActive = !1, this.detachedExitElapsed = 0, this.detachedExitSpin = 0, this.entranceActive = !1, this.entranceElapsed = 0, this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.stickerMesh.position.set(0, 0, 0), this.stickerMesh.scale.set(1, 1, 1), this.stickerMesh.rotation.z = Qi.degToRad(this.options.tilt), this.uniforms.uEntranceSweep.value = -1, this.uniforms.uEntranceScaleProgress.value = -1, this.uniforms.uInteractionHint.value = 0, this.peelAudio.reset(0), this.setCreaseDepth(0), this.state.pointer = null, this.state.grabPoint = null, this.renderer.domElement.style.cursor = "default", this.updatePeelUniforms(), this.emit("peelchange", {
       amount: 0,
       progress: 0
     }), this.requestRender();
@@ -17069,7 +17083,7 @@ var ru = class {
     });
   }
   updateMeshGeometry(e) {
-    const t = this.viewHeight / Math.max(1, this.viewportHeightPx), i = Math.min(this.viewWidth * 0.78, jf * t), n = Math.min(this.viewHeight * 0.58, $f * t);
+    const t = this.viewHeight / Math.max(1, this.viewportHeightPx), i = Math.min(this.viewWidth * 0.78, $f * t), n = Math.min(this.viewHeight * 0.58, eu * t);
     let A = i, r = A / e;
     r > n && (r = n, A = r * e), this.meshWidth = Math.max(0.34, A), this.meshHeight = Math.max(0.25, r);
     const s = this.options.quality === "high" ? 240 : this.options.quality === "medium" ? 160 : 96, a = tt(Math.round(s), 64, 256), l = tt(Math.round(s / Math.max(e, 0.35)), 56, 192), o = new Dn(this.meshWidth, this.meshHeight, a, l), c = this.geometry;
@@ -17185,13 +17199,13 @@ var ru = class {
     if (!this.state.dragging) return;
     const t = this.pointerId;
     this.pointerId = null, this.state.dragging = !1, t !== null && this.renderer.domElement.hasPointerCapture(t) && this.renderer.domElement.releasePointerCapture(t), this.renderer.domElement.style.cursor = "grab";
-    const i = this.options.peel.release, n = i === "snap" && this.state.progress >= Zf;
+    const i = this.options.peel.release, n = i === "snap" && this.state.progress >= jf;
     n && (this.setCreaseDepth(this.grabExtent), this.state.pointer = {
       x: this.grabOrigin.x + this.activeDirection.x * this.grabProjection,
       y: this.grabOrigin.y + this.activeDirection.y * this.grabProjection
     }, this.updatePeelUniforms(), this.peelAudio.update(this.state.progress, e, this.activeDirection.x)), this.peelAudio.end(this.state.progress);
     const A = i === "reset" || i === "snap" && !n, r = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (A && !r && (this.springActive = !0, this.springVelocity = 0), this.emit("peelend", {
+    if (A || (this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = this.creaseDepth), A && !r && (this.springActive = !0, this.springVelocity = 0, this.springTargetDepth = 0), this.emit("peelend", {
       amount: this.state.progress,
       progress: this.state.progress,
       willReset: A
@@ -17221,15 +17235,15 @@ var ru = class {
     this.container.dispatchEvent(new CustomEvent(e, { detail: t }));
   }
 };
-async function su(e, t = {}) {
+async function au(e, t = {}) {
   if (typeof document > "u") throw new Error("Sticker Forge can only be created in a browser.");
   const i = typeof e == "string" ? document.querySelector(e) : e;
   if (!i) throw new Error("Sticker Forge could not find its target element.");
-  const n = new ru(i, t);
+  const n = new su(i, t);
   return await n.setSource(t.source ?? yi), n;
 }
-var au = typeof HTMLElement > "u" ? class {
-} : HTMLElement, Ls = class extends au {
+var ou = typeof HTMLElement > "u" ? class {
+} : HTMLElement, Ls = class extends ou {
   constructor(...e) {
     super(...e), this.instance = null, this.instancePromise = null, this.mountElement = null, this.pendingOptions = {}, this.pendingSource = null, this.lifecycleRevision = 0;
   }
@@ -17308,7 +17322,7 @@ var au = typeof HTMLElement > "u" ? class {
     if (this.instance) return Promise.resolve(this.instance);
     if (this.instancePromise) return this.instancePromise;
     if (!this.mountElement) return Promise.reject(/* @__PURE__ */ new Error("The sticker element is not connected."));
-    const e = Rs(this.pendingOptions, { source: this.pendingSource ?? yi }), t = this.lifecycleRevision, i = su(this.mountElement, e);
+    const e = Rs(this.pendingOptions, { source: this.pendingSource ?? yi }), t = this.lifecycleRevision, i = au(this.mountElement, e);
     return this.instancePromise = i, i.then((n) => {
       if (this.instancePromise === i && (this.instancePromise = null), t !== this.lifecycleRevision || !this.isConnected) {
         n.destroy();
@@ -17329,18 +17343,18 @@ var au = typeof HTMLElement > "u" ? class {
     }), i;
   }
 };
-function ou(e = "sticker-forge") {
+function lu(e = "sticker-forge") {
   if (!(typeof customElements > "u") && !customElements.get(e)) {
     const t = e === "sticker-forge" ? Ls : class extends Ls {
     };
     customElements.define(e, t);
   }
 }
-ou();
+lu();
 export {
   Ls as StickerForgeElement,
-  su as createSticker,
-  ou as defineStickerForge,
+  au as createSticker,
+  lu as defineStickerForge,
   Rf as sanitizeSvgMarkup
 };
 

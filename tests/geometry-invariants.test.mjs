@@ -157,6 +157,38 @@ test("recomputes the peel extent for the live drag direction", async () => {
   );
 });
 
+test("smoothly returns a lifted sticker when the drag enters an invalid direction", async () => {
+  const renderer = await readFile(
+    new URL("../lib/sticker-forge.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(renderer, /let shouldReturnFromInvalidDirection = false/);
+  assert.match(
+    renderer,
+    /candidate\.dot\(this\.grabDirection\)[\s\S]*?shouldReturnFromInvalidDirection = true/,
+  );
+  assert.match(
+    renderer,
+    /if \(shouldReturnFromInvalidDirection\) \{[\s\S]*?this\.springActive = true/,
+  );
+  assert.match(renderer, /const MAX_DIRECT_RETURN_STEP_RATIO = 0\.035/);
+  assert.match(
+    renderer,
+    /returnDistance > this\.grabExtent \* MAX_DIRECT_RETURN_STEP_RATIO/,
+  );
+  assert.match(
+    renderer,
+    /-stiffness \* \(nextDepth - this\.springTargetDepth\)/,
+  );
+  assert.match(renderer, /const springStep = Math\.min\(remainingSpringTime, 1 \/ 120\)/);
+  assert.match(renderer, /nextDepth \+= this\.springVelocity \* springStep/);
+  assert.doesNotMatch(
+    renderer,
+    /else \{\s*this\.activeDirection\.copy\(this\.grabDirection\);\s*pointerDistance = Math\.max/,
+  );
+});
+
 test("snaps a sufficiently peeled sticker to full detachment on release", async () => {
   const [renderer, types] = await Promise.all([
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),

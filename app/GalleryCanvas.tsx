@@ -17,6 +17,7 @@ import {
 } from "@fortawesome/free-regular-svg-icons";
 import {
   faArrowLeft,
+  faArrowUpFromBracket,
   faMinus,
   faPlus,
   faRotate,
@@ -74,6 +75,8 @@ type GalleryCanvasProps = {
   onEntryComplete: () => void;
   onSurfaceReady: () => void;
   onEditStart: () => void;
+  onExport: (asset: GalleryAsset) => void;
+  interactionBlocked?: boolean;
   resolveEditTarget: (
     item: GalleryItem,
     asset: GalleryAsset,
@@ -139,6 +142,7 @@ const COPY = {
     zoomIn: "放大",
     zoomOut: "缩小",
     resetView: "重置视图",
+    exportSticker: "导出贴纸",
     empty: "还没添加贴纸，去其他 gallery 拖入",
   },
   en: {
@@ -153,6 +157,7 @@ const COPY = {
     zoomIn: "Zoom in",
     zoomOut: "Zoom out",
     resetView: "Reset view",
+    exportSticker: "Export sticker",
     empty: "No stickers yet. Drag one in from another gallery.",
   },
 } as const;
@@ -355,8 +360,8 @@ function GalleryDeleteControl({
   });
   const keepWidth = 31 + progress * 45;
   const deleteWidth = 31 + progress * 45;
-  // The resting edit/delete pair spans -35px..35px around the frame center.
-  const deleteLeft = 4 + progress * 37;
+  // The resting edit/export/delete trio is centered beneath the frame.
+  const deleteLeft = 24 + progress * 37;
   const labelProgress = clamp((progress - 0.18) / 0.72, 0, 1);
   const iconProgress = clamp(1 - progress / 0.62, 0, 1);
 
@@ -464,6 +469,8 @@ function GalleryItemView({
   onConfirmDelete,
   editing,
   onEdit,
+  onExport,
+  exportLabel,
   onMovePointer,
   onMoveDrop,
   hitTestItem,
@@ -487,6 +494,8 @@ function GalleryItemView({
   onConfirmDelete: () => void;
   editing: boolean;
   onEdit: () => void;
+  onExport: () => void;
+  exportLabel: string;
   onMovePointer: (
     id: string,
     clientX: number | null,
@@ -742,6 +751,20 @@ function GalleryItemView({
               <FontAwesomeIcon icon={faPenToSquare} />
             </button>
           </div>
+          <div className="gallery-export-control" data-gallery-control>
+            <button
+              className="gallery-export-button"
+              type="button"
+              aria-label={exportLabel}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation();
+                onExport();
+              }}
+            >
+              <FontAwesomeIcon icon={faArrowUpFromBracket} />
+            </button>
+          </div>
         </div>
       ) : null}
     </div>
@@ -933,6 +956,8 @@ export function GalleryCanvas({
   onEntryComplete,
   onSurfaceReady,
   onEditStart,
+  onExport,
+  interactionBlocked = false,
   resolveEditTarget,
   onEditComplete,
   onEditHandoffComplete,
@@ -1488,6 +1513,16 @@ export function GalleryCanvas({
     [assets, closing, editTransition, onEditStart, resolveEditTarget],
   );
 
+  const handleExport = useCallback(
+    (item: GalleryItem) => {
+      const asset = assets[item.id];
+      if (!asset) return;
+      setDeleteCandidate(null);
+      onExport(asset);
+    },
+    [assets, onExport],
+  );
+
   const handleEditSettled = useCallback(() => {
     if (!editTransition || editCompleteRef.current) return;
     editCompleteRef.current = true;
@@ -1677,6 +1712,7 @@ export function GalleryCanvas({
   ]);
 
   useEffect(() => {
+    if (interactionBlocked) return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (deleting || editTransition) return;
       if (event.key === "Escape") {
@@ -1699,7 +1735,14 @@ export function GalleryCanvas({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [deleteCandidate, deleting, editTransition, requestClose, selectedId]);
+  }, [
+    deleteCandidate,
+    deleting,
+    editTransition,
+    interactionBlocked,
+    requestClose,
+    selectedId,
+  ]);
 
   const worldStyle = {
     transform: `translate3d(${viewport.width / 2 - view.x * view.zoom}px, ${viewport.height / 2 - view.y * view.zoom}px, 0) scale(${view.zoom})`,
@@ -1715,7 +1758,7 @@ export function GalleryCanvas({
       tabIndex={-1}
       style={{
         "--gallery-presence": surfacePresence,
-        pointerEvents: editTransition ? "none" : "auto",
+        pointerEvents: interactionBlocked || editTransition ? "none" : "auto",
       } as CSSProperties}
     >
       <div
@@ -1830,6 +1873,8 @@ export function GalleryCanvas({
               onConfirmDelete={() => void handleDelete()}
               editing={Boolean(editTransition)}
               onEdit={() => handleEdit(item)}
+              onExport={() => handleExport(item)}
+              exportLabel={t.exportSticker}
               onMovePointer={handleMovePointer}
               onMoveDrop={handleMoveDrop}
               hitTestItem={hitTestItem}

@@ -20,7 +20,9 @@ export interface PreparedArtwork {
   hasTransparency: boolean;
 }
 
-const MAX_TEXTURE_EDGE = 1536;
+// The export workspace supports up to 260% zoom. A 2K source keeps generated
+// text and SVG artwork sharp at that scale without inflating every texture to 4K.
+const MAX_TEXTURE_EDGE = 2048;
 const MIN_TEXTURE_EDGE = 320;
 
 function clamp(value: number, min: number, max: number) {
@@ -198,7 +200,7 @@ async function renderTextSource(source: StickerTextSource) {
   if (richBlocks?.length) {
     const probe = document.createElement("canvas").getContext("2d");
     if (!probe) throw new Error("Canvas 2D is unavailable.");
-    const padding = 128;
+    const padding = 144;
 
     const buildLayout = (scale: number) => {
       const lines = richBlocks.map((block) => {
@@ -247,8 +249,8 @@ async function renderTextSource(source: StickerTextSource) {
 
     let scale = 8;
     let layout = buildLayout(scale);
-    const widthScale = 1240 / Math.max(layout.contentWidth, 1);
-    const heightScale = 1280 / Math.max(layout.contentHeight, 1);
+    const widthScale = 1750 / Math.max(layout.contentWidth, 1);
+    const heightScale = 1790 / Math.max(layout.contentHeight, 1);
     if (widthScale < 1 || heightScale < 1) {
       scale *= Math.min(widthScale, heightScale);
       layout = buildLayout(scale);
@@ -317,7 +319,7 @@ async function renderTextSource(source: StickerTextSource) {
   }
 
   const fontWeight = defaultWeight;
-  let fontSize = 300;
+  let fontSize = 420;
   const probe = document.createElement("canvas").getContext("2d");
   if (!probe) throw new Error("Canvas 2D is unavailable.");
 
@@ -333,8 +335,8 @@ async function renderTextSource(source: StickerTextSource) {
   probe.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
   let metrics = probe.measureText(text);
   const initialWidth = Math.max(1, metrics.width);
-  if (initialWidth > 1240) {
-    fontSize *= 1240 / initialWidth;
+  if (initialWidth > 1750) {
+    fontSize *= 1750 / initialWidth;
     probe.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
     metrics = probe.measureText(text);
   }
@@ -342,7 +344,7 @@ async function renderTextSource(source: StickerTextSource) {
   const ascent =
     metrics.actualBoundingBoxAscent || Math.max(fontSize * 0.76, 1);
   const descent = metrics.actualBoundingBoxDescent || Math.max(fontSize * 0.2, 1);
-  const padding = 128;
+  const padding = 144;
   const width = clamp(
     Math.ceil(metrics.width + padding * 2),
     MIN_TEXTURE_EDGE,
@@ -351,7 +353,7 @@ async function renderTextSource(source: StickerTextSource) {
   const height = clamp(
     Math.ceil(ascent + descent + padding * 2),
     MIN_TEXTURE_EDGE,
-    960,
+    1280,
   );
   const canvas = document.createElement("canvas");
   canvas.width = width;
@@ -371,8 +373,8 @@ async function renderTextSource(source: StickerTextSource) {
 async function renderSvgSource(source: StickerSvgSource) {
   const sanitized = sanitizeSvgMarkup(source.svg);
   const aspect = getSvgAspect(sanitized);
-  const contentMax = 1210;
-  const padding = 128;
+  const contentMax = 1740;
+  const padding = 144;
   const contentWidth = aspect >= 1 ? contentMax : contentMax * aspect;
   const contentHeight = aspect >= 1 ? contentMax / aspect : contentMax;
   const width = clamp(
@@ -406,8 +408,8 @@ async function renderImageSource(source: StickerImageSource) {
   const image = await loadImage(source.src);
   const hasTransparency = imageHasTransparency(image);
   const aspect = clamp(image.naturalWidth / image.naturalHeight, 0.15, 8);
-  const contentMax = 1210;
-  const padding = 128;
+  const contentMax = 1740;
+  const padding = 144;
   const contentWidth = aspect >= 1 ? contentMax : contentMax * aspect;
   const contentHeight = aspect >= 1 ? contentMax / aspect : contentMax;
   const width = clamp(

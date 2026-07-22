@@ -186,7 +186,8 @@ coordinates.
 
 `peel.radius` is normalized to the sticker's short side (`0.12` means 12%),
 while `peel.maxAngle` is expressed in radians. Shadow direction and `tilt` are
-expressed in degrees; shadow blur/distance and `peel.grabWidth` use CSS pixels.
+expressed in degrees; shadow blur/distance use CSS pixels, while
+`peel.grabWidth` uses CSS pixels at 100% scale and scales with the sticker.
 
 The bundled recording is treated as an audio sprite rather than a timeline.
 Sticker Forge separates its lift, light crackle, strong tear, and release

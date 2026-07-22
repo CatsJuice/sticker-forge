@@ -71,7 +71,7 @@ export interface StickerPeelOptions {
   radius?: number;
   /** Normalized spring stiffness from 0 to 1. */
   stiffness?: number;
-  /** Draggable edge-band width in CSS pixels. */
+  /** Draggable edge-band width in CSS pixels at 100% scale. */
   grabWidth?: number;
   /** Maximum curl angle in radians; degree values are also accepted when > 2π. */
   maxAngle?: number;
@@ -107,6 +107,8 @@ export interface StickerInstance {
   setSource(source: StickerSource): Promise<void>;
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  /** Replay the built-in spring-and-sweep entrance animation. */
+  reappear(): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;

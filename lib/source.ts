@@ -12,6 +12,8 @@ export interface PreparedArtwork {
   height: number;
   aspect: number;
   alpha: Uint8ClampedArray;
+  /** Transparent pixels connected to the canvas edge (the sticker exterior). */
+  exteriorAlpha: Uint8Array;
   /** Normalized left/right silhouette extremes for every occupied scanline. */
   support: Float32Array;
   /** Whether the decoded source image contained non-opaque pixels. */
@@ -23,6 +25,49 @@ const MIN_TEXTURE_EDGE = 320;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function createExteriorAlphaMask(
+  alpha: Uint8ClampedArray,
+  width: number,
+  height: number,
+) {
+  const exterior = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  const transparentThreshold = 0.1 * 255;
+  let queueStart = 0;
+  let queueEnd = 0;
+
+  const enqueue = (x: number, y: number) => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return;
+    const index = y * width + x;
+    if (exterior[index] || alpha[index] >= transparentThreshold) return;
+    exterior[index] = 1;
+    queue[queueEnd] = index;
+    queueEnd += 1;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x, 0);
+    enqueue(x, height - 1);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(0, y);
+    enqueue(width - 1, y);
+  }
+
+  while (queueStart < queueEnd) {
+    const index = queue[queueStart];
+    queueStart += 1;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    enqueue(x - 1, y);
+    enqueue(x + 1, y);
+    enqueue(x, y - 1);
+    enqueue(x, y + 1);
+  }
+
+  return exterior;
 }
 
 function parseSvgNumber(value: string | null): number | null {
@@ -589,6 +634,7 @@ export async function prepareArtwork(
     height: canvas.height,
     aspect: canvas.width / canvas.height,
     alpha,
+    exteriorAlpha: createExteriorAlphaMask(alpha, canvas.width, canvas.height),
     support: new Float32Array(support),
     hasTransparency: rendered.hasTransparency,
   };

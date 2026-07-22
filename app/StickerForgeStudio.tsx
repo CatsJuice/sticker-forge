@@ -9,6 +9,27 @@ import {
   type CSSProperties,
   type DragEvent,
 } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faGithub } from "@fortawesome/free-brands-svg-icons";
+import {
+  faCircleCheck,
+  faCopy,
+  faSquarePlus,
+} from "@fortawesome/free-regular-svg-icons";
+import {
+  faAlignCenter,
+  faAlignLeft,
+  faAlignRight,
+  faArrowLeft,
+  faArrowRight,
+  faBold,
+  faChevronDown,
+  faFont,
+  faPlus,
+  faRotateLeft,
+  faTextHeight,
+  faUnderline,
+} from "@fortawesome/free-solid-svg-icons";
 import type {
   StickerInstance,
   StickerOptions,
@@ -18,22 +39,39 @@ import type {
   StickerSource,
 } from "@/lib/sticker-forge";
 import { sanitizeSvgMarkup } from "@/lib/sticker-forge";
-import { createGalleryPreview } from "@/lib/gallery-preview";
+import {
+  createGalleryPreview,
+  type GalleryPreviewResult,
+} from "@/lib/gallery-preview";
 import {
   createGalleryItem,
   deleteGalleryItem,
+  listGalleryFolders,
   listGalleryItems,
+  updateGalleryLayout,
 } from "@/lib/gallery-storage";
 import type {
   CreateGalleryPayload,
+  GalleryAsset,
+  GalleryFolderRecord,
   GalleryItem,
   GalleryLayout,
 } from "@/lib/gallery-types";
 import {
+  DEFAULT_GALLERY_FOLDER_ID,
+  EVOLUTION_GALLERY_FOLDER_ID,
+} from "@/lib/gallery-types";
+import {
   GalleryCanvas,
+  type GalleryEditTarget,
   type GalleryEntryOrigin,
+  type GalleryFolderDropPreview,
 } from "./GalleryCanvas";
-import { GalleryFolder } from "./GalleryFolder";
+import { GalleryFolderDock } from "./GalleryFolderDock";
+import {
+  GalleryAddFlight,
+  type GalleryAddFlightRect,
+} from "./GalleryAddFlight";
 
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
@@ -159,7 +197,7 @@ const UI = {
     addedToGallery: "已添加到 Gallery",
     galleryLoadFailed: "Gallery 暂时无法加载",
     galleryAddFailed: "无法添加到 Gallery，请稍后重试",
-    copied: "✓ 已复制代码",
+    copied: "已复制代码",
     copiedAnnouncement: "嵌入代码已复制",
     resetSticker: "重置贴纸",
   },
@@ -227,7 +265,7 @@ const UI = {
     addedToGallery: "Added to Gallery",
     galleryLoadFailed: "Gallery is temporarily unavailable",
     galleryAddFailed: "Could not add to Gallery. Try again in a moment.",
-    copied: "✓ Code copied",
+    copied: "Code copied",
     copiedAnnouncement: "Embed code copied",
     resetSticker: "Reset sticker",
   },
@@ -402,11 +440,60 @@ function readRichTextEditor(
   };
 }
 
+function writeRichTextEditor(
+  root: HTMLDivElement,
+  document: StickerRichTextDocument,
+  fallbackColor: string,
+) {
+  const blocks = document.blocks.length
+    ? document.blocks
+    : [{ align: "center" as const, lineHeight: 1.2, runs: [{ text: "" }] }];
+  const elements = blocks.map((block) => {
+    const element = window.document.createElement("div");
+    const lineHeight = block.lineHeight ?? 1.2;
+    const maxFontSize = Math.max(
+      1,
+      ...block.runs.map((run) => run.fontSize ?? 28),
+    );
+    element.dataset.lineHeight = String(lineHeight);
+    element.style.textAlign = block.align ?? "center";
+    element.style.lineHeight = `${maxFontSize * lineHeight}px`;
+    for (const run of block.runs) {
+      const span = window.document.createElement("span");
+      span.textContent = run.text;
+      span.style.color = run.color ?? fallbackColor;
+      span.style.fontSize = `${run.fontSize ?? 28}px`;
+      span.style.fontWeight = String(run.fontWeight ?? 900);
+      if (run.underline) span.style.textDecoration = "underline";
+      element.appendChild(span);
+    }
+    return element;
+  });
+  root.replaceChildren(...elements);
+}
+
 function asStickerOptions(
   source: StickerSource,
   settings: StudioSettings,
 ): StickerOptions {
   return { source, ...settings };
+}
+
+function studioSettingsFrom(options: StickerOptions): StudioSettings {
+  return {
+    outline: { ...DEFAULT_SETTINGS.outline, ...options.outline },
+    shadow: { ...DEFAULT_SETTINGS.shadow, ...options.shadow },
+    peel: {
+      ...DEFAULT_SETTINGS.peel,
+      ...options.peel,
+      release: "snap",
+    },
+    sound: { ...DEFAULT_SETTINGS.sound, ...options.sound },
+    back: { ...DEFAULT_SETTINGS.back, ...options.back },
+    tilt: options.tilt ?? DEFAULT_SETTINGS.tilt,
+    wind: options.wind ?? DEFAULT_SETTINGS.wind,
+    quality: "high",
+  };
 }
 
 function stringifyForInlineScript(value: unknown, space?: number): string {
@@ -433,8 +520,41 @@ function galleryLayoutFor(
   };
 }
 
-const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-indexeddb-defaults-v1";
+const LEGACY_DEFAULT_GALLERY_SEED_V1_KEY =
+  "sticker-forge-gallery-indexeddb-defaults-v1";
+const LEGACY_DEFAULT_GALLERY_SEED_V2_KEY =
+  "sticker-forge-gallery-indexeddb-defaults-v2";
+const LEGACY_DEFAULT_GALLERY_SEED_V3_KEY =
+  "sticker-forge-gallery-indexeddb-defaults-v3";
+const LEGACY_DEFAULT_GALLERY_SEED_V4_KEY =
+  "sticker-forge-gallery-indexeddb-defaults-v4";
+const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-indexeddb-defaults-v5";
 const DEFAULT_GALLERY_SEED_LOCK_KEY = `${DEFAULT_GALLERY_SEED_KEY}-lock`;
+
+const DEFAULT_GALLERY_IMAGE_SOURCES: StickerSource[] = [
+  { type: "image", src: "/default-gallery/vue.svg", name: "Vue" },
+  { type: "image", src: "/default-gallery/react.svg", name: "React" },
+  { type: "image", src: "/default-gallery/claude.svg", name: "Claude" },
+  { type: "image", src: "/default-gallery/chatgpt.svg", name: "ChatGPT" },
+  { type: "image", src: "/default-gallery/affine.svg", name: "AFFiNE" },
+  { type: "image", src: "/default-gallery/vite.svg", name: "Vite" },
+];
+
+const EVOLUTION_GALLERY_IMAGE_SOURCES: StickerSource[] = [
+  { type: "image", src: "/default-gallery/bridge-1.svg", name: "Bridge 1" },
+  { type: "image", src: "/default-gallery/bridge-2.svg", name: "Bridge 2" },
+  { type: "image", src: "/default-gallery/bridge-3.svg", name: "Bridge 3" },
+  { type: "image", src: "/default-gallery/bridge-4.svg", name: "Bridge 4" },
+  { type: "image", src: "/default-gallery/bridge-5.svg", name: "Bridge 5" },
+];
+
+const EVOLUTION_GALLERY_LAYOUTS: GalleryLayout[] = [
+  { x: -642, y: 60, width: 404, height: 527, rotation: 0, zIndex: 1 },
+  { x: -356, y: 46, width: 323, height: 556, rotation: 0, zIndex: 2 },
+  { x: -97, y: 25, width: 355, height: 678, rotation: 0, zIndex: 3 },
+  { x: 179, y: 11, width: 366, height: 770, rotation: 0, zIndex: 4 },
+  { x: 487, y: 1, width: 330, height: 759, rotation: 0, zIndex: 5 },
+];
 
 function galleryTitleFor(source: StickerSource): string {
   if (source.type === "text") {
@@ -466,6 +586,70 @@ async function createStoredGalleryItem(
     ),
   };
   return createGalleryItem(payload);
+}
+
+async function createStoredGalleryItemWithPreview(
+  source: StickerSource,
+  options: StudioSettings,
+  layoutIndex: number,
+): Promise<{ item: GalleryItem; preview: GalleryPreviewResult }> {
+  const preview = await createGalleryPreview(source, options.outline);
+  const item = await createGalleryItem({
+    source,
+    options,
+    previewDataUrl: preview.dataUrl,
+    previewWidth: preview.previewWidth,
+    previewHeight: preview.previewHeight,
+    title: galleryTitleFor(source),
+    layout: galleryLayoutFor(
+      layoutIndex,
+      preview.suggestedWidth,
+      preview.suggestedHeight,
+    ),
+  });
+  return { item, preview };
+}
+
+function editorStickerRect(
+  host: HTMLElement,
+  aspect: number,
+): GalleryAddFlightRect {
+  const hostRect = host.getBoundingClientRect();
+  const maxWidth = Math.min(hostRect.width * 0.78, 760);
+  const maxHeight = Math.min(hostRect.height * 0.58, 520);
+  let width = maxWidth;
+  let height = width / Math.max(0.05, aspect);
+  if (height > maxHeight) {
+    height = maxHeight;
+    width = height * aspect;
+  }
+  return {
+    left: hostRect.left + (hostRect.width - width) / 2,
+    top: hostRect.top + (hostRect.height - height) / 2,
+    width,
+    height,
+  };
+}
+
+function folderReceiveTarget(
+  folder: HTMLElement,
+  aspect: number,
+): { rect: GalleryAddFlightRect; rotation: number } {
+  const folderRect = folder.getBoundingClientRect();
+  const isWide = aspect > 1;
+  const width = isWide ? 38 : Math.min(34, 38 * aspect);
+  const height = isWide ? Math.max(8, width / aspect) : 38;
+  const centerX = folderRect.left + folderRect.width / 2;
+  const centerY = folderRect.top + 15;
+  return {
+    rect: {
+      left: centerX - width / 2,
+      top: centerY - height / 2,
+      width,
+      height,
+    },
+    rotation: isWide ? -90 : -11,
+  };
 }
 
 function RangeRow({
@@ -516,32 +700,11 @@ function RangeRow({
 }
 
 function AlignmentIcon({ align }: { align: "left" | "center" | "right" }) {
-  const rows =
-    align === "left"
-      ? [[3, 17], [3, 13], [3, 17], [3, 11]]
-      : align === "right"
-        ? [[3, 17], [7, 17], [3, 17], [9, 17]]
-        : [[3, 17], [6, 14], [3, 17], [7, 13]];
-
-  return (
-    <svg viewBox="0 0 20 20" aria-hidden="true">
-      {rows.map(([x1, x2], index) => (
-        <path key={index} d={`M${x1} ${5 + index * 3.3}H${x2}`} />
-      ))}
-    </svg>
-  );
+  return <FontAwesomeIcon icon={align === "left" ? faAlignLeft : align === "right" ? faAlignRight : faAlignCenter} />;
 }
 
 function DropdownChevron() {
-  return (
-    <svg
-      className="number-preset-chevron"
-      viewBox="0 0 16 16"
-      aria-hidden="true"
-    >
-      <path d="m4 6 4 4 4-4" />
-    </svg>
-  );
+  return <FontAwesomeIcon className="number-preset-chevron" icon={faChevronDown} />;
 }
 
 export function StickerForgeStudio() {
@@ -550,6 +713,7 @@ export function StickerForgeStudio() {
     [],
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  const galleryFolderRef = useRef<HTMLButtonElement>(null);
   const richEditorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
   const selectionOffsetsRef = useRef<{ start: number; end: number } | null>(null);
@@ -579,9 +743,31 @@ export function StickerForgeStudio() {
   const [copied, setCopied] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
+  const [galleryFolders, setGalleryFolders] = useState<GalleryFolderRecord[]>([]);
+  const [activeGalleryFolderId, setActiveGalleryFolderId] = useState(
+    DEFAULT_GALLERY_FOLDER_ID,
+  );
+  const [galleryDropPreview, setGalleryDropPreview] =
+    useState<GalleryFolderDropPreview | null>(null);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [galleryAdding, setGalleryAdding] = useState(false);
+  const [galleryFolderReceiving, setGalleryFolderReceiving] = useState(false);
+  const [galleryAddFlight, setGalleryAddFlight] = useState<{
+    itemId: string;
+    previewDataUrl: string;
+    start: GalleryAddFlightRect;
+    target: GalleryAddFlightRect;
+    coordinateOrigin: { left: number; top: number };
+    startRotation: number;
+    targetRotation: number;
+  } | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryClosing, setGalleryClosing] = useState(false);
+  const [galleryFlightStarted, setGalleryFlightStarted] = useState(false);
+  const [galleryEntryComplete, setGalleryEntryComplete] = useState(false);
+  const [gallerySurfaceHeld, setGallerySurfaceHeld] = useState(false);
+  const [galleryEditing, setGalleryEditing] = useState(false);
+  const [galleryEditorReady, setGalleryEditorReady] = useState(false);
   const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
     Record<string, GalleryEntryOrigin>
   >({});
@@ -603,13 +789,41 @@ export function StickerForgeStudio() {
     let cancelled = false;
     const loadGallery = async () => {
       try {
-        let nextItems = await listGalleryItems();
+        const [loadedItems, nextFolders] = await Promise.all([
+          listGalleryItems(),
+          listGalleryFolders(),
+        ]);
+        let nextItems = loadedItems;
         const lockToken = String(Date.now());
         let shouldSeedDefaults = nextItems.length === 0;
+        let defaultFolderSourcesToSeed: StickerSource[] = [
+          initialSource,
+          {
+            type: "image",
+            src: DEFAULT_IMAGE_SRC,
+            name: "Default Image",
+          },
+          ...DEFAULT_GALLERY_IMAGE_SOURCES,
+        ];
+        let shouldSeedEvolutionGallery = true;
+        let shouldRefreshEvolutionLayouts = false;
+        let shouldRemoveDuplicateBridge = false;
         let ownsSeedLock = false;
         try {
           const alreadySeeded =
             window.localStorage.getItem(DEFAULT_GALLERY_SEED_KEY) === "done";
+          const v2DefaultsWereSeeded =
+            window.localStorage.getItem(LEGACY_DEFAULT_GALLERY_SEED_V2_KEY) ===
+            "done";
+          const v3DefaultsWereSeeded =
+            window.localStorage.getItem(LEGACY_DEFAULT_GALLERY_SEED_V3_KEY) ===
+            "done";
+          const v4DefaultsWereSeeded =
+            window.localStorage.getItem(LEGACY_DEFAULT_GALLERY_SEED_V4_KEY) ===
+            "done";
+          const v1DefaultsWereSeeded =
+            window.localStorage.getItem(LEGACY_DEFAULT_GALLERY_SEED_V1_KEY) ===
+            "done";
           const lockStartedAt = Number(
             window.localStorage.getItem(DEFAULT_GALLERY_SEED_LOCK_KEY),
           );
@@ -617,11 +831,29 @@ export function StickerForgeStudio() {
             Number.isFinite(lockStartedAt) && Date.now() - lockStartedAt < 120_000;
           shouldSeedDefaults = !alreadySeeded && !lockIsFresh;
           if (shouldSeedDefaults) {
+            if (v4DefaultsWereSeeded) {
+              defaultFolderSourcesToSeed = [];
+              shouldSeedEvolutionGallery = false;
+              shouldRemoveDuplicateBridge = true;
+            } else if (v3DefaultsWereSeeded) {
+              defaultFolderSourcesToSeed = [];
+              shouldSeedEvolutionGallery = false;
+              shouldRefreshEvolutionLayouts = true;
+              shouldRemoveDuplicateBridge = true;
+            } else if (v2DefaultsWereSeeded) {
+              defaultFolderSourcesToSeed = [];
+              shouldRemoveDuplicateBridge = true;
+            } else if (v1DefaultsWereSeeded) {
+              defaultFolderSourcesToSeed = DEFAULT_GALLERY_IMAGE_SOURCES;
+            }
             window.localStorage.setItem(DEFAULT_GALLERY_SEED_LOCK_KEY, lockToken);
             ownsSeedLock = true;
+          } else {
+            shouldSeedEvolutionGallery = false;
           }
         } catch {
           // If browser storage is unavailable, seed only a genuinely empty gallery.
+          shouldSeedEvolutionGallery = shouldSeedDefaults;
         }
 
         if (shouldSeedDefaults) {
@@ -630,23 +862,75 @@ export function StickerForgeStudio() {
             (largest, item) => Math.max(largest, item.layout.zIndex),
             0,
           );
-          const defaultSources: StickerSource[] = [
-            initialSource,
-            {
-              type: "image",
-              src: DEFAULT_IMAGE_SRC,
-              name: "Default Image",
-            },
-          ];
           try {
-            for (const [offset, source] of defaultSources.entries()) {
-              created.push(
-                await createStoredGalleryItem(
-                  source,
-                  DEFAULT_SETTINGS,
-                  firstLayoutIndex + offset,
+            if (shouldRemoveDuplicateBridge) {
+              const duplicateBridge = nextItems.find(
+                (item) =>
+                  item.folderId === DEFAULT_GALLERY_FOLDER_ID &&
+                  item.title === "Bridge",
+              );
+              if (duplicateBridge) {
+                await deleteGalleryItem(duplicateBridge.id);
+                nextItems = nextItems.filter(
+                  (item) => item.id !== duplicateBridge.id,
+                );
+              }
+            }
+            for (const [offset, source] of defaultFolderSourcesToSeed.entries()) {
+              try {
+                created.push(
+                  await createStoredGalleryItem(
+                    source,
+                    DEFAULT_SETTINGS,
+                    firstLayoutIndex + offset,
+                  ),
+                );
+              } catch (error) {
+                console.error(`Could not seed ${galleryTitleFor(source)}.`, error);
+                throw error;
+              }
+            }
+            if (shouldRefreshEvolutionLayouts) {
+              for (const [index, source] of
+                EVOLUTION_GALLERY_IMAGE_SOURCES.entries()) {
+                const title = galleryTitleFor(source);
+                const existing = nextItems.find(
+                  (item) =>
+                    item.folderId === EVOLUTION_GALLERY_FOLDER_ID &&
+                    item.title === title,
+                );
+                if (!existing) continue;
+                const updated = await updateGalleryLayout(
+                  existing.id,
+                  EVOLUTION_GALLERY_LAYOUTS[index],
+                );
+                nextItems = nextItems.map((item) =>
+                  item.id === updated.id ? updated : item,
+                );
+              }
+            }
+            if (shouldSeedEvolutionGallery) {
+              const evolutionPreviews = await Promise.all(
+                EVOLUTION_GALLERY_IMAGE_SOURCES.map((source) =>
+                  createGalleryPreview(source, DEFAULT_SETTINGS.outline),
                 ),
               );
+              for (const [index, source] of
+                EVOLUTION_GALLERY_IMAGE_SOURCES.entries()) {
+                const preview = evolutionPreviews[index];
+                created.push(
+                  await createGalleryItem({
+                    folderId: EVOLUTION_GALLERY_FOLDER_ID,
+                    source,
+                    options: DEFAULT_SETTINGS,
+                    previewDataUrl: preview.dataUrl,
+                    previewWidth: preview.previewWidth,
+                    previewHeight: preview.previewHeight,
+                    title: galleryTitleFor(source),
+                    layout: EVOLUTION_GALLERY_LAYOUTS[index],
+                  }),
+                );
+              }
             }
             nextItems = [...created].reverse().concat(nextItems);
             try {
@@ -675,8 +959,12 @@ export function StickerForgeStudio() {
           }
         }
 
-        if (!cancelled) setGalleryItems(nextItems);
-      } catch {
+        if (!cancelled) {
+          setGalleryItems(nextItems);
+          setGalleryFolders(nextFolders);
+        }
+      } catch (error) {
+        console.error("Could not initialize the local gallery.", error);
         if (!cancelled) {
           setSourceMessage((message) =>
             message || UI.zh.galleryLoadFailed,
@@ -796,6 +1084,73 @@ export function StickerForgeStudio() {
       }
     },
     [clearPendingText, t],
+  );
+
+  const applyGalleryAssetToEditor = useCallback(
+    async (asset: GalleryAsset) => {
+      const nextSettings = studioSettingsFrom(asset.options);
+      settingsRef.current = nextSettings;
+      setSettings(nextSettings);
+      controllerRef.current?.setOptions(nextSettings);
+
+      const source = asset.source;
+      selectionRef.current = null;
+      selectionOffsetsRef.current = null;
+      if (source.type === "text") {
+        const nextColor =
+          source.color ??
+          source.richText?.blocks[0]?.runs[0]?.color ??
+          DEFAULT_INK;
+        const nextDocument =
+          source.richText ??
+          ({
+            blocks: source.text.split(/\r?\n/).map((line) => ({
+              align: "center" as const,
+              lineHeight: 1.2,
+              runs: [{
+                text: line,
+                color: nextColor,
+                fontSize: 28,
+                fontWeight: source.fontWeight ?? 900,
+              }],
+            })),
+          } satisfies StickerRichTextDocument);
+        const firstBlock = nextDocument.blocks[0];
+        const firstRun = firstBlock?.runs[0];
+        setSourceMode("text");
+        setText(source.text);
+        setInkColor(nextColor);
+        setRichText(nextDocument);
+        setEditorFontSize(String(firstRun?.fontSize ?? 28));
+        setEditorLineHeightValue(String(firstBlock?.lineHeight ?? 1.2));
+        setEditorAlign(firstBlock?.align ?? "center");
+        if (richEditorRef.current) {
+          writeRichTextEditor(richEditorRef.current, nextDocument, nextColor);
+        }
+      } else if (source.type === "image") {
+        setSourceMode("image");
+        setImageDataUrl(source.src);
+        setImageName(source.name ?? "");
+      } else {
+        setSourceMode("image");
+        setImageDataUrl(
+          `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source.svg)}`,
+        );
+        setImageName("SVG Sticker");
+      }
+
+      await applySource(source);
+      // setSource resolves after the new texture and geometry are installed,
+      // while the actual WebGL draw is queued for the next animation frame.
+      // Wait for that draw before exposing the editor below the gallery copy.
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => resolve());
+      });
+      // Reveal the prepared editor renderer beneath the final gallery frame.
+      // GalleryCanvas owns the short Spring cross-fade and unmounts afterward.
+      setGalleryEditorReady(true);
+    },
+    [applySource],
   );
 
   const updateTextSource = useCallback(
@@ -1165,22 +1520,47 @@ export function StickerForgeStudio() {
         (largest, item) => Math.max(largest, item.layout.zIndex),
         0,
       );
-      const item = await createStoredGalleryItem(
+      const { item, preview } = await createStoredGalleryItemWithPreview(
         source,
         currentSettings,
         nextGalleryIndex,
       );
       setGalleryItems((items) => [item, ...items]);
       setSourceMessage(t.addedToGallery);
+      const host = stageRef.current;
+      const folder = galleryFolderRef.current;
+      if (!host || !folder) {
+        controllerRef.current?.reappear();
+        setGalleryAdding(false);
+        return;
+      }
+      const destination = folderReceiveTarget(folder, preview.aspect);
+      const folderRect = folder.getBoundingClientRect();
+      setGalleryFolderReceiving(true);
+      setGalleryAddFlight({
+        itemId: item.id,
+        previewDataUrl: preview.dataUrl,
+        start: editorStickerRect(host, preview.aspect),
+        target: destination.rect,
+        coordinateOrigin: {
+          left: folderRect.left,
+          top: folderRect.top,
+        },
+        startRotation: currentSettings.tilt,
+        targetRotation: destination.rotation,
+      });
     } catch {
       setSourceMessage(t.galleryAddFailed);
-    } finally {
       setGalleryAdding(false);
     }
   };
 
   return (
-    <main className="studio-shell" data-panel-open={isPanelOpen}>
+    <main
+      className="studio-shell"
+      data-panel-open={isPanelOpen}
+      data-gallery-editing={galleryEditing}
+    >
       <header className="studio-header">
         <span className="brand-mark" role="img" aria-label="Sticker Forge" />
       </header>
@@ -1190,6 +1570,9 @@ export function StickerForgeStudio() {
           <div
             ref={stageRef}
             className="sticker-host"
+            data-gallery-adding={Boolean(galleryAddFlight)}
+            data-gallery-editing={galleryEditing}
+            data-gallery-editor-ready={galleryEditorReady}
             data-testid="sticker-stage"
             role="group"
             aria-label={t.interactiveSticker}
@@ -1207,7 +1590,7 @@ export function StickerForgeStudio() {
         onClick={() => setIsPanelOpen((open) => !open)}
       >
         <span className="panel-toggle-arrow" aria-hidden="true">
-          {isPanelOpen ? "→" : "←"}
+          <FontAwesomeIcon icon={isPanelOpen ? faArrowRight : faArrowLeft} />
         </span>
       </button>
 
@@ -1223,13 +1606,13 @@ export function StickerForgeStudio() {
               <h2 className="controls-title">{t.title}</h2>
               <div className="controls-heading-actions">
                 <button
-                  className="icon-button"
+                  className="icon-button reset-button"
                   type="button"
                   onClick={resetStudio}
                   aria-label={t.reset}
                   title={t.reset}
                 >
-                  ↺
+                  <FontAwesomeIcon icon={faRotateLeft} />
                 </button>
                 <a
                   className="icon-button"
@@ -1239,9 +1622,7 @@ export function StickerForgeStudio() {
                   aria-label={t.github}
                   title={t.github}
                 >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.88c-2.78.6-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.64 0 0 .84-.27 2.75 1.02A9.6 9.6 0 0 1 12 6.52a9.6 9.6 0 0 1 2.5.34c1.91-1.29 2.75-1.02 2.75-1.02.55 1.37.2 2.39.1 2.64.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.68-4.57 4.93.36.31.68.92.68 1.86v3.06c0 .27.18.58.69.48A10 10 0 0 0 12 2Z" />
-                  </svg>
+                  <FontAwesomeIcon icon={faGithub} />
                 </a>
                 <div className="language-picker">
                   <button
@@ -1323,7 +1704,7 @@ export function StickerForgeStudio() {
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => runEditorCommand("bold")}
                       >
-                        <strong>B</strong>
+                        <FontAwesomeIcon icon={faBold} />
                       </button>
                       <button
                         type="button"
@@ -1332,11 +1713,11 @@ export function StickerForgeStudio() {
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => runEditorCommand("underline")}
                       >
-                        <span className="underline-glyph">U</span>
+                        <FontAwesomeIcon icon={faUnderline} />
                       </button>
                       <div className="toolbar-number-control" title={t.fontSize}>
                         <span className="sr-only">{t.fontSize}</span>
-                        <span className="number-control-symbol" aria-hidden="true">A</span>
+                        <span className="number-control-symbol" aria-hidden="true"><FontAwesomeIcon icon={faFont} /></span>
                         <input
                           type="text"
                           inputMode="numeric"
@@ -1379,7 +1760,7 @@ export function StickerForgeStudio() {
                       </div>
                       <div className="toolbar-number-control line-height-control" title={t.lineHeight}>
                         <span className="sr-only">{t.lineHeight}</span>
-                        <span className="number-control-symbol" aria-hidden="true">↕</span>
+                        <span className="number-control-symbol" aria-hidden="true"><FontAwesomeIcon icon={faTextHeight} /></span>
                         <input
                           type="text"
                           inputMode="decimal"
@@ -1528,7 +1909,7 @@ export function StickerForgeStudio() {
                     onDragOver={(event) => event.preventDefault()}
                     onDrop={handleDrop}
                   >
-                    <span className="upload-icon" aria-hidden="true">＋</span>
+                    <span className="upload-icon" aria-hidden="true"><FontAwesomeIcon icon={faPlus} /></span>
                     <strong>{imageName || t.uploadPrompt}</strong>
                     <span>{sourceMessage || t.localOnly}</span>
                     <input
@@ -1716,9 +2097,7 @@ export function StickerForgeStudio() {
               aria-label={`${t.export} — ${t.copy}`}
               title={t.copy}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3v12m0 0 4-4m-4 4-4-4M5 15v5h14v-5" />
-              </svg>
+              <FontAwesomeIcon icon={copied ? faCircleCheck : faCopy} />
               <span>{copied ? t.copied : t.export}</span>
             </button>
             <button
@@ -1727,35 +2106,157 @@ export function StickerForgeStudio() {
               disabled={galleryAdding || galleryLoading}
               onClick={() => void addCurrentStickerToGallery()}
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 7.5h5l2-2h9v13H4zM12 10v5m-2.5-2.5h5" />
-              </svg>
+              <FontAwesomeIcon icon={faSquarePlus} />
               <span>{galleryAdding ? t.addingToGallery : t.addToGallery}</span>
             </button>
           </div>
         </aside>
-      {!galleryOpen ? (
-        <GalleryFolder
-          items={galleryItems}
-          locale={locale}
-          loading={galleryLoading}
-          onOpen={(origins) => {
-            setGalleryEntryOrigins(origins);
-            setGalleryOpen(true);
-          }}
-        />
-      ) : (
+      {galleryOpen ? (
         <GalleryCanvas
-          items={galleryItems}
+          key={activeGalleryFolderId}
+          items={galleryItems.filter(
+            (item) => item.folderId === activeGalleryFolderId,
+          )}
           locale={locale}
           entryOrigins={galleryEntryOrigins}
-          onItemsChange={setGalleryItems}
+          closing={galleryClosing}
+          holdSurfaceVisible={gallerySurfaceHeld}
+          currentFolderId={activeGalleryFolderId}
+          currentFolder={galleryFolders.find(
+            (folder) => folder.id === activeGalleryFolderId,
+          )!}
+          onItemsChange={(folderItems) => {
+            setGalleryItems((current) => [
+              ...folderItems,
+              ...current.filter(
+                (item) => item.folderId !== activeGalleryFolderId,
+              ),
+            ]);
+          }}
+          onItemMoved={(movedItem) => {
+            setGalleryItems((current) =>
+              current.map((item) =>
+                item.id === movedItem.id ? movedItem : item,
+              ),
+            );
+          }}
+          onFolderDragHover={setGalleryDropPreview}
+          onFolderChange={(updatedFolder) => {
+            setGalleryFolders((current) =>
+              current.map((folder) =>
+                folder.id === updatedFolder.id ? updatedFolder : folder,
+              ),
+            );
+          }}
+          onRequestClose={() => setGalleryClosing(true)}
+          onEntryStart={() => setGalleryFlightStarted(true)}
+          onEntryComplete={() => setGalleryEntryComplete(true)}
+          onSurfaceReady={() => setGallerySurfaceHeld(false)}
+          onEditStart={() => {
+            setGalleryEditorReady(false);
+            setGalleryEditing(true);
+          }}
+          resolveEditTarget={(item, asset) => {
+            const host = stageRef.current;
+            if (!host) return null;
+            const target = editorStickerRect(
+              host,
+              item.previewWidth / Math.max(1, item.previewHeight),
+            );
+            return {
+              ...target,
+              rotation: asset.options.tilt ?? 0,
+            } satisfies GalleryEditTarget;
+          }}
+          onEditComplete={applyGalleryAssetToEditor}
+          onEditHandoffComplete={() => {
+            setGalleryOpen(false);
+            setGalleryClosing(false);
+            setGalleryFlightStarted(false);
+            setGalleryEntryComplete(false);
+            setGalleryEntryOrigins({});
+            setGalleryDropPreview(null);
+            setGallerySurfaceHeld(false);
+            window.requestAnimationFrame(() => {
+              setGalleryEditing(false);
+              setGalleryEditorReady(false);
+            });
+          }}
           onClose={() => {
             setGalleryOpen(false);
+            setGalleryClosing(false);
+            setGalleryFlightStarted(false);
+            setGalleryEntryComplete(false);
             setGalleryEntryOrigins({});
+            setGalleryEditing(false);
+            setGalleryEditorReady(false);
+            setGalleryDropPreview(null);
+            setGallerySurfaceHeld(false);
           }}
         />
-      )}
+      ) : null}
+      <GalleryFolderDock
+        defaultFolderRef={galleryFolderRef}
+        key="gallery-folder-dock"
+        folders={galleryFolders}
+        items={galleryItems}
+        locale={locale}
+        activeFolderId={activeGalleryFolderId}
+        galleryOpen={galleryOpen}
+        showActivePreviews={!galleryOpen || !galleryFlightStarted}
+        dropPreview={galleryDropPreview}
+        loading={
+          galleryLoading ||
+          galleryAdding ||
+          galleryEditing ||
+          galleryClosing ||
+          (galleryOpen && !galleryEntryComplete)
+        }
+        receiving={galleryFolderReceiving}
+        receivingItemId={galleryAddFlight?.itemId}
+        flight={
+          galleryAddFlight ? (
+            <GalleryAddFlight
+              previewDataUrl={galleryAddFlight.previewDataUrl}
+              start={galleryAddFlight.start}
+              target={galleryAddFlight.target}
+              coordinateOrigin={galleryAddFlight.coordinateOrigin}
+              startRotation={galleryAddFlight.startRotation}
+              targetRotation={galleryAddFlight.targetRotation}
+              onArrived={() => setGalleryFolderReceiving(false)}
+            />
+          ) : null
+        }
+        onReceiveClosed={() => {
+          controllerRef.current?.reappear();
+          setGalleryAddFlight(null);
+          setGalleryAdding(false);
+        }}
+        onFoldersChange={setGalleryFolders}
+        onItemsChange={setGalleryItems}
+        onFolderDeleted={(folderId) => {
+          if (folderId !== activeGalleryFolderId) return;
+          setGallerySurfaceHeld(true);
+          setActiveGalleryFolderId(DEFAULT_GALLERY_FOLDER_ID);
+          setGalleryEntryOrigins({});
+          setGalleryFlightStarted(false);
+          setGalleryEntryComplete(false);
+        }}
+        onFolderOpen={(folderId, origins) => {
+          if (galleryAdding || galleryEditing) return;
+          if (galleryOpen && folderId === activeGalleryFolderId) {
+            setGalleryClosing(true);
+            return;
+          }
+          setGallerySurfaceHeld(galleryOpen);
+          setActiveGalleryFolderId(folderId);
+          setGalleryEntryOrigins(origins);
+          setGalleryClosing(false);
+          setGalleryFlightStarted(false);
+          setGalleryEntryComplete(false);
+          setGalleryOpen(true);
+        }}
+      />
       <span className="sr-only" aria-live="polite">
         {copied ? t.copiedAnnouncement : sourceMessage || t.localOnly}
       </span>

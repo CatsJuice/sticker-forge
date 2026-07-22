@@ -1,5 +1,20 @@
 import type { StickerOptions, StickerSource } from "./types";
 
+export const DEFAULT_GALLERY_FOLDER_ID = "default";
+export const DEFAULT_GALLERY_FOLDER_TITLE = "sticker.oooo.so";
+export const DEFAULT_GALLERY_FOLDER_COLOR = "#59b0d8";
+export const EVOLUTION_GALLERY_FOLDER_ID = "evolution";
+export const EVOLUTION_GALLERY_FOLDER_COLOR = "#909090";
+
+export interface GalleryFolderRecord {
+  id: string;
+  title: string;
+  color: string;
+  createdAt: number;
+  order: number;
+  isDefault: boolean;
+}
+
 /** Gallery-space coordinates use CSS pixels at zoom 1; rotation is in degrees. */
 export interface GalleryLayout {
   x: number;
@@ -12,6 +27,7 @@ export interface GalleryLayout {
 
 export interface GalleryItem {
   id: string;
+  folderId: string;
   createdAt: number;
   sourceType: StickerSource["type"];
   title: string;
@@ -28,6 +44,7 @@ export interface GalleryAsset {
 }
 
 export interface CreateGalleryPayload {
+  folderId?: string;
   source: StickerSource;
   options: StickerOptions;
   previewDataUrl: string;

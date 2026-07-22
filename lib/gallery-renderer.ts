@@ -4,6 +4,10 @@ import { getGalleryPreviewUrl } from "./gallery-storage";
 import { PeelAudioEngine, DEFAULT_PEEL_SOUND_URL } from "./peel-audio";
 import { prepareArtwork, type PreparedArtwork } from "./source";
 import {
+  galleryShadowFragmentShader,
+  galleryShadowVertexShader,
+  peelShadowDepthFragmentShader,
+  peelShadowDepthVertexShader,
   residueFragmentShader,
   residueVertexShader,
   stickerFragmentShader,
@@ -16,19 +20,36 @@ export type GalleryRenderItem = {
   asset?: GalleryAsset;
   interactive: boolean;
   hidden: boolean;
+  opacity: number;
 };
 
 type ViewState = { x: number; y: number; zoom: number };
+
+export type GalleryScreenTransform = {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  rotation: number;
+};
 
 type RenderRecord = {
   item: GalleryItem;
   root: THREE.Group;
   preview: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial> | null;
+  previewHitMask: AlphaHitMask | null;
   sticker: GalleryStickerMesh | null;
   previewLoading: boolean;
   stickerLoading: boolean;
   generation: number;
   hidden: boolean;
+  opacity: number;
+};
+
+type AlphaHitMask = {
+  width: number;
+  height: number;
+  alpha: Uint8ClampedArray;
 };
 
 type QueueJob = () => Promise<void>;
@@ -37,6 +58,7 @@ const MIN_CURL_ANGLE = 2.55;
 const MAX_CURL_ANGLE = Math.PI;
 const MAX_FRONT_TO_POINTER_RATIO = 1.28;
 const SNAP_DETACH_THRESHOLD = 0.74;
+const ACTIVE_PEEL_RENDER_ORDER = 1_000_000;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -62,6 +84,54 @@ function disposeObject(object: THREE.Object3D) {
   });
 }
 
+function createAlphaHitMask(image: CanvasImageSource) {
+  const source = image as CanvasImageSource & {
+    naturalWidth?: number;
+    naturalHeight?: number;
+    videoWidth?: number;
+    videoHeight?: number;
+    width?: number;
+    height?: number;
+  };
+  const sourceWidth =
+    source.naturalWidth ?? source.videoWidth ?? source.width ?? 0;
+  const sourceHeight =
+    source.naturalHeight ?? source.videoHeight ?? source.height ?? 0;
+  if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+  const scale = Math.min(1, 128 / Math.max(sourceWidth, sourceHeight));
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+  try {
+    context.drawImage(image, 0, 0, width, height);
+    const rgba = context.getImageData(0, 0, width, height).data;
+    const alpha = new Uint8ClampedArray(width * height);
+    for (let sourceIndex = 3, targetIndex = 0; sourceIndex < rgba.length; sourceIndex += 4, targetIndex += 1) {
+      alpha[targetIndex] = rgba[sourceIndex];
+    }
+    return { width, height, alpha };
+  } catch {
+    return null;
+  }
+}
+
+function hitAlphaMask(mask: AlphaHitMask, local: THREE.Vector2) {
+  const u = local.x + 0.5;
+  const v = local.y + 0.5;
+  if (u < 0 || u > 1 || v < 0 || v > 1) return false;
+  const x = clamp(Math.round(u * (mask.width - 1)), 0, mask.width - 1);
+  const y = clamp(
+    Math.round((1 - v) * (mask.height - 1)),
+    0,
+    mask.height - 1,
+  );
+  return mask.alpha[y * mask.width + x] >= 26;
+}
+
 class GalleryStickerMesh {
   readonly root: THREE.Group;
   readonly artwork: PreparedArtwork;
@@ -71,10 +141,23 @@ class GalleryStickerMesh {
   private readonly texture: THREE.CanvasTexture;
   private readonly uniforms: Record<string, THREE.IUniform>;
   private readonly stickerMaterial: THREE.ShaderMaterial;
+  private readonly peelShadowDepthMaterial: THREE.ShaderMaterial;
   private readonly residueMaterial: THREE.ShaderMaterial;
+  private readonly shadowMaterial: THREE.ShaderMaterial;
+  private readonly flatMaterial: THREE.MeshBasicMaterial;
   private readonly stickerMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly residueMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private readonly shadowMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private readonly flatMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>;
   private readonly audio: PeelAudioEngine;
+  private readonly setDynamicShadowOpacity: (opacity: number) => void;
+  private deleteTearActive = false;
+  private deletePermanentExit = false;
+  private deleteShadowOpacity = 1;
+  private deleteShadowVelocity = 0;
+  private deletePromise: Promise<void> | null = null;
+  private resolveDelete: (() => void) | null = null;
+  private renderOrder = 0;
   private grabOrigin = new THREE.Vector2(-0.5, 0);
   private grabStart = new THREE.Vector2();
   private grabDirection = new THREE.Vector2(1, 0);
@@ -90,6 +173,7 @@ class GalleryStickerMesh {
   private springVelocity = 0;
   private springTargetDepth = 0;
   private dragDetached = false;
+  private detachedTension = 0;
   private exitActive = false;
   private exitElapsed = 0;
   private exitSpin = 0;
@@ -102,11 +186,13 @@ class GalleryStickerMesh {
     asset: GalleryAsset,
     audio: PeelAudioEngine,
     maxAnisotropy: number,
+    setDynamicShadowOpacity: (opacity: number) => void,
   ) {
     this.root = root;
     this.artwork = artwork;
     this.options = resolveStickerOptions(undefined, asset.options);
     this.audio = audio;
+    this.setDynamicShadowOpacity = setDynamicShadowOpacity;
     this.texture = new THREE.CanvasTexture(artwork.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -125,10 +211,12 @@ class GalleryStickerMesh {
       this.options.peel.radius <= 1 ? this.options.peel.radius : 0.1,
     );
     this.effectivePeelRadius = this.basePeelRadius;
+    const shadowAngle = THREE.MathUtils.degToRad(this.options.shadow.angle);
     this.uniforms = {
       uMap: { value: this.texture },
       uPeel: { value: 0 },
       uPeelDepth: { value: 0 },
+      uDetachedTension: { value: 0 },
       uRadius: { value: this.basePeelRadius },
       uMaxAngle: { value: clamp(maxAngle, MIN_CURL_ANGLE, MAX_CURL_ANGLE) },
       uWind: { value: Math.max(0, this.options.wind) },
@@ -141,16 +229,43 @@ class GalleryStickerMesh {
       uGloss: { value: clamp(this.options.back.gloss, 0, 1) },
       uRoughness: { value: clamp(this.options.back.roughness, 0, 1) },
       uShadowColor: { value: colorFrom(this.options.shadow.color, "#191823") },
-      uShadowOpacity: { value: clamp(this.options.shadow.opacity, 0, 0.9) },
-      uShadowBlur: { value: Math.max(0, this.options.shadow.blur) },
-      uShadowDistance: { value: 0.02 },
-      uShadowDirection: { value: new THREE.Vector2(0.7, -0.7) },
+      uShadowOpacity: {
+        value: clamp(this.options.shadow.opacity, 0, 0.9),
+      },
+      uShadowDeleteOpacity: { value: 1 },
+      uShadowBlur: {
+        value: clamp(this.options.shadow.blur * 0.18, 0.75, 7),
+      },
+      uShadowDistance: {
+        // The editor's shadow is cast onto a plane only 0.012 world units
+        // behind the sticker, so the configured distance changes the light
+        // angle rather than becoming a direct pixel offset. Match that small
+        // resting footprint here instead of shifting by the full CSS value.
+        value: 1.4 + Math.max(0, this.options.shadow.distance) * 0.09,
+      },
+      uShadowDirection: {
+        value: new THREE.Vector2(
+          Math.cos(shadowAngle),
+          -Math.sin(shadowAngle),
+        ).normalize(),
+      },
+      uShadowLiftScale: {
+        value:
+          Math.max(
+            1,
+            Math.min(Math.abs(root.scale.x), Math.abs(root.scale.y)),
+          ) * 0.58,
+      },
       uEntranceSweep: { value: -1 },
       uEntranceAxis: { value: new THREE.Vector2(artwork.aspect >= 1 ? 1 : 0, artwork.aspect >= 1 ? 0 : -1) },
       uEntranceScaleProgress: { value: -1 },
       uInteractionHint: { value: 0 },
       uInteractionHintRadius: { value: 3 },
       uInteractionHintColor: { value: colorFrom("rgb(36, 126, 245)", "#247ef5") },
+      uOpacity: { value: 1 },
+      // Gallery idle rendering uses an unlit MeshBasicMaterial. Keep the
+      // printed face identical when switching to the peel shader.
+      uPreserveFrontColor: { value: 1 },
     };
 
     this.stickerMaterial = new THREE.ShaderMaterial({
@@ -163,10 +278,32 @@ class GalleryStickerMesh {
       lights: true,
       side: THREE.DoubleSide,
       transparent: true,
-      depthTest: false,
-      depthWrite: false,
+      // A peeled sheet overlaps itself. Without a real depth buffer, triangle
+      // submission order makes the lifted face look folded behind the sticker.
+      depthTest: true,
+      depthWrite: true,
+      toneMapped: false,
     });
     this.stickerMaterial.alphaTest = 0.008;
+    this.peelShadowDepthMaterial = new THREE.ShaderMaterial({
+      uniforms: { ...this.uniforms },
+      vertexShader: peelShadowDepthVertexShader,
+      fragmentShader: peelShadowDepthFragmentShader,
+      side: THREE.DoubleSide,
+      depthTest: true,
+      depthWrite: true,
+    });
+    this.shadowMaterial = new THREE.ShaderMaterial({
+      uniforms: { ...this.uniforms },
+      vertexShader: galleryShadowVertexShader,
+      fragmentShader: galleryShadowFragmentShader,
+      side: THREE.DoubleSide,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.shadowMesh = new THREE.Mesh(this.geometry, this.shadowMaterial);
     this.residueMaterial = new THREE.ShaderMaterial({
       uniforms: { ...this.uniforms },
       vertexShader: residueVertexShader,
@@ -178,13 +315,152 @@ class GalleryStickerMesh {
     });
     this.residueMesh = new THREE.Mesh(this.geometry, this.residueMaterial);
     this.residueMesh.position.z = -0.002;
+    // Gallery stacking is controlled by renderOrder. Clear depth once at the
+    // start of this sticker's peel pass so lower stickers cannot occlude it,
+    // while the curled surface can still self-occlude correctly.
+    this.residueMesh.onBeforeRender = (renderer) => renderer.clearDepth();
     this.stickerMesh = new THREE.Mesh(this.geometry, this.stickerMaterial);
-    root.add(this.residueMesh, this.stickerMesh);
+    this.stickerMesh.castShadow = false;
+    this.stickerMesh.receiveShadow = true;
+    this.stickerMesh.customDepthMaterial = this.peelShadowDepthMaterial;
+    this.flatMaterial = new THREE.MeshBasicMaterial({
+      map: this.texture,
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    this.flatMesh = new THREE.Mesh(this.geometry, this.flatMaterial);
+    this.stickerMesh.visible = false;
+    this.residueMesh.visible = false;
+    root.add(this.shadowMesh, this.residueMesh, this.stickerMesh, this.flatMesh);
   }
 
   setRenderOrder(order: number) {
-    this.residueMesh.renderOrder = order * 2;
-    this.stickerMesh.renderOrder = order * 2 + 1;
+    this.renderOrder = order;
+    this.shadowMesh.renderOrder = order * 3;
+    this.residueMesh.renderOrder = order * 3 + 1;
+    this.stickerMesh.renderOrder = order * 3 + 2;
+    this.flatMesh.renderOrder = order * 3 + 2;
+  }
+
+  needsElevatedLayer() {
+    return (
+      this.dragging ||
+      this.springActive ||
+      this.exitActive ||
+      this.entranceActive ||
+      this.deleteTearActive ||
+      this.deletePermanentExit ||
+      this.progress > 0.0001
+    );
+  }
+
+  setShadowScale(scaleX: number, scaleY: number) {
+    this.uniforms.uShadowLiftScale.value =
+      Math.max(1, Math.min(Math.abs(scaleX), Math.abs(scaleY))) * 0.58;
+  }
+
+  setOpacity(opacity: number) {
+    const next = clamp(opacity, 0, 1);
+    this.uniforms.uOpacity.value = next;
+    this.flatMaterial.opacity = next;
+  }
+
+  tearAwayForDelete(time: number) {
+    if (this.deletePromise) return this.deletePromise;
+
+    const support = this.artwork.support;
+    const pointCount = Math.floor(support.length / 2);
+    const pointIndex = Math.floor(Math.random() * Math.max(pointCount, 1)) * 2;
+    const origin = new THREE.Vector2(
+      (support[pointIndex] ?? 0) - 0.5,
+      0.5 - (support[pointIndex + 1] ?? 0.5),
+    );
+    const center = new THREE.Vector2();
+    for (let index = 0; index < support.length; index += 2) {
+      center.x += support[index] - 0.5;
+      center.y += 0.5 - support[index + 1];
+    }
+    if (pointCount > 0) center.multiplyScalar(1 / pointCount);
+    const inward = center.sub(origin);
+    if (inward.lengthSq() < 0.0001) inward.set(-origin.x, -origin.y);
+    if (inward.lengthSq() < 0.0001) inward.set(1, 0);
+    inward.normalize();
+    const randomAngle = (Math.random() - 0.5) * 0.62;
+    inward.set(
+      inward.x * Math.cos(randomAngle) - inward.y * Math.sin(randomAngle),
+      inward.x * Math.sin(randomAngle) + inward.y * Math.cos(randomAngle),
+    );
+
+    this.dragging = false;
+    this.exitActive = false;
+    this.entranceActive = false;
+    this.showPeelSurface();
+    this.grabOrigin.copy(origin);
+    this.grabStart.copy(origin);
+    this.grabDirection.copy(inward);
+    this.activeDirection.copy(inward);
+    this.grabExtent = this.projectionExtent(this.grabOrigin, this.activeDirection);
+    this.setCreaseDepth(0);
+    this.springActive = true;
+    this.springVelocity = 0;
+    this.springTargetDepth = this.grabExtent;
+    this.deleteTearActive = true;
+    this.deletePermanentExit = false;
+    this.deleteShadowOpacity = 1;
+    this.deleteShadowVelocity = 0;
+    this.uniforms.uShadowDeleteOpacity.value = 1;
+    this.updateUniforms();
+
+    const customSource = this.options.sound.src.trim();
+    this.audio.configure({
+      enabled: this.options.sound.enabled,
+      src: customSource || DEFAULT_PEEL_SOUND_URL,
+      volume: this.options.sound.volume,
+      useBuiltInProfile: !customSource,
+    });
+    this.audio.unlock();
+    this.audio.begin(0, time);
+    this.deletePromise = new Promise<void>((resolve) => {
+      this.resolveDelete = resolve;
+    });
+    return this.deletePromise;
+  }
+
+  restoreAfterDelete() {
+    this.deleteTearActive = false;
+    this.deletePermanentExit = false;
+    this.deleteShadowOpacity = 1;
+    this.deleteShadowVelocity = 0;
+    this.uniforms.uShadowDeleteOpacity.value = 1;
+    this.exitActive = false;
+    this.entranceActive = false;
+    this.resolveDelete?.();
+    this.resolveDelete = null;
+    this.deletePromise = null;
+    this.reset();
+    this.showFlatSurface();
+  }
+
+  private showPeelSurface() {
+    // The live curl uses the same shadow-map path as the editor: the peeled
+    // sheet casts onto both the receiver plane and its own adhered surface.
+    this.shadowMesh.visible = false;
+    this.flatMesh.visible = false;
+    this.stickerMesh.visible = true;
+    this.stickerMesh.castShadow = true;
+    this.residueMesh.visible = true;
+    this.setDynamicShadowOpacity(1);
+  }
+
+  private showFlatSurface() {
+    this.stickerMesh.castShadow = false;
+    this.setDynamicShadowOpacity(0);
+    this.shadowMesh.visible = true;
+    this.flatMesh.visible = true;
+    this.stickerMesh.visible = false;
+    this.residueMesh.visible = false;
   }
 
   private sampleAlpha(x: number, y: number) {
@@ -193,13 +469,33 @@ class GalleryStickerMesh {
     return this.artwork.alpha[pixelY * this.artwork.width + pixelX] / 255;
   }
 
-  hitEdge(local: THREE.Vector2, displayedWidth: number) {
+  private sampleExterior(x: number, y: number) {
+    const pixelX = Math.round(x);
+    const pixelY = Math.round(y);
+    if (pixelX < 0 || pixelX >= this.artwork.width || pixelY < 0 || pixelY >= this.artwork.height) return true;
+    return this.artwork.exteriorAlpha[pixelY * this.artwork.width + pixelX] === 1;
+  }
+
+  hitSurface(local: THREE.Vector2) {
+    const u = local.x + 0.5;
+    const v = local.y + 0.5;
+    if (u < 0 || u > 1 || v < 0 || v > 1) return false;
+    return this.sampleAlpha(
+      u * (this.artwork.width - 1),
+      (1 - v) * (this.artwork.height - 1),
+    ) >= 0.1;
+  }
+
+  hitEdge(local: THREE.Vector2, unscaledDisplayedWidth: number) {
     const u = local.x + 0.5;
     const v = local.y + 0.5;
     if (u < -0.04 || u > 1.04 || v < -0.04 || v > 1.04) return null;
     const pixelX = u * (this.artwork.width - 1);
     const pixelY = (1 - v) * (this.artwork.height - 1);
-    const pixelsPerCss = this.artwork.width / Math.max(displayedWidth, 1);
+    // Keep the band in sticker-local space. Camera zoom then scales the hit
+    // target together with the sticker instead of pinning it to screen pixels.
+    const pixelsPerCss =
+      this.artwork.width / Math.max(unscaledDisplayedWidth, 1);
     const radius = clamp(
       this.options.peel.grabWidth * pixelsPerCss,
       3,
@@ -215,8 +511,8 @@ class GalleryStickerMesh {
         if (distanceSq >= nearestDistanceSq || distanceSq > radius * radius) continue;
         const alpha = this.sampleAlpha(x, y);
         if (alpha < 0.1) continue;
-        const boundary = alpha < 0.9 || this.sampleAlpha(x - 1, y) < 0.1 || this.sampleAlpha(x + 1, y) < 0.1 || this.sampleAlpha(x, y - 1) < 0.1 || this.sampleAlpha(x, y + 1) < 0.1;
-        if (!boundary) continue;
+        const outerBoundary = this.sampleExterior(x - 1, y) || this.sampleExterior(x + 1, y) || this.sampleExterior(x, y - 1) || this.sampleExterior(x, y + 1);
+        if (!outerBoundary) continue;
         nearestX = x;
         nearestY = y;
         nearestDistanceSq = distanceSq;
@@ -249,6 +545,7 @@ class GalleryStickerMesh {
 
   start(hit: { local: THREE.Vector2; inward: THREE.Vector2 }, pointer: THREE.Vector2, time: number) {
     if (this.exitActive || this.entranceActive) return false;
+    this.showPeelSurface();
     this.grabOrigin.copy(hit.local);
     this.grabStart.copy(hit.local);
     this.grabDirection.copy(hit.inward);
@@ -286,11 +583,19 @@ class GalleryStickerMesh {
     this.springActive = false;
     this.setCreaseDepth(targetDepth);
     const detachedDistance = Math.max(0, distance - maximumPointerDistance);
+    const tensionDistance = Math.max(this.grabExtent * 0.45, 0.12);
+    const linearTension = clamp(detachedDistance / tensionDistance, 0, 1);
+    this.detachedTension = linearTension * linearTension * (3 - 2 * linearTension);
     this.stickerMesh.position.set(
       this.activeDirection.x * detachedDistance,
       this.activeDirection.y * detachedDistance,
       0,
     );
+    const flatteningOffset =
+      (maximumPointerDistance - this.grabExtent * 2) * this.detachedTension;
+    this.stickerMesh.position.x += this.activeDirection.x * flatteningOffset;
+    this.stickerMesh.position.y += this.activeDirection.y * flatteningOffset;
+    this.shadowMesh.position.copy(this.stickerMesh.position);
     this.dragDetached = this.progress >= 1 - Number.EPSILON;
     this.audio.update(this.progress, time, this.activeDirection.x);
     this.updateUniforms();
@@ -362,6 +667,7 @@ class GalleryStickerMesh {
   private updateUniforms() {
     this.uniforms.uPeel.value = this.progress;
     this.uniforms.uPeelDepth.value = this.creaseDepth;
+    this.uniforms.uDetachedTension.value = this.detachedTension;
     this.uniforms.uRadius.value = this.effectivePeelRadius;
     (this.uniforms.uOrigin.value as THREE.Vector2).copy(this.grabOrigin);
     (this.uniforms.uPeelDir.value as THREE.Vector2).copy(this.activeDirection);
@@ -373,8 +679,11 @@ class GalleryStickerMesh {
     this.creaseDepth = 0;
     this.springActive = false;
     this.springVelocity = 0;
+    this.detachedTension = 0;
     this.stickerMesh.position.set(0, 0, 0);
     this.stickerMesh.rotation.set(0, 0, 0);
+    this.shadowMesh.position.set(0, 0, 0);
+    this.shadowMesh.rotation.set(0, 0, 0);
     this.updateUniforms();
   }
 
@@ -395,11 +704,27 @@ class GalleryStickerMesh {
         this.setCreaseDepth(this.springTargetDepth);
         this.springActive = false;
         this.springVelocity = 0;
-        if (this.springTargetDepth === 0) this.stickerMesh.position.set(0, 0, 0);
+        if (this.deleteTearActive) {
+          this.deleteTearActive = false;
+          this.deletePermanentExit = true;
+          this.exitActive = true;
+          this.exitElapsed = 0;
+          this.exitSpin =
+            (this.activeDirection.x >= 0 ? -1 : 1) *
+            (0.32 + Math.random() * 0.24);
+          this.audio.update(1, time, this.activeDirection.x);
+          this.audio.end(1);
+        } else if (this.springTargetDepth === 0) {
+          this.stickerMesh.position.set(0, 0, 0);
+          this.showFlatSurface();
+        }
       } else {
         this.setCreaseDepth(Math.max(0, depth));
       }
       this.updateUniforms();
+      if (this.deleteTearActive) {
+        this.audio.update(this.progress, time, this.activeDirection.x);
+      }
     }
     if (this.exitActive) {
       this.exitElapsed += delta;
@@ -407,13 +732,52 @@ class GalleryStickerMesh {
       this.stickerMesh.position.x += this.activeDirection.x * speed * delta;
       this.stickerMesh.position.y += this.activeDirection.y * speed * delta;
       this.stickerMesh.rotation.z += this.exitSpin * delta;
+      this.shadowMesh.position.copy(this.stickerMesh.position);
+      this.shadowMesh.rotation.copy(this.stickerMesh.rotation);
+      if (this.deletePermanentExit) {
+        const stiffness = 150;
+        const damping = 21;
+        let remaining = Math.min(delta, 1 / 20);
+        while (remaining > 0) {
+          const step = Math.min(remaining, 1 / 120);
+          const acceleration =
+            -stiffness * this.deleteShadowOpacity -
+            damping * this.deleteShadowVelocity;
+          this.deleteShadowVelocity += acceleration * step;
+          this.deleteShadowOpacity += this.deleteShadowVelocity * step;
+          remaining -= step;
+        }
+        this.uniforms.uShadowDeleteOpacity.value = clamp(
+          this.deleteShadowOpacity,
+          0,
+          1,
+        );
+        this.setDynamicShadowOpacity(
+          clamp(this.deleteShadowOpacity, 0, 1),
+        );
+      }
       if (this.exitElapsed >= 0.46) {
         this.exitActive = false;
-        this.reset();
-        this.audio.playReappear();
-        this.entranceActive = true;
-        this.entranceElapsed = 0;
-        this.uniforms.uEntranceScaleProgress.value = 0;
+        if (this.deletePermanentExit) {
+          this.deleteShadowOpacity = 0;
+          this.deleteShadowVelocity = 0;
+          this.uniforms.uShadowDeleteOpacity.value = 0;
+          this.shadowMesh.visible = false;
+          this.stickerMesh.visible = false;
+          this.stickerMesh.castShadow = false;
+          this.residueMesh.visible = false;
+          this.setDynamicShadowOpacity(0);
+          this.resolveDelete?.();
+          this.resolveDelete = null;
+        } else {
+          this.reset();
+          this.stickerMesh.castShadow = false;
+          this.setDynamicShadowOpacity(0);
+          this.audio.playReappear();
+          this.entranceActive = true;
+          this.entranceElapsed = 0;
+          this.uniforms.uEntranceScaleProgress.value = 0;
+        }
       }
     }
     if (this.entranceActive) {
@@ -426,18 +790,32 @@ class GalleryStickerMesh {
         this.entranceActive = false;
         this.uniforms.uEntranceScaleProgress.value = -1;
         this.uniforms.uEntranceSweep.value = -1;
+        this.showFlatSurface();
       }
     }
     this.uniforms.uTime.value = time / 1000;
-    return this.dragging || this.springActive || this.exitActive || this.entranceActive || (this.options.wind > 0.001 && this.progress > 0.01);
+    return this.deleteTearActive || this.dragging || this.springActive || this.exitActive || this.entranceActive || (this.options.wind > 0.001 && this.progress > 0.01);
   }
 
   dispose() {
-    this.root.remove(this.stickerMesh, this.residueMesh);
+    this.stickerMesh.castShadow = false;
+    this.setDynamicShadowOpacity(0);
+    this.resolveDelete?.();
+    this.resolveDelete = null;
+    this.deletePromise = null;
+    this.root.remove(
+      this.shadowMesh,
+      this.stickerMesh,
+      this.residueMesh,
+      this.flatMesh,
+    );
     this.geometry.dispose();
     this.texture.dispose();
+    this.shadowMaterial.dispose();
+    this.peelShadowDepthMaterial.dispose();
     this.stickerMaterial.dispose();
     this.residueMaterial.dispose();
+    this.flatMaterial.dispose();
   }
 }
 
@@ -446,24 +824,58 @@ export class GalleryRenderer {
   private readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 10);
+  private readonly camera = new THREE.OrthographicCamera(
+    -1,
+    1,
+    1,
+    -1,
+    0.1,
+    20_000,
+  );
+  private readonly peelShadowLight = new THREE.DirectionalLight(0xffffff, 1);
+  private readonly peelShadowTarget = new THREE.Object3D();
+  private readonly groundShadowGeometry = new THREE.PlaneGeometry(1, 1);
+  private readonly groundShadowMaterial = new THREE.ShadowMaterial({
+    color: 0x191823,
+    opacity: 0,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  private readonly groundShadowMesh = new THREE.Mesh(
+    this.groundShadowGeometry,
+    this.groundShadowMaterial,
+  );
   private readonly records = new Map<string, RenderRecord>();
+  private readonly entryTransforms = new Map<string, GalleryScreenTransform>();
   private readonly previewGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly audio = new PeelAudioEngine();
   private readonly queue: QueueJob[] = [];
   private readonly onLiveIdsChange: (ids: Set<string>) => void;
+  private readonly onPreviewIdsChange: (ids: Set<string>) => void;
   private view: ViewState = { x: 0, y: 0, zoom: 1 };
   private width = 1;
   private height = 1;
   private queueBusy = false;
+  private idleCallback: number | null = null;
   private destroyed = false;
   private frame = 0;
   private lastFrameTime = 0;
   private activePeel: { id: string; pointerId: number } | null = null;
+  private elevatedPeelId: string | null = null;
+  private dynamicShadowOwner: string | null = null;
+  private dynamicShadowDirection = new THREE.Vector2(0.7, -0.7).normalize();
+  private dynamicShadowSlope = 0.58;
 
-  constructor(canvas: HTMLCanvasElement, onLiveIdsChange: (ids: Set<string>) => void) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    onLiveIdsChange: (ids: Set<string>) => void,
+    onPreviewIdsChange: (ids: Set<string>) => void = () => undefined,
+  ) {
     this.canvas = canvas;
     this.onLiveIdsChange = onLiveIdsChange;
+    this.onPreviewIdsChange = onPreviewIdsChange;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       alpha: true,
@@ -473,11 +885,23 @@ export class GalleryRenderer {
     });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
-    this.camera.position.z = 3;
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.camera.position.z = 10_000;
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.35));
-    const light = new THREE.DirectionalLight(0xffffff, 1.8);
-    light.position.set(-2, 3, 5);
-    this.scene.add(light);
+    this.peelShadowLight.castShadow = true;
+    this.peelShadowLight.shadow.mapSize.set(2048, 2048);
+    this.peelShadowLight.shadow.bias = -0.0001;
+    this.peelShadowLight.shadow.normalBias = 0.35;
+    this.peelShadowLight.target = this.peelShadowTarget;
+    this.groundShadowMesh.position.z = -3;
+    this.groundShadowMesh.receiveShadow = true;
+    this.groundShadowMesh.renderOrder = -1_000_000;
+    this.scene.add(
+      this.groundShadowMesh,
+      this.peelShadowTarget,
+      this.peelShadowLight,
+    );
     this.requestRender();
   }
 
@@ -501,18 +925,102 @@ export class GalleryRenderer {
     this.camera.right = halfWidth;
     this.camera.top = halfHeight;
     this.camera.bottom = -halfHeight;
-    this.camera.position.set(this.view.x, -this.view.y, 3);
+    this.camera.position.set(this.view.x, -this.view.y, 10_000);
     this.camera.updateProjectionMatrix();
+    this.updateDynamicShadowRig(halfWidth, halfHeight);
+    for (const [id, transform] of this.entryTransforms) {
+      const record = this.records.get(id);
+      if (record) this.applyEntryTransform(record, transform);
+    }
     this.requestRender();
+  }
+
+  private updateDynamicShadowRig(
+    halfWidth = this.width / Math.max(this.view.zoom * 2, 0.001),
+    halfHeight = this.height / Math.max(this.view.zoom * 2, 0.001),
+  ) {
+    const centerX = this.view.x;
+    const centerY = -this.view.y;
+    const lightHeight = 4_000;
+    const horizontalOffset = lightHeight * this.dynamicShadowSlope;
+    this.peelShadowTarget.position.set(centerX, centerY, 0);
+    this.peelShadowLight.position.set(
+      centerX - this.dynamicShadowDirection.x * horizontalOffset,
+      centerY - this.dynamicShadowDirection.y * horizontalOffset,
+      lightHeight,
+    );
+    const shadowCamera = this.peelShadowLight.shadow
+      .camera as THREE.OrthographicCamera;
+    const extent = Math.max(halfWidth, halfHeight) * 1.45;
+    shadowCamera.left = -extent;
+    shadowCamera.right = extent;
+    shadowCamera.top = extent;
+    shadowCamera.bottom = -extent;
+    shadowCamera.near = 0.1;
+    shadowCamera.far = lightHeight * 2;
+    shadowCamera.updateProjectionMatrix();
+    this.groundShadowMesh.position.set(centerX, centerY, -3);
+    this.groundShadowMesh.scale.set(
+      Math.max(1, halfWidth * 2.6),
+      Math.max(1, halfHeight * 2.6),
+      1,
+    );
+    this.peelShadowLight.shadow.needsUpdate = true;
+  }
+
+  private setDynamicShadow(
+    id: string,
+    options: ResolvedStickerOptions,
+    opacity: number,
+  ) {
+    const nextOpacity = clamp(opacity, 0, 1);
+    if (nextOpacity <= 0) {
+      if (this.dynamicShadowOwner !== id) return;
+      this.dynamicShadowOwner = null;
+      this.groundShadowMaterial.opacity = 0;
+      return;
+    }
+    this.dynamicShadowOwner = id;
+    const ownerScale = this.records.get(id)?.root.scale.z ?? 1;
+    this.peelShadowLight.shadow.normalBias = clamp(
+      Math.abs(ownerScale) * (0.0015 / 0.62),
+      0.02,
+      1.5,
+    );
+    this.groundShadowMaterial.color.copy(
+      colorFrom(options.shadow.color, "#191823"),
+    );
+    this.groundShadowMaterial.opacity =
+      clamp(options.shadow.opacity, 0, 0.9) * nextOpacity;
+    const shadowAngle = THREE.MathUtils.degToRad(options.shadow.angle);
+    this.dynamicShadowDirection
+      .set(Math.cos(shadowAngle), -Math.sin(shadowAngle))
+      .normalize();
+    // Mirror the editor's directional-light geometry. Its configured CSS
+    // distance changes the horizontal light position; it is not applied as a
+    // direct shadow translation.
+    const configuredDistance =
+      (Math.max(0, options.shadow.distance) / Math.max(this.height, 1)) * 2;
+    this.dynamicShadowSlope =
+      (1.6 + configuredDistance * 34) / 4.8;
+    this.peelShadowLight.shadow.radius = clamp(
+      options.shadow.blur * 0.18,
+      1,
+      7,
+    );
+    this.updateDynamicShadowRig();
   }
 
   sync(items: GalleryRenderItem[]) {
     const nextIds = new Set(items.map(({ item }) => item.id));
+    let removedPreview = false;
     for (const [id, record] of this.records) {
       if (nextIds.has(id)) continue;
+      removedPreview ||= !record.previewLoading;
       this.removeRecord(record);
       this.records.delete(id);
     }
+    if (removedPreview) this.emitPreviewIds();
     for (const renderItem of items) {
       let record = this.records.get(renderItem.item.id);
       if (!record) {
@@ -521,11 +1029,13 @@ export class GalleryRenderer {
           item: renderItem.item,
           root,
           preview: null,
+          previewHitMask: null,
           sticker: null,
           previewLoading: true,
           stickerLoading: false,
           generation: 0,
           hidden: renderItem.hidden,
+          opacity: clamp(renderItem.opacity, 0, 1),
         };
         this.records.set(renderItem.item.id, record);
         this.scene.add(root);
@@ -533,8 +1043,10 @@ export class GalleryRenderer {
       }
       record.item = renderItem.item;
       record.hidden = renderItem.hidden;
+      record.opacity = clamp(renderItem.opacity, 0, 1);
       this.applyLayout(record, renderItem.item.layout);
-      record.root.visible = !renderItem.hidden;
+      record.root.visible = !renderItem.hidden && record.opacity > 0.001;
+      record.sticker?.setOpacity(record.opacity);
       if (
         renderItem.interactive &&
         renderItem.asset &&
@@ -551,6 +1063,9 @@ export class GalleryRenderer {
         record.stickerLoading = false;
         if (record.preview) record.preview.visible = true;
       }
+      if (record.preview) {
+        record.preview.material.opacity = record.opacity;
+      }
     }
     this.emitLiveIds();
     this.requestRender();
@@ -564,34 +1079,118 @@ export class GalleryRenderer {
     this.requestRender();
   }
 
+  setEntryTransform(id: string, transform: GalleryScreenTransform) {
+    this.entryTransforms.set(id, transform);
+    const record = this.records.get(id);
+    if (record) this.applyEntryTransform(record, transform);
+    this.requestRender();
+  }
+
+  clearEntryTransform(id: string) {
+    this.entryTransforms.delete(id);
+    const record = this.records.get(id);
+    if (record) this.applyLayout(record, record.item.layout);
+    this.requestRender();
+  }
+
   private applyLayout(record: RenderRecord, layout: GalleryLayout) {
+    const entryTransform = this.entryTransforms.get(record.item.id);
+    if (entryTransform) {
+      this.applyEntryTransform(record, entryTransform);
+      return;
+    }
     record.root.position.set(layout.x, -layout.y, 0);
-    record.root.scale.set(layout.width * 0.78, layout.height * 0.58, 1);
+    const scaleX = layout.width * 0.78;
+    const scaleY = layout.height * 0.58;
+    record.root.scale.set(
+      scaleX,
+      scaleY,
+      Math.max(1, Math.min(Math.abs(scaleX), Math.abs(scaleY))),
+    );
     record.root.rotation.z = -THREE.MathUtils.degToRad(record.item.baseTilt + layout.rotation);
-    if (record.preview) record.preview.renderOrder = layout.zIndex * 2 + 1;
-    record.sticker?.setRenderOrder(layout.zIndex);
+    const renderOrder =
+      this.elevatedPeelId === record.item.id
+        ? ACTIVE_PEEL_RENDER_ORDER
+        : layout.zIndex;
+    if (record.preview) record.preview.renderOrder = renderOrder * 3 + 2;
+    record.sticker?.setShadowScale(record.root.scale.x, record.root.scale.y);
+    record.sticker?.setRenderOrder(renderOrder);
+    record.root.updateMatrixWorld(true);
+  }
+
+  private applyEntryTransform(
+    record: RenderRecord,
+    transform: GalleryScreenTransform,
+  ) {
+    const rect = this.canvas.getBoundingClientRect();
+    const centerX = transform.left + transform.width / 2;
+    const centerY = transform.top + transform.height / 2;
+    const pixelsPerWorldX =
+      this.view.zoom * (rect.width / Math.max(this.width, 1));
+    const pixelsPerWorldY =
+      this.view.zoom * (rect.height / Math.max(this.height, 1));
+    record.root.position.set(
+      this.view.x +
+        (centerX - rect.left - rect.width / 2) /
+          Math.max(pixelsPerWorldX, 0.001),
+      -this.view.y -
+        (centerY - rect.top - rect.height / 2) /
+          Math.max(pixelsPerWorldY, 0.001),
+      0,
+    );
+    const scaleX = transform.width / Math.max(pixelsPerWorldX, 0.001);
+    const scaleY = transform.height / Math.max(pixelsPerWorldY, 0.001);
+    record.root.scale.set(
+      scaleX,
+      scaleY,
+      Math.max(1, Math.min(Math.abs(scaleX), Math.abs(scaleY))),
+    );
+    record.root.rotation.z = -THREE.MathUtils.degToRad(transform.rotation);
+    const renderOrder =
+      this.elevatedPeelId === record.item.id
+        ? ACTIVE_PEEL_RENDER_ORDER
+        : record.item.layout.zIndex;
+    if (record.preview) record.preview.renderOrder = renderOrder * 3 + 2;
+    record.sticker?.setShadowScale(record.root.scale.x, record.root.scale.y);
+    record.sticker?.setRenderOrder(renderOrder);
     record.root.updateMatrixWorld(true);
   }
 
   private enqueue(job: QueueJob) {
     this.queue.push(job);
-    void this.drainQueue();
+    this.scheduleNextJob();
   }
 
-  private async drainQueue() {
-    if (this.queueBusy) return;
+  private scheduleNextJob() {
+    if (this.destroyed || this.queueBusy || this.idleCallback !== null) return;
+    if (!this.queue.length) return;
+
+    const runNext = () => {
+      this.idleCallback = null;
+      if (this.destroyed) return;
+
+      // Taking exactly one job per idle callback keeps pointer and wheel input
+      // ahead of gallery asset preparation, even when many stickers enter the
+      // viewport at once.
+      const job = this.queue.shift();
+      if (!job) return;
+      void this.runQueueJob(job);
+    };
+
+    if (typeof window.requestIdleCallback === "function") {
+      this.idleCallback = window.requestIdleCallback(runNext);
+    } else {
+      this.idleCallback = window.setTimeout(runNext, 0);
+    }
+  }
+
+  private async runQueueJob(job: QueueJob) {
     this.queueBusy = true;
     try {
-      while (!this.destroyed && this.queue.length) {
-        const job = this.queue.shift();
-        if (job) await job();
-        await new Promise<void>((resolve) => {
-          if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(() => resolve(), { timeout: 80 });
-          else window.setTimeout(resolve, 0);
-        });
-      }
+      await job();
     } finally {
       this.queueBusy = false;
+      this.scheduleNextJob();
     }
   }
 
@@ -613,21 +1212,32 @@ export class GalleryRenderer {
       texture.magFilter = THREE.LinearFilter;
       texture.generateMipmaps = true;
       texture.anisotropy = Math.min(4, this.renderer.capabilities.getMaxAnisotropy());
-      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false, toneMapped: false });
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: record.opacity, depthTest: false, depthWrite: false, toneMapped: false });
       const mesh = new THREE.Mesh(this.previewGeometry, material);
-      mesh.renderOrder = record.item.layout.zIndex * 2 + 1;
+      mesh.renderOrder = record.item.layout.zIndex * 3 + 2;
       mesh.visible = !record.sticker;
       record.preview = mesh;
+      record.previewHitMask = createAlphaHitMask(
+        texture.image as CanvasImageSource,
+      );
       record.previewLoading = false;
       record.root.add(mesh);
+      this.emitPreviewIds();
       this.requestRender();
     } catch {
       record.previewLoading = false;
+      this.emitPreviewIds();
       // The asset queue may still upgrade this record to its full renderer.
     }
   }
 
   private async loadSticker(record: RenderRecord, asset: GalleryAsset, generation: number) {
+    if (
+      this.destroyed ||
+      this.records.get(record.item.id) !== record ||
+      record.generation !== generation ||
+      !record.stickerLoading
+    ) return;
     try {
       const options = resolveStickerOptions(undefined, asset.options);
       const artwork = await prepareArtwork(asset.source, options.outline);
@@ -636,7 +1246,21 @@ export class GalleryRenderer {
         this.records.get(record.item.id) !== record ||
         record.generation !== generation
       ) return;
-      record.sticker = new GalleryStickerMesh(record.root, artwork, asset, this.audio, this.renderer.capabilities.getMaxAnisotropy());
+      record.sticker = new GalleryStickerMesh(
+        record.root,
+        artwork,
+        asset,
+        this.audio,
+        this.renderer.capabilities.getMaxAnisotropy(),
+        (opacity) =>
+          this.setDynamicShadow(
+            record.item.id,
+            options,
+            opacity * record.opacity,
+          ),
+      );
+      record.sticker.setOpacity(record.opacity);
+      record.sticker.setShadowScale(record.root.scale.x, record.root.scale.y);
       record.stickerLoading = false;
       record.sticker.setRenderOrder(record.item.layout.zIndex);
       if (record.preview) record.preview.visible = false;
@@ -645,6 +1269,10 @@ export class GalleryRenderer {
     } catch {
       if (this.records.get(record.item.id) === record && record.generation === generation) {
         record.stickerLoading = false;
+        if (record.preview) {
+          record.preview.material.opacity = record.opacity;
+        }
+        this.requestRender();
       }
       // Keep the preview mesh when a malformed local source cannot be prepared.
     }
@@ -652,6 +1280,16 @@ export class GalleryRenderer {
 
   private emitLiveIds() {
     this.onLiveIdsChange(new Set([...this.records].filter(([, record]) => Boolean(record.sticker)).map(([id]) => id)));
+  }
+
+  private emitPreviewIds() {
+    this.onPreviewIdsChange(
+      new Set(
+        [...this.records]
+          .filter(([, record]) => !record.previewLoading)
+          .map(([id]) => id),
+      ),
+    );
   }
 
   private clientToLocal(record: RenderRecord, clientX: number, clientY: number) {
@@ -666,22 +1304,82 @@ export class GalleryRenderer {
     return new THREE.Vector2(world.x, world.y);
   }
 
-  startPeel(clientX: number, clientY: number, pointerId: number, time: number) {
-    const candidates = [...this.records.values()]
-      .filter((record) => record.sticker && !record.hidden)
+  private hitCandidates() {
+    return [...this.records.values()]
+      .filter(
+        (record) =>
+          (record.sticker || record.previewHitMask) &&
+          !record.hidden &&
+          record.opacity > 0.001 &&
+          record.root.visible,
+      )
       .sort((a, b) => b.item.layout.zIndex - a.item.layout.zIndex);
+  }
+
+  private surfaceHit(
+    clientX: number,
+    clientY: number,
+    candidates = this.hitCandidates(),
+  ) {
     for (const record of candidates) {
       const local = this.clientToLocal(record, clientX, clientY);
-      const hit = record.sticker!.hitEdge(
-        local,
-        record.item.layout.width * 0.78 * this.view.zoom,
-      );
-      if (!hit || !record.sticker!.start(hit, local, time)) continue;
-      this.activePeel = { id: record.item.id, pointerId };
-      this.requestRender();
-      return record.item.id;
+      const hit = record.sticker
+        ? record.sticker.hitSurface(local)
+        : record.previewHitMask
+          ? hitAlphaMask(record.previewHitMask, local)
+          : false;
+      if (hit) return { record, local };
     }
     return null;
+  }
+
+  /** Returns the topmost sticker with a visible pixel at this screen point. */
+  pickSticker(clientX: number, clientY: number) {
+    return this.surfaceHit(clientX, clientY)?.record.item.id ?? null;
+  }
+
+  private peelHit(
+    clientX: number,
+    clientY: number,
+    candidates = this.hitCandidates(),
+  ) {
+    const surface = this.surfaceHit(clientX, clientY, candidates);
+    // An opaque pixel owns the pointer. Only allow that sticker to peel so an
+    // edge on a lower layer cannot steal the gesture through visible artwork.
+    // When the pointer is just outside an edge there is no surface hit, so all
+    // layers remain eligible and transparent regions naturally pass through.
+    const peelCandidates = (surface ? [surface.record] : candidates).filter(
+      (record) => Boolean(record.sticker),
+    );
+    for (const record of peelCandidates) {
+      const local =
+        surface?.record === record
+          ? surface.local
+          : this.clientToLocal(record, clientX, clientY);
+      const hit = record.sticker!.hitEdge(
+        local,
+        record.item.layout.width * 0.78,
+      );
+      if (hit) return { record, local, hit };
+    }
+    return null;
+  }
+
+  /** Returns the visible sticker whose edge owns a peel gesture here. */
+  pickPeelTarget(clientX: number, clientY: number) {
+    return this.peelHit(clientX, clientY)?.record.item.id ?? null;
+  }
+
+  startPeel(clientX: number, clientY: number, pointerId: number, time: number) {
+    if (this.activePeel) return null;
+    const result = this.peelHit(clientX, clientY);
+    if (!result?.record.sticker?.start(result.hit, result.local, time)) {
+      return null;
+    }
+    this.setElevatedPeel(result.record.item.id);
+    this.activePeel = { id: result.record.item.id, pointerId };
+    this.requestRender();
+    return result.record.item.id;
   }
 
   movePeel(clientX: number, clientY: number, pointerId: number, time: number) {
@@ -702,6 +1400,36 @@ export class GalleryRenderer {
     return true;
   }
 
+  async tearAwayForDelete(id: string) {
+    const record = this.records.get(id);
+    if (!record?.sticker) return false;
+    if (this.activePeel?.id === id) this.activePeel = null;
+    this.setElevatedPeel(id);
+    const animation = record.sticker.tearAwayForDelete(performance.now());
+    this.requestRender();
+    await animation;
+    return true;
+  }
+
+  restoreAfterDelete(id: string) {
+    const record = this.records.get(id);
+    if (!record?.sticker) return;
+    record.sticker.restoreAfterDelete();
+    if (this.elevatedPeelId === id) this.setElevatedPeel(null);
+    this.requestRender();
+  }
+
+  private setElevatedPeel(id: string | null) {
+    if (this.elevatedPeelId === id) return;
+    const previous = this.elevatedPeelId
+      ? this.records.get(this.elevatedPeelId)
+      : null;
+    this.elevatedPeelId = id;
+    if (previous) this.applyLayout(previous, previous.item.layout);
+    const next = id ? this.records.get(id) : null;
+    if (next) this.applyLayout(next, next.item.layout);
+  }
+
   private requestRender() {
     if (this.destroyed || this.frame) return;
     this.frame = requestAnimationFrame(this.renderFrame);
@@ -713,14 +1441,24 @@ export class GalleryRenderer {
     const delta = this.lastFrameTime ? Math.min((time - this.lastFrameTime) / 1000, 1 / 20) : 1 / 60;
     this.lastFrameTime = time;
     let animating = false;
-    for (const record of this.records.values()) {
+    for (const [id, record] of this.records) {
       if (record.sticker?.update(delta, time)) animating = true;
+      if (
+        this.elevatedPeelId === id &&
+        record.sticker &&
+        !record.sticker.needsElevatedLayer()
+      ) {
+        this.setElevatedPeel(null);
+      }
     }
     this.renderer.render(this.scene, this.camera);
     if (animating) this.requestRender();
   };
 
   private removeRecord(record: RenderRecord) {
+    if (this.elevatedPeelId === record.item.id) {
+      this.elevatedPeelId = null;
+    }
     record.generation += 1;
     record.sticker?.dispose();
     if (record.preview) {
@@ -735,6 +1473,14 @@ export class GalleryRenderer {
   destroy() {
     this.destroyed = true;
     if (this.frame) cancelAnimationFrame(this.frame);
+    if (this.idleCallback !== null) {
+      if (typeof window.cancelIdleCallback === "function") {
+        window.cancelIdleCallback(this.idleCallback);
+      } else {
+        window.clearTimeout(this.idleCallback);
+      }
+      this.idleCallback = null;
+    }
     this.queue.length = 0;
     for (const record of this.records.values()) this.removeRecord(record);
     this.records.clear();

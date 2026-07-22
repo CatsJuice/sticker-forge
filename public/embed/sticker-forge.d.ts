@@ -120,6 +120,8 @@ export interface StickerInstance {
   /** Deep-merge a partial option patch into the current settings. */
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  /** Replay the built-in spring-and-sweep entrance animation. */
+  reappear(): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;
@@ -173,6 +175,7 @@ export declare class StickerForgeElement extends HTMLElement {
   setSource(source: StickerSource): Promise<void>;
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  reappear(): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;

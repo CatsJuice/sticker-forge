@@ -194,6 +194,7 @@ class StickerRenderer implements StickerInstance {
   private springActive = false;
   private springTargetDepth = 0;
   private dragDetached = false;
+  private detachedTension = 0;
   private detachedExitActive = false;
   private detachedExitElapsed = 0;
   private detachedExitSpin = 0;
@@ -251,6 +252,7 @@ class StickerRenderer implements StickerInstance {
       uMap: { value: null },
       uPeel: { value: 0 },
       uPeelDepth: { value: 0 },
+      uDetachedTension: { value: 0 },
       uRadius: { value: 0.08 },
       uMaxAngle: { value: 3.55 },
       uWind: { value: this.options.wind },
@@ -277,6 +279,8 @@ class StickerRenderer implements StickerInstance {
       uInteractionHintColor: {
         value: colorFrom(INTERACTION_HINT_COLOR, "rgb(36, 126, 245)"),
       },
+      uPreserveFrontColor: { value: 0 },
+      uOpacity: { value: 1 },
     };
 
     const stickerUniforms = {
@@ -445,6 +449,7 @@ class StickerRenderer implements StickerInstance {
     this.springVelocity = 0;
     this.springTargetDepth = 0;
     this.dragDetached = false;
+    this.detachedTension = 0;
     this.detachedExitActive = false;
     this.detachedExitElapsed = 0;
     this.detachedExitSpin = 0;
@@ -466,6 +471,11 @@ class StickerRenderer implements StickerInstance {
     this.updatePeelUniforms();
     this.emit("peelchange", { amount: 0, progress: 0 });
     this.requestRender();
+  }
+
+  reappear(): void {
+    if (this.destroyed) return;
+    this.startEntranceAnimation();
   }
 
   resize = (): void => {
@@ -702,11 +712,11 @@ class StickerRenderer implements StickerInstance {
       0,
       0.9,
     );
-    const displayWidth =
+    const unscaledDisplayWidth =
       (this.meshWidth / Math.max(this.viewWidth, 0.001)) *
-      Math.max(rect.width, 1);
+      Math.max(this.renderer.domElement.clientWidth, 1);
     const textureScale = this.artwork
-      ? this.artwork.width / Math.max(displayWidth, 1)
+      ? this.artwork.width / Math.max(unscaledDisplayWidth, 1)
       : 1;
     this.uniforms.uInteractionHintRadius.value = this.artwork
       ? clamp(
@@ -747,6 +757,7 @@ class StickerRenderer implements StickerInstance {
   private updatePeelUniforms() {
     this.uniforms.uPeel.value = this.state.progress;
     this.uniforms.uPeelDepth.value = this.creaseDepth;
+    this.uniforms.uDetachedTension.value = this.detachedTension;
     this.uniforms.uRadius.value = this.effectivePeelRadius;
     (this.uniforms.uOrigin.value as THREE.Vector2).copy(this.grabOrigin);
     (this.uniforms.uPeelDir.value as THREE.Vector2).copy(this.activeDirection);
@@ -837,9 +848,21 @@ class StickerRenderer implements StickerInstance {
     const angle = THREE.MathUtils.degToRad(this.options.tilt);
     const cosine = Math.cos(angle);
     const sine = Math.sin(angle);
+    const pullDistance = Math.hypot(localX, localY);
+    const tensionDistance = Math.max(this.grabExtent * 0.45, 0.12);
+    const linearTension = clamp(pullDistance / tensionDistance, 0, 1);
+    this.detachedTension = linearTension * linearTension * (3 - 2 * linearTension);
+    const flatteningCompensation =
+      this.grabProjection - this.grabExtent * 2;
+    const compensatedX =
+      localX +
+      this.activeDirection.x * flatteningCompensation * this.detachedTension;
+    const compensatedY =
+      localY +
+      this.activeDirection.y * flatteningCompensation * this.detachedTension;
     this.stickerMesh.position.set(
-      localX * cosine - localY * sine,
-      localX * sine + localY * cosine,
+      compensatedX * cosine - compensatedY * sine,
+      compensatedX * sine + compensatedY * cosine,
       0,
     );
   }
@@ -866,6 +889,19 @@ class StickerRenderer implements StickerInstance {
     return this.artwork.alpha[pixelY * this.artwork.width + pixelX] / 255;
   }
 
+  private sampleExterior(x: number, y: number) {
+    if (!this.artwork) return false;
+    const pixelX = Math.round(x);
+    const pixelY = Math.round(y);
+    if (
+      pixelX < 0 ||
+      pixelX >= this.artwork.width ||
+      pixelY < 0 ||
+      pixelY >= this.artwork.height
+    ) return true;
+    return this.artwork.exteriorAlpha[pixelY * this.artwork.width + pixelX] === 1;
+  }
+
   private hitEdge(local: THREE.Vector2): EdgeHit | null {
     if (!this.artwork) return null;
     const u = local.x / this.meshWidth + 0.5;
@@ -873,10 +909,11 @@ class StickerRenderer implements StickerInstance {
     if (u < -0.04 || u > 1.04 || v < -0.04 || v > 1.04) return null;
     const pixelX = u * (this.artwork.width - 1);
     const pixelY = (1 - v) * (this.artwork.height - 1);
-    const rect = this.renderer.domElement.getBoundingClientRect();
-    const displayedWidth =
-      (this.meshWidth / Math.max(this.viewWidth, 0.001)) * rect.width;
-    const pixelsPerCss = this.artwork.width / Math.max(displayedWidth, 1);
+    const unscaledDisplayedWidth =
+      (this.meshWidth / Math.max(this.viewWidth, 0.001)) *
+      this.renderer.domElement.clientWidth;
+    const pixelsPerCss =
+      this.artwork.width / Math.max(unscaledDisplayedWidth, 1);
     const radius = clamp(
       this.options.peel.grabWidth * pixelsPerCss,
       3,
@@ -906,13 +943,12 @@ class StickerRenderer implements StickerInstance {
         }
         const alpha = this.sampleAlpha(candidateX, candidateY);
         if (alpha < 0.1) continue;
-        const isBoundary =
-          alpha < 0.9 ||
-          this.sampleAlpha(candidateX - 1, candidateY) < 0.1 ||
-          this.sampleAlpha(candidateX + 1, candidateY) < 0.1 ||
-          this.sampleAlpha(candidateX, candidateY - 1) < 0.1 ||
-          this.sampleAlpha(candidateX, candidateY + 1) < 0.1;
-        if (!isBoundary) continue;
+        const isOuterBoundary =
+          this.sampleExterior(candidateX - 1, candidateY) ||
+          this.sampleExterior(candidateX + 1, candidateY) ||
+          this.sampleExterior(candidateX, candidateY - 1) ||
+          this.sampleExterior(candidateX, candidateY + 1);
+        if (!isOuterBoundary) continue;
         nearestX = candidateX;
         nearestY = candidateY;
         nearestDistanceSq = distanceSq;
@@ -1573,6 +1609,10 @@ export class StickerForgeElement extends HTMLElementBase {
 
   reset(): void {
     this.instance?.reset();
+  }
+
+  reappear(): void {
+    this.instance?.reappear();
   }
 
   resize(): void {

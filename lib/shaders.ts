@@ -1,6 +1,7 @@
 const deformation = /* glsl */ `
   uniform float uPeel;
   uniform float uPeelDepth;
+  uniform float uDetachedTension;
   uniform float uRadius;
   uniform float uMaxAngle;
   uniform float uWind;
@@ -73,6 +74,12 @@ const deformation = /* glsl */ `
     curved.z += windDisplacement * 0.032;
     curved.xy += tangent * windDisplacement * 0.04;
     curved.xy += direction * windDisplacement * 0.01;
+    // Pulling a detached sheet taut unfolds the curl without turning the
+    // sticker back over. Reflecting it across the peel front keeps the back
+    // face toward the viewer when the sheet becomes flat.
+    vec3 tautBack = base;
+    tautBack.xy += direction * (2.0 * arcDistance);
+    curved = mix(curved, tautBack, clamp(uDetachedTension, 0.0, 1.0));
     return curved;
   }
 
@@ -89,7 +96,12 @@ const deformation = /* glsl */ `
     float radius = max(uRadius, 0.001);
     float maxAngle = clamp(uMaxAngle, 2.55, 3.14159265);
     float angle = min(arcDistance / radius, maxAngle);
-    return normalize(vec3(direction * sin(angle), cos(angle)));
+    vec3 curledNormal = normalize(vec3(direction * sin(angle), cos(angle)));
+    return normalize(mix(
+      curledNormal,
+      vec3(0.0, 0.0, -1.0),
+      clamp(uDetachedTension, 0.0, 1.0)
+    ));
   }
 `;
 
@@ -123,7 +135,9 @@ export const stickerVertexShader = /* glsl */ `
     float activePeel = step(0.00001, uPeelDepth);
 
     vLift = max(deformed.z, 0.0);
-    vCurl = peelMask * sin(clamp(normalizedArc, 0.0, 3.14159265));
+    vCurl = peelMask
+      * sin(clamp(normalizedArc, 0.0, 3.14159265))
+      * (1.0 - clamp(uDetachedTension, 0.0, 1.0));
     vAdhered = mix(
       1.0,
       smoothstep(front - receiverFeather, front + receiverFeather, along),
@@ -140,6 +154,68 @@ export const stickerVertexShader = /* glsl */ `
   }
 `;
 
+export const galleryShadowVertexShader = /* glsl */ `
+  ${deformation}
+
+  uniform vec2 uShadowDirection;
+  uniform float uShadowDistance;
+  uniform float uShadowLiftScale;
+
+  varying vec2 vShadowUv;
+
+  void main() {
+    vShadowUv = uv;
+    vec3 deformed = deformSticker(position);
+    vec4 worldPosition = modelMatrix * vec4(deformed, 1.0);
+    float projectionDistance =
+      uShadowDistance + max(deformed.z, 0.0) * uShadowLiftScale;
+    worldPosition.xy += normalize(uShadowDirection) * projectionDistance;
+    worldPosition.z = -0.004;
+    gl_Position = projectionMatrix * viewMatrix * worldPosition;
+  }
+`;
+
+export const galleryShadowFragmentShader = /* glsl */ `
+  uniform sampler2D uMap;
+  uniform vec2 uTexel;
+  uniform vec3 uShadowColor;
+  uniform float uShadowOpacity;
+  uniform float uShadowDeleteOpacity;
+  uniform float uShadowBlur;
+  uniform float uOpacity;
+
+  varying vec2 vShadowUv;
+
+  float shadowAlpha(vec2 offset) {
+    return texture2D(uMap, vShadowUv + offset).a;
+  }
+
+  void main() {
+    vec2 blur = uTexel * max(uShadowBlur, 0.75);
+    float alpha = shadowAlpha(vec2(0.0)) * 0.16;
+    alpha += shadowAlpha(vec2( blur.x, 0.0)) * 0.1;
+    alpha += shadowAlpha(vec2(-blur.x, 0.0)) * 0.1;
+    alpha += shadowAlpha(vec2(0.0,  blur.y)) * 0.1;
+    alpha += shadowAlpha(vec2(0.0, -blur.y)) * 0.1;
+    alpha += shadowAlpha(vec2( blur.x,  blur.y)) * 0.075;
+    alpha += shadowAlpha(vec2(-blur.x,  blur.y)) * 0.075;
+    alpha += shadowAlpha(vec2( blur.x, -blur.y)) * 0.075;
+    alpha += shadowAlpha(vec2(-blur.x, -blur.y)) * 0.075;
+    vec2 wideBlur = blur * 1.85;
+    alpha += shadowAlpha(vec2( wideBlur.x, 0.0)) * 0.0375;
+    alpha += shadowAlpha(vec2(-wideBlur.x, 0.0)) * 0.0375;
+    alpha += shadowAlpha(vec2(0.0,  wideBlur.y)) * 0.0375;
+    alpha += shadowAlpha(vec2(0.0, -wideBlur.y)) * 0.0375;
+
+    if (alpha < 0.002) discard;
+    gl_FragColor = vec4(
+      uShadowColor,
+      alpha * uShadowOpacity * uShadowDeleteOpacity * uOpacity
+    );
+    #include <colorspace_fragment>
+  }
+`;
+
 export const stickerFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
   uniform vec2 uTexel;
@@ -153,6 +229,8 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uInteractionHint;
   uniform float uInteractionHintRadius;
   uniform vec3 uInteractionHintColor;
+  uniform float uPreserveFrontColor;
+  uniform float uOpacity;
 
   varying vec2 vUv;
   varying vec3 vNormalView;
@@ -214,8 +292,17 @@ export const stickerFragmentShader = /* glsl */ `
 
     vec3 surfaceNormal = normalize(vNormalView);
     vec3 viewDirection = normalize(-vViewPosition);
+    float frontDeformation = clamp(vCurl * 0.82 + vLift * 0.48, 0.0, 1.0);
+    float preservedFront = uPreserveFrontColor * (
+      1.0 - smoothstep(0.025, 0.34, frontDeformation)
+    );
     float signedFacing = dot(surfaceNormal, viewDirection);
     float frontMix = smoothstep(-0.035, 0.035, signedFacing);
+    frontMix = mix(
+      frontMix,
+      step(0.0, signedFacing),
+      preservedFront
+    );
     vec3 normal = signedFacing < 0.0 ? -surfaceNormal : surfaceNormal;
     vec3 lightDirection = normalize(vec3(-0.38, 0.52, 0.76));
     vec3 halfDirection = normalize(lightDirection + viewDirection);
@@ -225,10 +312,14 @@ export const stickerFragmentShader = /* glsl */ `
     float micro = (hash21(vUv * 970.0) - 0.5) * 0.018;
 
     float printHighlight = pow(max(dot(normal, halfDirection), 0.0), 42.0) * 0.055;
-    float frontDeformation = clamp(vCurl * 0.82 + vLift * 0.48, 0.0, 1.0);
     float frontDiffuse = mix(1.0, 0.76 + 0.24 * normalLight, frontDeformation);
-    vec3 frontColor = printSample.rgb * frontDiffuse + printHighlight;
-    frontColor += fresnel * 0.025;
+    vec3 litFrontColor = printSample.rgb * frontDiffuse + printHighlight;
+    litFrontColor += fresnel * 0.025;
+    vec3 frontColor = mix(
+      litFrontColor,
+      printSample.rgb,
+      preservedFront
+    );
 
     float exponent = mix(17.0, 86.0, clamp(uGloss, 0.0, 1.0));
     float specular = pow(max(dot(normal, halfDirection), 0.0), exponent);
@@ -314,7 +405,7 @@ export const stickerFragmentShader = /* glsl */ `
       );
     }
 
-    gl_FragColor = vec4(color, printSample.a);
+    gl_FragColor = vec4(color, printSample.a * uOpacity);
     #include <colorspace_fragment>
   }
 `;
@@ -345,6 +436,7 @@ export const residueVertexShader = /* glsl */ `
 
 export const residueFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform float uOpacity;
 
   varying vec2 vResidueUv;
   varying float vResidueReveal;
@@ -361,7 +453,7 @@ export const residueFragmentShader = /* glsl */ `
 
     float grain = mix(0.82, 1.0, residueNoise(vResidueUv * 760.0));
     float residueAlpha = artworkAlpha * vResidueReveal * grain * 0.085;
-    gl_FragColor = vec4(vec3(0.34), residueAlpha);
+    gl_FragColor = vec4(vec3(0.34), residueAlpha * uOpacity);
     #include <colorspace_fragment>
   }
 `;

@@ -12,8 +12,6 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import {
-  faCircleCheck,
-  faCopy,
   faSquarePlus,
 } from "@fortawesome/free-regular-svg-icons";
 import {
@@ -22,6 +20,7 @@ import {
   faAlignRight,
   faArrowLeft,
   faArrowRight,
+  faArrowUpFromBracket,
   faBold,
   faChevronDown,
   faFont,
@@ -72,6 +71,7 @@ import {
   GalleryAddFlight,
   type GalleryAddFlightRect,
 } from "./GalleryAddFlight";
+import { ExportDialog } from "./ExportDialog";
 
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
@@ -740,7 +740,10 @@ export function StickerForgeStudio() {
   const [isLanguageOpen, setIsLanguageOpen] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
   const [sourceMessage, setSourceMessage] = useState("");
-  const [copied, setCopied] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
+  const [exportOptions, setExportOptions] =
+    useState<StickerOptions>(DEFAULT_SETTINGS);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [galleryFolders, setGalleryFolders] = useState<GalleryFolderRecord[]>([]);
@@ -1477,16 +1480,15 @@ export function StickerForgeStudio() {
     void applySource(makeTextSource(DEFAULT_TEXT, DEFAULT_INK, DEFAULT_RICH_TEXT));
   };
 
-  const buildEmbedSnippet = () => {
+  const buildEmbedSnippet = (
+    selectedSource: StickerSource,
+    selectedOptions: StickerOptions,
+  ) => {
     const origin = window.location.origin;
-    const imageSource =
-      imageDataUrl === DEFAULT_IMAGE_SRC
-        ? `${origin}${DEFAULT_IMAGE_SRC}`
-        : imageDataUrl;
     const source: StickerSource =
-      sourceMode === "image" && imageSource
-        ? { type: "image", src: imageSource, name: imageName }
-        : makeTextSource(text, inkColor, richText ?? undefined);
+      selectedSource.type === "image" && selectedSource.src.startsWith("/")
+        ? { ...selectedSource, src: `${origin}${selectedSource.src}` }
+        : selectedSource;
 
     return `<script type="module" src="${origin}/embed/sticker-forge.es.js"></script>
 
@@ -1496,18 +1498,8 @@ export function StickerForgeStudio() {
   await customElements.whenDefined("sticker-forge");
   const sticker = document.querySelector("#my-sticker");
   await sticker.setSource(${stringifyForInlineScript(source, 2)});
-  sticker.setOptions(${stringifyForInlineScript(settings, 2)});
+  sticker.setOptions(${stringifyForInlineScript(selectedOptions, 2)});
 </script>`;
-  };
-
-  const copyEmbedCode = async () => {
-    try {
-      await navigator.clipboard.writeText(buildEmbedSnippet());
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch {
-      setSourceMessage(t.copyBlocked);
-    }
   };
 
   const addCurrentStickerToGallery = async () => {
@@ -2090,17 +2082,6 @@ export function StickerForgeStudio() {
 
           <div className="controls-footer">
             <button
-              className="primary-button export-button"
-              type="button"
-              data-copied={copied}
-              onClick={copyEmbedCode}
-              aria-label={`${t.export} — ${t.copy}`}
-              title={t.copy}
-            >
-              <FontAwesomeIcon icon={copied ? faCircleCheck : faCopy} />
-              <span>{copied ? t.copied : t.export}</span>
-            </button>
-            <button
               className="primary-button gallery-add-button"
               type="button"
               disabled={galleryAdding || galleryLoading}
@@ -2109,8 +2090,29 @@ export function StickerForgeStudio() {
               <FontAwesomeIcon icon={faSquarePlus} />
               <span>{galleryAdding ? t.addingToGallery : t.addToGallery}</span>
             </button>
+            <button
+              className="primary-button export-button"
+              type="button"
+              onClick={() => {
+                setExportSource(sourceRef.current);
+                setExportOptions(settingsRef.current);
+                setExportOpen(true);
+              }}
+            >
+              <FontAwesomeIcon icon={faArrowUpFromBracket} />
+              <span>{t.export}</span>
+            </button>
           </div>
         </aside>
+      {exportOpen ? (
+        <ExportDialog
+          source={exportSource}
+          options={exportOptions}
+          embedCode={buildEmbedSnippet(exportSource, exportOptions)}
+          locale={locale}
+          onClose={() => setExportOpen(false)}
+        />
+      ) : null}
       {galleryOpen ? (
         <GalleryCanvas
           key={activeGalleryFolderId}
@@ -2155,6 +2157,12 @@ export function StickerForgeStudio() {
           onEditStart={() => {
             setGalleryEditorReady(false);
             setGalleryEditing(true);
+          }}
+          interactionBlocked={exportOpen}
+          onExport={(asset) => {
+            setExportSource(asset.source);
+            setExportOptions(asset.options);
+            setExportOpen(true);
           }}
           resolveEditTarget={(item, asset) => {
             const host = stageRef.current;
@@ -2258,7 +2266,7 @@ export function StickerForgeStudio() {
         }}
       />
       <span className="sr-only" aria-live="polite">
-        {copied ? t.copiedAnnouncement : sourceMessage || t.localOnly}
+        {sourceMessage || t.localOnly}
       </span>
     </main>
   );

@@ -103,12 +103,28 @@ export interface StickerState {
   readonly pointer: StickerPoint | null;
 }
 
+export interface StickerPlaybackMotion {
+  /** Normalized sticker position where the peel begins (0..1 on each axis). */
+  origin: StickerPoint;
+  /**
+   * Normalized sticker-space position the drag travels toward. Values may
+   * extend outside 0..1 to model pulling a detached sticker taut.
+   */
+  target: StickerPoint;
+}
+
 export interface StickerInstance {
   setSource(source: StickerSource): Promise<void>;
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  /** Set a deterministic peel pose without synthesizing pointer events. */
+  setPeelProgress(progress: number, motion?: StickerPlaybackMotion): void;
+  /** Set a deterministic pose of the built-in scale-and-laser entrance. */
+  setEntranceProgress(progress: number): void;
   /** Replay the built-in spring-and-sweep entrance animation. */
   reappear(): void;
+  /** Increase the backing-buffer density without changing the logical layout. */
+  setRenderScale(scale: number): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;

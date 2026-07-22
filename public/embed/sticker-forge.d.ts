@@ -114,14 +114,30 @@ export interface StickerState {
   readonly pointer: StickerPoint | null;
 }
 
+export interface StickerPlaybackMotion {
+  /** Normalized sticker position where the peel begins (0..1 on each axis). */
+  origin: StickerPoint;
+  /**
+   * Normalized sticker-space position the drag travels toward. Values may
+   * extend outside 0..1 to model pulling a detached sticker taut.
+   */
+  target: StickerPoint;
+}
+
 export interface StickerInstance {
   /** Rebuild the sticker texture. Resolves after the artwork is ready. */
   setSource(source: StickerSource): Promise<void>;
   /** Deep-merge a partial option patch into the current settings. */
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  /** Set a deterministic peel pose without synthesizing pointer events. */
+  setPeelProgress(progress: number, motion?: StickerPlaybackMotion): void;
+  /** Set a deterministic pose of the built-in scale-and-laser entrance. */
+  setEntranceProgress(progress: number): void;
   /** Replay the built-in spring-and-sweep entrance animation. */
   reappear(): void;
+  /** Increase the backing-buffer density without changing the logical layout. */
+  setRenderScale(scale: number): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;
@@ -138,6 +154,9 @@ export declare function defineStickerForge(tagName?: string): void;
 
 /** Sanitize raw SVG markup with the same policy used by `setSource()`. */
 export declare function sanitizeSvgMarkup(markup: string): string;
+
+/** Duration of the built-in scale-and-laser entrance animation. */
+export declare const STICKER_ENTRANCE_DURATION_MS = 720;
 
 export interface StickerReadyDetail {
   width: number;
@@ -175,7 +194,10 @@ export declare class StickerForgeElement extends HTMLElement {
   setSource(source: StickerSource): Promise<void>;
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
+  setPeelProgress(progress: number, motion?: StickerPlaybackMotion): void;
+  setEntranceProgress(progress: number): void;
   reappear(): void;
+  setRenderScale(scale: number): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;
@@ -206,6 +228,14 @@ export declare class StickerForgeElement extends HTMLElement {
     listener: (
       this: StickerForgeElement,
       event: CustomEvent<StickerPeelEndDetail>,
+    ) => unknown,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  addEventListener(
+    type: "cyclecomplete",
+    listener: (
+      this: StickerForgeElement,
+      event: CustomEvent<{ progress: 0 }>,
     ) => unknown,
     options?: boolean | AddEventListenerOptions,
   ): void;

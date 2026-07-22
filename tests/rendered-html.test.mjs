@@ -37,7 +37,8 @@ test("server-renders the Sticker Forge studio shell", async () => {
     html,
     /href="https:\/\/github\.com\/CatsJuice\/sticker-forge"/,
   );
-  assert.match(html, /复制嵌入代码/);
+  assert.match(html, /添加到 Gallery/);
+  assert.match(html, /<span>导出<\/span>/);
   assert.match(html, /富文本贴纸内容/);
   assert.match(html, /contentEditable="true"/);
   assert.match(html, /data-testid="sticker-stage"/);
@@ -72,6 +73,9 @@ test("ships both standalone bundles and a copyable embed example", async () => {
   assert.match(declarations, /richText\?: StickerRichTextDocument/);
   assert.match(declarations, /sound\?: StickerSoundOptions/);
   assert.match(declarations, /setSource\(source: StickerSource\): Promise<void>/);
+  assert.match(declarations, /setPeelProgress\(progress: number/);
+  assert.match(declarations, /setEntranceProgress\(progress: number\): void/);
+  assert.match(declarations, /setRenderScale\(scale: number\): void/);
   assert.match(iifeSource, /data:audio\/mpeg;base64,/);
   assert.match(esmSource, /data:audio\/mpeg;base64,/);
 

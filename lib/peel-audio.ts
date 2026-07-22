@@ -2,6 +2,7 @@ import defaultPeelSoundUrl from "./assets/elevenlabs-sticker-peel-foley.mp3?inli
 import reappearSoundUrl from "./assets/sticker-reappear.wav?inline";
 
 export const DEFAULT_PEEL_SOUND_URL = defaultPeelSoundUrl;
+export const DEFAULT_REAPPEAR_SOUND_URL = reappearSoundUrl;
 
 const MAX_ACTIVE_VOICES = 5;
 const MOTION_EPSILON = 0.0007;

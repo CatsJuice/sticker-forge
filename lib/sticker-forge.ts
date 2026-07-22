@@ -17,6 +17,7 @@ import {
   type ResolvedStickerOptions,
   type StickerInstance,
   type StickerOptions,
+  type StickerPlaybackMotion,
   type StickerPoint,
   type StickerSource,
   type StickerState,
@@ -31,6 +32,7 @@ export type {
   StickerOutlineOptions,
   StickerPeelOptions,
   StickerPoint,
+  StickerPlaybackMotion,
   StickerRichTextBlock,
   StickerRichTextDocument,
   StickerRichTextRun,
@@ -94,7 +96,8 @@ const MAX_DIRECT_RETURN_STEP_RATIO = 0.035;
 const SNAP_DETACH_THRESHOLD = 0.74;
 const MAX_STICKER_WIDTH_PX = 760;
 const MAX_STICKER_HEIGHT_PX = 520;
-const ENTRANCE_SCALE_DURATION = 0.72;
+export const STICKER_ENTRANCE_DURATION_MS = 720;
+const ENTRANCE_SCALE_DURATION = STICKER_ENTRANCE_DURATION_MS / 1000;
 const ENTRANCE_SWEEP_DELAY = 0.06;
 const ENTRANCE_SWEEP_DURATION = 0.42;
 const INTERACTION_HINT_DURATION = 0.9;
@@ -178,6 +181,7 @@ class StickerRenderer implements StickerInstance {
   private viewWidth = 2;
   private viewHeight = 2;
   private viewportHeightPx = 420;
+  private renderScale = 1;
   private meshWidth = 1.6;
   private meshHeight = 0.62;
   private pointerId: number | null = null;
@@ -223,6 +227,7 @@ class StickerRenderer implements StickerInstance {
       antialias: true,
       powerPreference: "high-performance",
       premultipliedAlpha: true,
+      preserveDrawingBuffer: true,
     });
     this.renderer.setClearColor(0x000000, 0);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -473,19 +478,125 @@ class StickerRenderer implements StickerInstance {
     this.requestRender();
   }
 
+  setPeelProgress(
+    progress: number,
+    motion: StickerPlaybackMotion = {
+      origin: { x: 0, y: 0.5 },
+      target: { x: 1, y: 0.5 },
+    },
+  ): void {
+    if (this.destroyed || !this.artwork) return;
+    this.springActive = false;
+    this.springVelocity = 0;
+    this.detachedExitActive = false;
+    this.entranceActive = false;
+    this.interactionHintActive = false;
+    this.state.dragging = false;
+    this.stickerMesh.position.set(0, 0, 0);
+    this.stickerMesh.scale.set(1, 1, 1);
+    this.stickerMesh.rotation.z = THREE.MathUtils.degToRad(this.options.tilt);
+    this.uniforms.uEntranceSweep.value = -1;
+    this.uniforms.uEntranceScaleProgress.value = -1;
+    this.uniforms.uInteractionHint.value = 0;
+
+    const originX = clamp(motion.origin.x, 0, 1) - 0.5;
+    const originY = 0.5 - clamp(motion.origin.y, 0, 1);
+    const targetX = motion.target.x - 0.5;
+    const targetY = 0.5 - motion.target.y;
+    this.grabOrigin.set(originX * this.meshWidth, originY * this.meshHeight);
+    const targetDeltaX = (targetX - originX) * this.meshWidth;
+    const targetDeltaY = (targetY - originY) * this.meshHeight;
+    const requestedPointerDistance = Math.hypot(targetDeltaX, targetDeltaY);
+    this.grabDirection.set(targetDeltaX, targetDeltaY);
+    if (this.grabDirection.lengthSq() < 0.0001) this.grabDirection.set(1, 0);
+    this.grabDirection.normalize();
+    this.activeDirection.copy(this.grabDirection);
+    this.grabExtent = this.projectionExtent(
+      this.grabOrigin,
+      this.activeDirection,
+    );
+    const maximumPointerDistance = this.peelModelForDepth(
+      this.grabExtent,
+    ).projection;
+    // A nearby target still reaches a complete peel. Extending the target
+    // farther than that continues the real drag, translating the detached
+    // sticker and pulling its remaining curl taut.
+    const fullPointerDistance = Math.max(
+      requestedPointerDistance,
+      maximumPointerDistance,
+    );
+    const pointerDistance = clamp(progress, 0, 1) * fullPointerDistance;
+    this.setCreaseDepth(this.solveCreaseDepth(pointerDistance));
+    const detachedDistance = Math.max(
+      0,
+      pointerDistance - maximumPointerDistance,
+    );
+    this.setDetachedDragOffset(
+      this.activeDirection.x * detachedDistance,
+      this.activeDirection.y * detachedDistance,
+    );
+    this.state.grabPoint = {
+      x: this.grabOrigin.x,
+      y: this.grabOrigin.y,
+    };
+    this.state.pointer = {
+      x: this.grabOrigin.x + this.activeDirection.x * pointerDistance,
+      y: this.grabOrigin.y + this.activeDirection.y * pointerDistance,
+    };
+    this.updatePeelUniforms();
+    this.renderer.render(this.scene, this.camera);
+  }
+
+  setEntranceProgress(progress: number): void {
+    if (this.destroyed || !this.artwork) return;
+    this.springActive = false;
+    this.springVelocity = 0;
+    this.detachedExitActive = false;
+    this.entranceActive = false;
+    this.interactionHintActive = false;
+    this.state.dragging = false;
+    this.detachedTension = 0;
+    this.stickerMesh.position.set(0, 0, 0);
+    this.stickerMesh.scale.set(1, 1, 1);
+    this.stickerMesh.rotation.z = THREE.MathUtils.degToRad(this.options.tilt);
+    this.uniforms.uInteractionHint.value = 0;
+    this.setCreaseDepth(0);
+    this.state.grabPoint = null;
+    this.state.pointer = null;
+    this.configureEntranceAxis();
+    const completed = this.applyEntranceElapsed(
+      clamp(progress, 0, 1) * ENTRANCE_SCALE_DURATION,
+    );
+    if (completed) this.clearEntrancePose();
+    this.updatePeelUniforms();
+    this.renderer.render(this.scene, this.camera);
+  }
+
   reappear(): void {
     if (this.destroyed) return;
     this.startEntranceAnimation();
   }
 
+  setRenderScale(scale: number): void {
+    if (this.destroyed) return;
+    const nextScale = clamp(scale, 1, 2.6);
+    if (Math.abs(nextScale - this.renderScale) < 0.001) return;
+    this.renderScale = nextScale;
+    this.resize();
+  }
+
   resize = (): void => {
     if (this.destroyed) return;
-    const rect = this.container.getBoundingClientRect();
-    const width = Math.max(2, Math.round(rect.width || 640));
-    const height = Math.max(2, Math.round(rect.height || 420));
+    // CSS transforms are presentation-only. Keeping layout dimensions separate
+    // lets export previews supersample without changing the sticker geometry.
+    const width = Math.max(2, Math.round(this.container.clientWidth || 640));
+    const height = Math.max(2, Math.round(this.container.clientHeight || 420));
     const qualityRatio = this.options.quality === "low" ? 1.25 : 2;
     this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio || 1, qualityRatio),
+      Math.min(
+        Math.min(window.devicePixelRatio || 1, qualityRatio) * this.renderScale,
+        6,
+      ),
     );
     this.renderer.setSize(width, height, false);
     this.viewportHeightPx = height;
@@ -1343,11 +1454,7 @@ class StickerRenderer implements StickerInstance {
     this.requestRender();
   }
 
-  private startEntranceAnimation() {
-    this.reset();
-    this.peelAudio.playReappear();
-    this.entranceActive = true;
-    this.entranceElapsed = 0;
+  private configureEntranceAxis() {
     this.entranceAxis.set(
       this.meshWidth >= this.meshHeight ? 1 : 0,
       this.meshWidth >= this.meshHeight ? 0 : -1,
@@ -1355,8 +1462,33 @@ class StickerRenderer implements StickerInstance {
     (this.uniforms.uEntranceAxis.value as THREE.Vector2).copy(
       this.entranceAxis,
     );
+  }
+
+  private applyEntranceElapsed(elapsed: number) {
+    const scaleProgress = clamp(elapsed / ENTRANCE_SCALE_DURATION, 0, 1);
+    this.uniforms.uEntranceScaleProgress.value = scaleProgress;
+    const sweepProgress = clamp(
+      (elapsed - ENTRANCE_SWEEP_DELAY) / ENTRANCE_SWEEP_DURATION,
+      0,
+      1,
+    );
+    this.uniforms.uEntranceSweep.value =
+      elapsed < ENTRANCE_SWEEP_DELAY ? -1 : sweepProgress;
+    return scaleProgress >= 1 && sweepProgress >= 1;
+  }
+
+  private clearEntrancePose() {
+    this.uniforms.uEntranceScaleProgress.value = -1;
     this.uniforms.uEntranceSweep.value = -1;
-    this.uniforms.uEntranceScaleProgress.value = 0;
+  }
+
+  private startEntranceAnimation() {
+    this.reset();
+    this.peelAudio.playReappear();
+    this.entranceActive = true;
+    this.entranceElapsed = 0;
+    this.configureEntranceAxis();
+    this.applyEntranceElapsed(0);
     this.requestRender();
   }
 
@@ -1450,26 +1582,10 @@ class StickerRenderer implements StickerInstance {
 
     if (this.entranceActive) {
       this.entranceElapsed += delta;
-      const scaleProgress = clamp(
-        this.entranceElapsed / ENTRANCE_SCALE_DURATION,
-        0,
-        1,
-      );
-      this.uniforms.uEntranceScaleProgress.value = scaleProgress;
-
-      const sweepStart = ENTRANCE_SWEEP_DELAY;
-      const sweepProgress = clamp(
-        (this.entranceElapsed - sweepStart) / ENTRANCE_SWEEP_DURATION,
-        0,
-        1,
-      );
-      this.uniforms.uEntranceSweep.value =
-        this.entranceElapsed < sweepStart ? -1 : sweepProgress;
-
-      if (scaleProgress >= 1 && sweepProgress >= 1) {
+      if (this.applyEntranceElapsed(this.entranceElapsed)) {
         this.entranceActive = false;
-        this.uniforms.uEntranceScaleProgress.value = -1;
-        this.uniforms.uEntranceSweep.value = -1;
+        this.clearEntrancePose();
+        this.emit("cyclecomplete", { progress: 0 });
       }
     }
 
@@ -1557,7 +1673,13 @@ export class StickerForgeElement extends HTMLElementBase {
       this.mountElement = document.createElement("div");
       this.mountElement.className = "mount";
       shadow.append(style, this.mountElement);
-      for (const eventName of ["peelstart", "peelchange", "peelend", "error"]) {
+      for (const eventName of [
+        "peelstart",
+        "peelchange",
+        "peelend",
+        "cyclecomplete",
+        "error",
+      ]) {
         this.mountElement.addEventListener(eventName, (event) => {
           this.dispatchEvent(
             new CustomEvent(eventName, {
@@ -1611,8 +1733,23 @@ export class StickerForgeElement extends HTMLElementBase {
     this.instance?.reset();
   }
 
+  setPeelProgress(
+    progress: number,
+    motion?: StickerPlaybackMotion,
+  ): void {
+    this.instance?.setPeelProgress(progress, motion);
+  }
+
+  setEntranceProgress(progress: number): void {
+    this.instance?.setEntranceProgress(progress);
+  }
+
   reappear(): void {
     this.instance?.reappear();
+  }
+
+  setRenderScale(scale: number): void {
+    this.instance?.setRenderScale(scale);
   }
 
   resize(): void {

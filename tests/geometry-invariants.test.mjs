@@ -140,7 +140,7 @@ test("keeps repeated delete clicks on the inline Keep action", async () => {
 
   assert.match(gallery, /function GalleryDeleteControl\(/);
   assert.match(gallery, /useSpringValue\(armed \? 1 : 0/);
-  assert.match(gallery, /const deleteLeft = 4 \+ progress \* 37/);
+  assert.match(gallery, /const deleteLeft = 24 \+ progress \* 37/);
   assert.match(gallery, /"--gallery-control-counter-rotation": `\$\{-totalRotation\}deg`/);
   assert.match(gallery, /pointerEvents: armed \? "auto" : "none"/);
   assert.doesNotMatch(gallery, /translateY\(\$\{\(1 - progress\) \* 10\}px\)/);
@@ -183,6 +183,7 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   ]);
 
   assert.match(gallery, /aria-label="Edit sticker"/);
+  assert.match(gallery, /aria-label=\{exportLabel\}/);
   assert.match(gallery, /function GalleryEditMotion\(/);
   assert.match(gallery, /useSpringVector\(/);
   assert.match(gallery, /width: currentItem\.layout\.width \* scale/);
@@ -198,7 +199,11 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   assert.match(studio, /await new Promise<void>\(\(resolve\) => \{/);
   assert.match(studio, /setGalleryEditorReady\(true\)/);
   assert.match(studio, /onEditHandoffComplete=\{\(\) => \{/);
-  assert.match(styles, /\.gallery-edit-button \{[^}]*right: 4px;[^}]*cursor: pointer;/s);
+  assert.match(styles, /\.gallery-edit-button \{[^}]*right: 24px;/s);
+  assert.match(styles, /\.gallery-export-button \{[^}]*left: -15\.5px;/s);
+  assert.match(studio, /onExport=\{\(asset\) => \{/);
+  assert.match(studio, /setExportSource\(asset\.source\)/);
+  assert.match(studio, /setExportOptions\(asset\.options\)/);
   assert.match(styles, /\.sticker-host canvas \{[^}]*transition: opacity 110ms/s);
   assert.match(
     styles,
@@ -695,21 +700,37 @@ test("continues moving a sticker after the peel reaches full progress", async ()
 });
 
 test("pulls a fully detached sticker flat as tension increases", async () => {
-  const [renderer, gallery, shader] = await Promise.all([
+  const [renderer, gallery, shader, exportDialog] = await Promise.all([
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/gallery-renderer.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(renderer, /private detachedTension = 0/);
   assert.match(renderer, /Math\.hypot\(localX, localY\)/);
   assert.match(renderer, /this\.grabProjection - this\.grabExtent \* 2/);
+  assert.match(renderer, /const targetX = motion\.target\.x - 0\.5/);
+  assert.match(renderer, /const requestedPointerDistance = Math\.hypot\(/);
+  assert.match(
+    renderer,
+    /const fullPointerDistance = Math\.max\([\s\S]*?requestedPointerDistance,[\s\S]*?maximumPointerDistance/,
+  );
+  assert.match(
+    renderer,
+    /pointerDistance - maximumPointerDistance/,
+  );
   assert.match(gallery, /detachedDistance \/ tensionDistance/);
   assert.match(gallery, /maximumPointerDistance - this\.grabExtent \* 2/);
   assert.match(shader, /uniform float uDetachedTension/);
   assert.match(shader, /tautBack\.xy \+= direction \* \(2\.0 \* arcDistance\)/);
   assert.match(shader, /mix\(curved, tautBack, clamp\(uDetachedTension/);
   assert.match(shader, /mix\(\s*curledNormal,\s*vec3\(0\.0, 0\.0, -1\.0\)/);
+  assert.match(exportDialog, /const MOTION_ANCHOR_INSET = 30/);
+  assert.match(
+    exportDialog,
+    /anchor === "origin"[\s\S]*?clamp\(normalized\.x, 0, 1\)[\s\S]*?: normalized/,
+  );
 });
 
 test("distinguishes retracing a detached peel from crossing its invalid side", async () => {
@@ -767,9 +788,11 @@ test("flies a fully detached sticker out instead of freezing the folded mesh", a
 });
 
 test("re-enters a detached sticker with a centered spring and laser sweep", async () => {
-  const [renderer, shader, reappearAsset] = await Promise.all([
+  const [renderer, shader, exportDialog, rendererTypes, reappearAsset] = await Promise.all([
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
     stat(new URL("../lib/assets/sticker-reappear.wav", import.meta.url)),
   ]);
 
@@ -778,11 +801,28 @@ test("re-enters a detached sticker with a centered spring and laser sweep", asyn
   assert.match(renderer, /this\.peelAudio\.playReappear\(\)/);
   assert.match(renderer, /this\.meshWidth >= this\.meshHeight \? 1 : 0/);
   assert.match(renderer, /this\.meshWidth >= this\.meshHeight \? 0 : -1/);
-  assert.match(renderer, /this\.uniforms\.uEntranceScaleProgress\.value = 0/);
+  assert.match(renderer, /private configureEntranceAxis\(\)/);
+  assert.match(renderer, /private applyEntranceElapsed\(elapsed: number\)/);
   assert.match(renderer, /this\.uniforms\.uEntranceScaleProgress\.value = scaleProgress/);
-  assert.match(renderer, /const sweepStart = ENTRANCE_SWEEP_DELAY/);
+  assert.match(renderer, /elapsed < ENTRANCE_SWEEP_DELAY \? -1 : sweepProgress/);
   assert.match(renderer, /ENTRANCE_SWEEP_DELAY = 0\.06/);
   assert.match(renderer, /this\.startEntranceAnimation\(\)/);
+  assert.match(renderer, /setEntranceProgress\(progress: number\): void/);
+  assert.match(rendererTypes, /setEntranceProgress\(progress: number\): void/);
+  assert.match(
+    exportDialog,
+    /controllerRef\.current\?\.setEntranceProgress\(state\.entranceProgress\)/,
+  );
+  assert.doesNotMatch(exportDialog, /scale: 0\.78 \+ easedEntrance/);
+  assert.match(
+    exportDialog,
+    /const rate = phase === "peel" \? speedRef\.current : 1/,
+  );
+  assert.match(
+    exportDialog,
+    /AUTO_PEEL_DURATION_MS \/ speed \+[\s\S]*?AUTO_EXIT_DURATION_MS \+[\s\S]*?STICKER_ENTRANCE_DURATION_MS/,
+  );
+  assert.doesNotMatch(exportDialog, /AUTO_ANIMATION_DURATION_MS \/ speed/);
   assert.match(shader, /vec3 scaleEntranceSlice\(vec3 base\)/);
   assert.match(shader, /uEntranceScaleProgress \* 1\.42 - entranceCoordinate \* 0\.42/);
   assert.match(shader, /exp\(-3\.8 \* sliceProgress\) \* cos\(9\.0 \* sliceProgress\)/);
@@ -960,4 +1000,141 @@ test("drives processed peel foley from motion instead of absolute progress", asy
   assert.match(renderer, /peelAudio\.update\(/);
   assert.match(renderer, /peelAudio\.end\(this\.state\.progress\)/);
   assert.doesNotMatch(renderer, /peelAudio\.seek/);
+});
+
+test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => {
+  const [exportDialog, encoders, styles] = await Promise.all([
+    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/export-encoders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(exportDialog, /GIF_FRAME_RATES = \[10, 15, 20, 30\]/);
+  assert.match(exportDialog, /APNG_FRAME_RATES = \[10, 15, 20, 30, 60\]/);
+  assert.match(exportDialog, /MOV_FRAME_RATES = \[24, 30, 60\]/);
+  assert.match(exportDialog, /MAX_PLAYBACK_INTERVAL = 5/);
+  assert.match(exportDialog, /PLAYBACK_INTERVAL_STEP = 0\.05/);
+  assert.match(exportDialog, /exportAnimation\("gif", frameRate\)/);
+  assert.match(exportDialog, /exportAnimation\("apng", frameRate\)/);
+  assert.match(exportDialog, /exportAnimation\("mov", frameRate\)/);
+  assert.match(exportDialog, /prepareAutomaticFrames\(frameRate\)/);
+  assert.match(exportDialog, /prepareRecordedFrames\(frameRate\)/);
+  assert.match(exportDialog, /encodeTransparentMov\(frames, frameRate, audio\)/);
+  assert.match(exportDialog, /includeShadow: gifShadow/);
+  assert.match(exportDialog, /const \[gifShadow, setGifShadow\] = useState\(true\)/);
+  assert.match(exportDialog, /const \[videoSound, setVideoSound\] = useState\(true\)/);
+  assert.match(exportDialog, /renderStickerExportAudio/);
+  assert.match(encoders, /export function resampleExportFrames/);
+  assert.match(encoders, /export function appendPlaybackInterval/);
+  assert.match(exportDialog, /format === "mov"/);
+  assert.match(exportDialog, /label=\{t\.playbackInterval\}/);
+  assert.match(encoders, /export async function encodeTransparentApng/);
+  assert.match(encoders, /export function repairTransparentEdgeColors/);
+  assert.match(styles, /\.export-split-action/);
+  assert.match(styles, /\.export-fps-menu/);
+  assert.match(styles, /\.export-footer-options/);
+  assert.match(styles, /\.export-option-toggle/);
+  assert.match(
+    styles,
+    /\.export-dialog-footer \{[^}]*position: relative;[^}]*z-index: 50;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-motion-panel \{[^}]*position: relative;[^}]*z-index: 30;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-speed-control:has\(\.export-speed-popover\),[\s\S]*?\.export-bezier-control:has\(\.export-bezier-popover\) \{[^}]*z-index: 10;/,
+  );
+  assert.match(
+    styles,
+    /\.export-split-action:has\(\.export-fps-menu\) \{[^}]*z-index: 10;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-fps-menu \{[^}]*z-index: 100;/s,
+  );
+  assert.doesNotMatch(
+    styles,
+    /\.export-split-action:has\(> button:hover:not\(:disabled\)\) \{[^}]*transform:/s,
+  );
+  assert.match(exportDialog, /className="export-mode-slider"/);
+  assert.match(exportDialog, /data-mode=\{mode\}/);
+  assert.match(exportDialog, /className="export-method-slider"/);
+  assert.match(exportDialog, /data-method=\{animationMethod\}/);
+  assert.match(
+    styles,
+    /\.export-mode-slider \{[^}]*transition: transform 280ms cubic-bezier/s,
+  );
+  assert.match(
+    styles,
+    /\.export-mode-tabs\[data-mode="embed"\] \.export-mode-slider/,
+  );
+  assert.match(
+    styles,
+    /\.export-method-slider \{[^}]*transition: transform 260ms cubic-bezier/s,
+  );
+  assert.match(
+    styles,
+    /\.export-method-switch\[data-method="automatic"\] \.export-method-slider/,
+  );
+  assert.match(
+    styles,
+    /\.export-record-control \{[^}]*gap: 7px;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-record-control \.export-interval-trigger \{[^}]*height: 38px;/s,
+  );
+  assert.match(exportDialog, /labelInside/);
+  assert.match(
+    styles,
+    /\.export-auto-inline-control\.export-select-control select \{[^}]*height: 38px;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-auto-inline-control \.export-speed-trigger \{[^}]*height: 38px;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-motion-panel \{[^}]*min-height: 68px;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-motion-panel\[data-method="manual"\] \{[^}]*min-height: 68px;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-interval-control\[data-label-inside="true"\] \.export-interval-trigger \{[^}]*grid-template-rows: auto auto;/s,
+  );
+});
+
+test("starts manual recording from the first direct peel", async () => {
+  const exportDialog = await readFile(
+    new URL("../app/ExportDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    exportDialog,
+    /manualStateRef\.current !== "idle" &&[\s\S]*?manualStateRef\.current !== "armed"/,
+  );
+  assert.match(
+    exportDialog,
+    /mode === "animated" && animationMethod === "manual"/,
+  );
+  assert.match(exportDialog, /enabled: previewSoundEnabled/);
+  assert.doesNotMatch(exportDialog, /sound: \{ \.\.\.options\.sound, enabled: false \}/);
+  assert.match(
+    exportDialog,
+    /const onPeelStart = \(\) => \{[\s\S]*?recordedFramesRef\.current\.push\(captureRecordingFrame\(\)\)[\s\S]*?setManualStateSynced\("capturing"\)/,
+  );
+  assert.match(
+    exportDialog,
+    /const canPanDirectly =[\s\S]*?animationMethod === "automatic";/,
+  );
+  assert.doesNotMatch(
+    exportDialog,
+    /animationMethod === "automatic" \|\| manualState === "idle"/,
+  );
 });

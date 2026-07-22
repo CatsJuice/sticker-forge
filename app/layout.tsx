@@ -47,6 +47,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
+      <head>
+        <script
+          defer
+          src="https://vibeloft.ai/telemetry/v1.js"
+          data-vl-product-id="c487b005-2d62-4cdc-b2d1-05e9186d00eb"
+          data-vl-auth-key="vl_web.hBqwU87ATF_flUbHTsi2cWmignCM_XgxTUkBPav0cLo"
+        />
+      </head>
       <body>{children}</body>
     </html>
   );

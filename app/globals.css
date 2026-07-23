@@ -262,12 +262,26 @@ input[type="color"] {
 }
 
 .sticker-host {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   height: 100%;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+}
+
+.background-removal-particles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.background-removal-particles {
+  z-index: 0;
+  width: 100%;
+  height: 100%;
 }
 
 .sticker-host canvas {
@@ -758,6 +772,155 @@ input[type="color"] {
   height: 12px;
 }
 
+.background-removal-control {
+  margin-top: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.background-removal-action {
+  position: relative;
+}
+
+.background-removal-tip {
+  position: fixed;
+  z-index: 140;
+  width: max-content;
+  max-width: 140px;
+  padding: 7px 10px;
+  border-radius: 9px;
+  color: #fff;
+  background: var(--accent);
+  font-size: 10px;
+  font-weight: 760;
+  line-height: 1.25;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 7px 20px rgba(36, 126, 245, 0.3);
+}
+
+.background-removal-tip::after {
+  content: "";
+  position: absolute;
+  border: 5px solid transparent;
+}
+
+.background-removal-tip[data-side="left"] {
+  animation: background-removal-tip-float-left 1.2s ease-in-out infinite alternate;
+}
+
+.background-removal-tip[data-side="left"]::after {
+  top: 50%;
+  left: 100%;
+  border-left-color: var(--accent);
+  transform: translateY(-50%);
+}
+
+.background-removal-tip[data-side="above"] {
+  animation: background-removal-tip-float-above 1.2s ease-in-out infinite alternate;
+}
+
+.background-removal-tip[data-side="above"]::after {
+  top: 100%;
+  left: 50%;
+  border-top-color: var(--accent);
+  transform: translateX(-50%);
+}
+
+.background-removal-button {
+  position: relative;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: #45444c;
+  background: rgba(255, 255, 255, 0.78);
+  font-size: 11px;
+  font-weight: 740;
+  cursor: pointer;
+  box-shadow: 0 3px 10px rgba(32, 33, 45, 0.05);
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.background-removal-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(78, 79, 92, 0.28);
+  background: #fff;
+  box-shadow: 0 5px 14px rgba(32, 33, 45, 0.08);
+}
+
+.background-removal-button:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.background-removal-button[data-phase="error"] {
+  border-color: rgba(195, 63, 70, 0.26);
+  color: #a83c42;
+  background: rgba(255, 247, 247, 0.9);
+}
+
+.background-removal-button[data-phase="loading"] > svg,
+.background-removal-button[data-phase="processing"] > svg {
+  animation: background-removal-icon-pulse 1.15s ease-in-out infinite alternate;
+}
+
+.background-removal-button > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.background-removal-caption {
+  display: block;
+  padding: 0 2px;
+  color: #777680;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.background-removal-caption[data-error="true"] {
+  color: #b43c43;
+}
+
+.background-removal-progress {
+  position: absolute;
+  inset: auto 0 0;
+  height: 3px;
+  background: rgba(76, 76, 224, 0.08);
+}
+
+.background-removal-progress::after {
+  content: "";
+  display: block;
+  width: var(--background-removal-progress, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #54dfff, #796cff 58%, #ec78c6);
+  box-shadow: 0 0 9px rgba(96, 109, 255, 0.48);
+  transition: width 180ms ease;
+}
+
+@keyframes background-removal-icon-pulse {
+  from { transform: scale(0.94) rotate(-5deg); filter: hue-rotate(0deg); }
+  to { transform: scale(1.06) rotate(5deg); filter: hue-rotate(35deg); }
+}
+
+@keyframes background-removal-tip-float-left {
+  from { transform: translate(-100%, calc(-50% - 3px)); }
+  to { transform: translate(-100%, calc(-50% + 3px)); }
+}
+
+@keyframes background-removal-tip-float-above {
+  from { transform: translate(-50%, calc(-100% - 3px)); }
+  to { transform: translate(-50%, calc(-100% + 3px)); }
+}
+
 .section-divider {
   height: 1px;
   margin: 18px 0;
@@ -943,6 +1106,16 @@ input[type="color"] {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+.debug-pane-host {
+  position: fixed;
+  z-index: 10000;
+  top: 12px;
+  left: 12px;
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
 }
 
 /* Fullscreen workspace */

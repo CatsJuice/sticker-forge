@@ -22,13 +22,16 @@
     "@fortawesome/free-regular-svg-icons": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
+    "@huggingface/transformers": "^4.2.0",
     "drizzle-orm": "0.45.2",
     "gifenc": "^1.0.3",
+    "heic-decode": "^2.1.0",
     "next": "16.2.6",
     "prores-wasm-encoder": "^0.2.3",
     "react": "19.2.6",
     "react-dom": "19.2.6",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "tweakpane": "^4.0.5"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "1.37.1",

@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import { DebugPanel } from "./DebugPanel";
 
 const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "https://sticker.oooo.so";
 
@@ -55,7 +56,10 @@ export default function RootLayout({
           data-vl-auth-key="vl_web.hBqwU87ATF_flUbHTsi2cWmignCM_XgxTUkBPav0cLo"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <DebugPanel />
+      </body>
     </html>
   );
 }

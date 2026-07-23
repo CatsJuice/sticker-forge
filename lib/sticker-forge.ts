@@ -11,6 +11,7 @@ import {
   DEFAULT_PEEL_SOUND_URL,
   PeelAudioEngine,
 } from "./peel-audio";
+import { getLaserEffectSettings } from "./laser-debug";
 import { prepareArtwork, type PreparedArtwork } from "./source";
 import {
   resolveStickerOptions,
@@ -19,6 +20,7 @@ import {
   type StickerOptions,
   type StickerPlaybackMotion,
   type StickerPoint,
+  type PreparedStickerSource,
   type StickerSource,
   type StickerState,
   type StickerTextSource,
@@ -27,6 +29,7 @@ import {
 export type {
   StickerBackOptions,
   StickerInstance,
+  PreparedStickerSource,
   StickerImageSource,
   StickerOptions,
   StickerOutlineOptions,
@@ -43,7 +46,10 @@ export type {
   StickerSvgSource,
   StickerTextSource,
 } from "./types";
-export { sanitizeSvgMarkup } from "./source";
+export {
+  imageSourceHasTransparency,
+  sanitizeSvgMarkup,
+} from "./source";
 
 const DEFAULT_SOURCE: StickerTextSource = {
   type: "text",
@@ -100,6 +106,7 @@ export const STICKER_ENTRANCE_DURATION_MS = 720;
 const ENTRANCE_SCALE_DURATION = STICKER_ENTRANCE_DURATION_MS / 1000;
 const ENTRANCE_SWEEP_DELAY = 0.06;
 const ENTRANCE_SWEEP_DURATION = 0.42;
+const PRE_ENTRANCE_DURATION = 0.32;
 const INTERACTION_HINT_DURATION = 0.9;
 const INTERACTION_HINT_COLOR = "rgb(36, 126, 245)";
 
@@ -109,6 +116,14 @@ type MutableStickerState = {
   progress: number;
   grabPoint: StickerPoint | null;
   pointer: StickerPoint | null;
+};
+
+type PreparedEntrance = {
+  artwork: PreparedArtwork;
+  texture: THREE.CanvasTexture;
+  source: StickerSource;
+  options: Partial<StickerOptions>;
+  elapsed: number;
 };
 
 type EdgeHit = {
@@ -204,6 +219,9 @@ class StickerRenderer implements StickerInstance {
   private detachedExitSpin = 0;
   private entranceActive = false;
   private entranceElapsed = 0;
+  private preparedEntrance: PreparedEntrance | null = null;
+  private backgroundRemovalEffectActive = false;
+  private backgroundRemovalEffectElapsed = 0;
   private interactionHintActive = false;
   private interactionHintElapsed = 0;
   private readonly entranceAxis = new THREE.Vector2(1, 0);
@@ -255,6 +273,8 @@ class StickerRenderer implements StickerInstance {
 
     this.uniforms = {
       uMap: { value: null },
+      uPreparedMap: { value: null },
+      uPreparedMix: { value: 0 },
       uPeel: { value: 0 },
       uPeelDepth: { value: 0 },
       uDetachedTension: { value: 0 },
@@ -279,6 +299,17 @@ class StickerRenderer implements StickerInstance {
       uEntranceSweep: { value: -1 },
       uEntranceAxis: { value: this.entranceAxis.clone() },
       uEntranceScaleProgress: { value: -1 },
+      uPreEntranceProgress: { value: 0 },
+      uLaserCoreWidth: { value: 0.04 },
+      uLaserBandWidth: { value: 0.3 },
+      uLaserBandOpacity: { value: 0.46 },
+      uLaserBrightness: { value: 1.18 },
+      uLaserHighlightIntensity: { value: 0.62 },
+      uBackgroundRemovalDistortion: { value: 0 },
+      uRemovalDistortionRange: { value: 0.37 },
+      uRemovalDistortionStrength: { value: 2.25 },
+      uRemovalRippleDensity: { value: 12 },
+      uRemovalRippleSpeed: { value: 4.2 },
       uInteractionHint: { value: 0 },
       uInteractionHintRadius: { value: 3 },
       uInteractionHintColor: {
@@ -387,6 +418,7 @@ class StickerRenderer implements StickerInstance {
 
   async setSource(source: StickerSource): Promise<void> {
     if (this.destroyed) return;
+    this.cancelPreparedEntrance();
     this.requestedSource = source;
     if (this.sourceRebuildTimer !== null) {
       window.clearTimeout(this.sourceRebuildTimer);
@@ -405,6 +437,65 @@ class StickerRenderer implements StickerInstance {
       this.emit("error", { message });
       throw error;
     }
+  }
+
+  async prepareSource(
+    source: StickerSource,
+    options: Partial<StickerOptions> = {},
+  ): Promise<PreparedStickerSource> {
+    if (this.destroyed) {
+      throw new Error("The sticker renderer has been destroyed.");
+    }
+    const preparedOptions = resolveStickerOptions(this.options, options);
+    const artwork = await prepareArtwork(source, preparedOptions.outline);
+    if (this.destroyed) {
+      throw new Error("The sticker renderer has been destroyed.");
+    }
+    const texture = this.createArtworkTexture(artwork);
+    this.renderer.initTexture(texture);
+    let pending = true;
+    const commitPrepared = () => {
+      this.sourceRevision += 1;
+      this.requestedSource = source;
+      this.source = source;
+      this.options = resolveStickerOptions(this.options, {
+        ...options,
+        source,
+      });
+      this.applyOptionsToRenderer();
+      this.applyArtwork(artwork, texture);
+    };
+
+    return {
+      commit: () => {
+        if (!pending || this.destroyed) return;
+        pending = false;
+        commitPrepared();
+      },
+      commitWithEntrance: () => {
+        if (!pending || this.destroyed) return;
+        pending = false;
+        this.cancelPreparedEntrance();
+        this.entranceActive = false;
+        this.clearEntrancePose();
+        this.preparedEntrance = {
+          artwork,
+          texture,
+          source,
+          options,
+          elapsed: 0,
+        };
+        this.uniforms.uPreparedMap.value = texture;
+        this.uniforms.uPreparedMix.value = 0;
+        this.uniforms.uPreEntranceProgress.value = 0;
+        this.requestRender();
+      },
+      dispose: () => {
+        if (!pending) return;
+        pending = false;
+        texture.dispose();
+      },
+    };
   }
 
   setOptions(patch: Partial<StickerOptions>): void {
@@ -572,6 +663,20 @@ class StickerRenderer implements StickerInstance {
     this.renderer.render(this.scene, this.camera);
   }
 
+  setBackgroundRemovalEffect(active: boolean): void {
+    if (this.destroyed) return;
+    this.backgroundRemovalEffectActive = active;
+    this.backgroundRemovalEffectElapsed = 0;
+    // Background removal intentionally uses the exact same material-bound
+    // laser as the sticker entrance instead of maintaining a second look.
+    this.configureEntranceAxis();
+    this.uniforms.uBackgroundRemovalDistortion.value = active ? 1 : 0;
+    if (!this.entranceActive) {
+      this.uniforms.uEntranceSweep.value = active ? 0 : -1;
+    }
+    this.requestRender();
+  }
+
   reappear(): void {
     if (this.destroyed) return;
     this.startEntranceAnimation();
@@ -641,6 +746,7 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) return;
     this.destroyed = true;
     cancelAnimationFrame(this.frameRequest);
+    this.cancelPreparedEntrance();
     if (this.sourceRebuildTimer !== null) {
       window.clearTimeout(this.sourceRebuildTimer);
       this.sourceRebuildTimer = null;
@@ -675,8 +781,7 @@ class StickerRenderer implements StickerInstance {
     canvas.remove();
   }
 
-  private applyArtwork(artwork: PreparedArtwork) {
-    this.artwork = artwork;
+  private createArtworkTexture(artwork: PreparedArtwork) {
     const nextTexture = new THREE.CanvasTexture(artwork.canvas);
     nextTexture.colorSpace = THREE.SRGBColorSpace;
     nextTexture.minFilter = THREE.LinearMipmapLinearFilter;
@@ -687,10 +792,29 @@ class StickerRenderer implements StickerInstance {
       this.renderer.capabilities.getMaxAnisotropy(),
     );
     nextTexture.needsUpdate = true;
+    return nextTexture;
+  }
 
+  private cancelPreparedEntrance() {
+    const prepared = this.preparedEntrance;
+    this.preparedEntrance = null;
+    if (prepared) prepared.texture.dispose();
+    this.uniforms.uPreparedMix.value = 0;
+    this.uniforms.uPreEntranceProgress.value = 0;
+    this.uniforms.uPreparedMap.value = this.texture;
+  }
+
+  private applyArtwork(
+    artwork: PreparedArtwork,
+    nextTexture = this.createArtworkTexture(artwork),
+  ) {
+    this.artwork = artwork;
     const previousTexture = this.texture;
     this.texture = nextTexture;
     this.uniforms.uMap.value = nextTexture;
+    this.uniforms.uPreparedMap.value = nextTexture;
+    this.uniforms.uPreparedMix.value = 0;
+    this.uniforms.uPreEntranceProgress.value = 0;
     (this.uniforms.uTexel.value as THREE.Vector2).set(
       1 / artwork.width,
       1 / artwork.height,
@@ -1488,8 +1612,24 @@ class StickerRenderer implements StickerInstance {
     this.entranceActive = true;
     this.entranceElapsed = 0;
     this.configureEntranceAxis();
+    this.applyLaserEffectSettings();
     this.applyEntranceElapsed(0);
     this.requestRender();
+  }
+
+  private applyLaserEffectSettings() {
+    const settings = getLaserEffectSettings();
+    this.uniforms.uLaserCoreWidth.value = settings.coreWidth;
+    this.uniforms.uLaserBandWidth.value = settings.bandWidth;
+    this.uniforms.uLaserBandOpacity.value = settings.bandOpacity;
+    this.uniforms.uLaserBrightness.value = settings.brightness;
+    this.uniforms.uLaserHighlightIntensity.value =
+      settings.highlightIntensity;
+    this.uniforms.uRemovalDistortionRange.value = settings.distortionRange;
+    this.uniforms.uRemovalDistortionStrength.value =
+      settings.distortionStrength;
+    this.uniforms.uRemovalRippleDensity.value = settings.rippleDensity;
+    this.uniforms.uRemovalRippleSpeed.value = settings.rippleSpeed;
   }
 
   private renderFrame = (time: number) => {
@@ -1580,6 +1720,33 @@ class StickerRenderer implements StickerInstance {
       }
     }
 
+    if (this.preparedEntrance) {
+      this.preparedEntrance.elapsed += delta;
+      const progress = clamp(
+        this.preparedEntrance.elapsed / PRE_ENTRANCE_DURATION,
+        0,
+        1,
+      );
+      const easedProgress = smoothstep(0, 1, progress);
+      this.uniforms.uPreparedMix.value = easedProgress;
+      this.uniforms.uPreEntranceProgress.value = easedProgress;
+      if (progress >= 1) {
+        const prepared = this.preparedEntrance;
+        this.preparedEntrance = null;
+        this.sourceRevision += 1;
+        this.requestedSource = prepared.source;
+        this.source = prepared.source;
+        this.options = resolveStickerOptions(this.options, {
+          ...prepared.options,
+          source: prepared.source,
+        });
+        this.applyOptionsToRenderer();
+        this.applyArtwork(prepared.artwork, prepared.texture);
+        this.startEntranceAnimation();
+        return;
+      }
+    }
+
     if (this.entranceActive) {
       this.entranceElapsed += delta;
       if (this.applyEntranceElapsed(this.entranceElapsed)) {
@@ -1610,6 +1777,23 @@ class StickerRenderer implements StickerInstance {
       }
     }
 
+    if (this.backgroundRemovalEffectActive) {
+      const laserSettings = getLaserEffectSettings();
+      this.applyLaserEffectSettings();
+      if (reducedMotion) {
+        this.uniforms.uEntranceSweep.value = 0.5;
+      } else {
+        this.backgroundRemovalEffectElapsed += delta;
+        const cycleElapsed =
+          this.backgroundRemovalEffectElapsed
+          % (laserSettings.cycleDuration / 1000);
+        this.uniforms.uEntranceSweep.value = Math.min(
+          cycleElapsed / (laserSettings.sweepDuration / 1000),
+          1,
+        );
+      }
+    }
+
     this.uniforms.uTime.value = time / 1000;
     this.renderer.render(this.scene, this.camera);
     const windIsAnimating =
@@ -1617,8 +1801,10 @@ class StickerRenderer implements StickerInstance {
     if (
       this.springActive ||
       this.detachedExitActive ||
+      this.preparedEntrance !== null ||
       this.entranceActive ||
       this.interactionHintActive ||
+      (this.backgroundRemovalEffectActive && !reducedMotion) ||
       windIsAnimating
     ) {
       this.requestRender();
@@ -1724,6 +1910,14 @@ export class StickerForgeElement extends HTMLElementBase {
     await instance.setSource(source);
   }
 
+  async prepareSource(
+    source: StickerSource,
+    options?: Partial<StickerOptions>,
+  ): Promise<PreparedStickerSource> {
+    const instance = await this.ensureInstance();
+    return instance.prepareSource(source, options);
+  }
+
   setOptions(options: Partial<StickerOptions>): void {
     this.pendingOptions = mergePublicOptions(this.pendingOptions, options);
     this.instance?.setOptions(options);
@@ -1742,6 +1936,10 @@ export class StickerForgeElement extends HTMLElementBase {
 
   setEntranceProgress(progress: number): void {
     this.instance?.setEntranceProgress(progress);
+  }
+
+  setBackgroundRemovalEffect(active: boolean): void {
+    this.instance?.setBackgroundRemovalEffect(active);
   }
 
   reappear(): void {

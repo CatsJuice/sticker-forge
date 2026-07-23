@@ -10,6 +10,7 @@ const deformation = /* glsl */ `
   uniform vec2 uPeelDir;
   uniform vec2 uMeshSize;
   uniform float uEntranceScaleProgress;
+  uniform float uPreEntranceProgress;
   uniform vec2 uEntranceAxis;
 
   vec3 scaleEntranceSlice(vec3 base) {
@@ -35,6 +36,12 @@ const deformation = /* glsl */ `
   }
 
   vec3 deformSticker(vec3 base) {
+    float preEntrance = smoothstep(
+      0.0,
+      1.0,
+      clamp(uPreEntranceProgress, 0.0, 1.0)
+    );
+    base.xy *= mix(1.0, 0.6, preEntrance);
     base = scaleEntranceSlice(base);
     if (uPeelDepth <= 0.00001 || uPeel <= 0.0) return base;
 
@@ -218,6 +225,8 @@ export const galleryShadowFragmentShader = /* glsl */ `
 
 export const stickerFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform sampler2D uPreparedMap;
+  uniform float uPreparedMix;
   uniform vec2 uTexel;
   uniform vec3 uBackColor;
   uniform float uGloss;
@@ -226,9 +235,20 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uShadowOpacity;
   uniform float uEntranceSweep;
   uniform vec2 uEntranceAxis;
+  uniform float uLaserCoreWidth;
+  uniform float uLaserBandWidth;
+  uniform float uLaserBandOpacity;
+  uniform float uLaserBrightness;
+  uniform float uLaserHighlightIntensity;
+  uniform float uBackgroundRemovalDistortion;
+  uniform float uRemovalDistortionRange;
+  uniform float uRemovalDistortionStrength;
+  uniform float uRemovalRippleDensity;
+  uniform float uRemovalRippleSpeed;
   uniform float uInteractionHint;
   uniform float uInteractionHintRadius;
   uniform vec3 uInteractionHintColor;
+  uniform float uTime;
   uniform float uPreserveFrontColor;
   uniform float uOpacity;
 
@@ -287,8 +307,69 @@ export const stickerFragmentShader = /* glsl */ `
   }
 
   void main() {
-    vec4 printSample = texture2D(uMap, vUv);
-    if (printSample.a < 0.018) discard;
+    vec2 surfaceUv = vUv;
+    if (uBackgroundRemovalDistortion > 0.5 && uEntranceSweep >= 0.0) {
+      vec2 scanDirection = abs(uEntranceAxis.x) > 0.5
+        ? vec2(sign(uEntranceAxis.x), 0.0)
+        : vec2(0.0, sign(uEntranceAxis.y));
+      vec2 scanTangent = vec2(-scanDirection.y, scanDirection.x);
+      float scanCoordinate = abs(uEntranceAxis.x) > 0.5
+        ? (uEntranceAxis.x > 0.0 ? vUv.x : 1.0 - vUv.x)
+        : (uEntranceAxis.y < 0.0 ? 1.0 - vUv.y : vUv.y);
+      float tangentCoordinate = dot(vUv - vec2(0.5), scanTangent);
+      float sweepCenter = mix(-0.3, 1.3, uEntranceSweep);
+      float sweepDelta = scanCoordinate - sweepCenter;
+      float distortionEnvelope =
+        1.0 - smoothstep(
+          uRemovalDistortionRange * 0.15,
+          uRemovalDistortionRange,
+          abs(sweepDelta)
+        );
+      float ripplePhase =
+        tangentCoordinate * uRemovalRippleDensity;
+      float rippleAcross = sweepDelta * uRemovalRippleDensity;
+      float waterWaveA = sin(
+        ripplePhase * 0.55
+        + rippleAcross * 0.8
+        + uTime * uRemovalRippleSpeed
+      );
+      float waterWaveB = sin(
+        ripplePhase * 0.31
+        - rippleAcross * 0.45
+        - uTime * uRemovalRippleSpeed * 0.63
+        + 1.7
+      );
+      float waterWaveC = sin(
+        ripplePhase * 0.18
+        + uTime * uRemovalRippleSpeed * 0.37
+        + 3.1
+      );
+      float waterRipple =
+        (waterWaveA * 0.58 + waterWaveB * 0.3 + waterWaveC * 0.12)
+        * 0.0045
+        * distortionEnvelope
+        * uRemovalDistortionStrength;
+      surfaceUv += scanTangent * waterRipple;
+      surfaceUv +=
+        scanDirection
+        * (
+          cos(ripplePhase * 0.42 + uTime * uRemovalRippleSpeed * 0.48)
+          * 0.65
+          + sin(ripplePhase * 0.23 - uTime * uRemovalRippleSpeed * 0.31)
+          * 0.35
+        )
+        * distortionEnvelope
+        * uRemovalDistortionStrength
+        * 0.0016;
+      surfaceUv = clamp(surfaceUv, vec2(0.001), vec2(0.999));
+    }
+
+    vec4 printSample = texture2D(uMap, surfaceUv);
+    if (uPreparedMix > 0.0) {
+      vec4 preparedSample = texture2D(uPreparedMap, surfaceUv);
+      printSample = mix(printSample, preparedSample, uPreparedMix);
+    }
+    if (printSample.a < 0.1) discard;
 
     vec3 surfaceNormal = normalize(vNormalView);
     vec3 viewDirection = normalize(-vViewPosition);
@@ -343,15 +424,24 @@ export const stickerFragmentShader = /* glsl */ `
         : (uEntranceAxis.y < 0.0 ? 1.0 - vUv.y : vUv.y);
       float sweepCenter = mix(-0.3, 1.3, uEntranceSweep);
       float laserDistance = abs(sweepCoordinate - sweepCenter);
-      float laserCore = 1.0 - smoothstep(0.0, 0.04, laserDistance);
-      float laserHalo = 1.0 - smoothstep(0.04, 0.3, laserDistance);
+      float laserCore =
+        1.0 - smoothstep(0.0, uLaserCoreWidth, laserDistance);
+      float laserHalo =
+        1.0 - smoothstep(uLaserCoreWidth, uLaserBandWidth, laserDistance);
       float laserPhase =
         (sweepCoordinate - sweepCenter) * 3.6 + uEntranceSweep * 1.7;
       vec3 laserColor = 0.58 + 0.42 * cos(
         6.2831853 * (laserPhase + vec3(0.0, 0.33, 0.67))
       );
-      color = mix(color, laserColor * 1.18, laserHalo * 0.46);
-      color += laserColor * (laserCore * 0.62 + laserHalo * 0.16);
+      color = mix(
+        color,
+        laserColor * uLaserBrightness,
+        laserHalo * uLaserBandOpacity
+      );
+      color += laserColor * (
+        laserCore * uLaserHighlightIntensity
+        + laserHalo * uLaserBandOpacity * 0.347826
+      );
     }
 
     if (uInteractionHint > 0.0) {
@@ -449,7 +539,7 @@ export const residueFragmentShader = /* glsl */ `
 
   void main() {
     float artworkAlpha = texture2D(uMap, vResidueUv).a;
-    if (artworkAlpha < 0.018 || vResidueReveal < 0.001) discard;
+    if (artworkAlpha < 0.1 || vResidueReveal < 0.001) discard;
 
     float grain = mix(0.82, 1.0, residueNoise(vResidueUv * 760.0));
     float residueAlpha = artworkAlpha * vResidueReveal * grain * 0.085;

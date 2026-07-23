@@ -24,6 +24,7 @@ export interface PreparedArtwork {
 // text and SVG artwork sharp at that scale without inflating every texture to 4K.
 const MAX_TEXTURE_EDGE = 2048;
 const MIN_TEXTURE_EDGE = 320;
+const VISIBLE_ALPHA_THRESHOLD = 0.1 * 255;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -36,14 +37,13 @@ export function createExteriorAlphaMask(
 ) {
   const exterior = new Uint8Array(width * height);
   const queue = new Int32Array(width * height);
-  const transparentThreshold = 0.1 * 255;
   let queueStart = 0;
   let queueEnd = 0;
 
   const enqueue = (x: number, y: number) => {
     if (x < 0 || x >= width || y < 0 || y >= height) return;
     const index = y * width + x;
-    if (exterior[index] || alpha[index] >= transparentThreshold) return;
+    if (exterior[index] || alpha[index] >= VISIBLE_ALPHA_THRESHOLD) return;
     exterior[index] = 1;
     queue[queueEnd] = index;
     queueEnd += 1;
@@ -190,6 +190,10 @@ function imageHasTransparency(image: HTMLImageElement): boolean {
     if (pixels[index] < 255) return true;
   }
   return false;
+}
+
+export async function imageSourceHasTransparency(src: string) {
+  return imageHasTransparency(await loadImage(src));
 }
 
 async function renderTextSource(source: StickerTextSource) {
@@ -512,7 +516,8 @@ function expandAlpha(source: HTMLCanvasElement, radius: number) {
   let hasSeed = false;
 
   for (let pixel = 0; pixel < size; pixel += 1) {
-    const occupied = sourcePixels[pixel * 4 + 3] >= 128;
+    const occupied =
+      sourcePixels[pixel * 4 + 3] >= VISIBLE_ALPHA_THRESHOLD;
     seeds[pixel] = occupied ? 0 : DISTANCE_INFINITY;
     hasSeed ||= occupied;
   }
@@ -613,13 +618,12 @@ export async function prepareArtwork(
     targetIndex += 1;
   }
   const support: number[] = [];
-  const alphaThreshold = 0.1 * 255;
   for (let y = 0; y < canvas.height; y += 1) {
     const rowOffset = y * canvas.width;
     let left = -1;
     let right = -1;
     for (let x = 0; x < canvas.width; x += 1) {
-      if (alpha[rowOffset + x] < alphaThreshold) continue;
+      if (alpha[rowOffset + x] < VISIBLE_ALPHA_THRESHOLD) continue;
       if (left < 0) left = x;
       right = x;
     }

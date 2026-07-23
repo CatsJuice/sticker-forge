@@ -47,6 +47,7 @@ import {
   type StickerExportWorkerTask,
 } from "@/lib/export-worker-client";
 import type { StickerExportFormat } from "@/lib/export-worker-types";
+import { createRandomId } from "@/lib/random-id";
 
 type ExportMode = "static" | "animated" | "embed";
 type AnimationMethod = "manual" | "automatic";
@@ -999,7 +1000,7 @@ export function ExportDialog({
           frameRate,
           frames,
           gifShadow,
-          id: crypto.randomUUID(),
+          id: createRandomId(),
           outputScale: exportScale,
           playbackInterval,
         },

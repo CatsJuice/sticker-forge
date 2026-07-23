@@ -1021,6 +1021,14 @@ export function StickerForgeStudio() {
           listGalleryItems(),
           listGalleryFolders(),
         ]);
+        if (!cancelled) {
+          setGalleryFolders(nextFolders);
+          setAddToGalleryFolderId((current) =>
+            nextFolders.some((folder) => folder.id === current)
+              ? current
+              : DEFAULT_GALLERY_FOLDER_ID,
+          );
+        }
         let nextItems = loadedItems;
         const lockToken = String(Date.now());
         let shouldSeedDefaults = nextItems.length === 0;
@@ -1190,9 +1198,14 @@ export function StickerForgeStudio() {
         if (!cancelled) {
           setGalleryItems(nextItems);
           setGalleryFolders(nextFolders);
-          const storedFolderId = window.localStorage.getItem(
-            ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
-          );
+          let storedFolderId: string | null = null;
+          try {
+            storedFolderId = window.localStorage.getItem(
+              ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
+            );
+          } catch {
+            // Keep the default folder when preference storage is unavailable.
+          }
           setAddToGalleryFolderId(
             nextFolders.some((folder) => folder.id === storedFolderId)
               ? storedFolderId!
@@ -2751,7 +2764,11 @@ export function StickerForgeStudio() {
               onPointerLeave={() => setGalleryAddHovered(false)}
               onFocusCapture={() => setGalleryAddHovered(true)}
               onBlurCapture={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) {
+                const nextTarget = event.relatedTarget;
+                if (
+                  !(nextTarget instanceof Node) ||
+                  !event.currentTarget.contains(nextTarget)
+                ) {
                   setGalleryAddHovered(false);
                 }
               }}

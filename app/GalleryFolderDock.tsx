@@ -233,7 +233,7 @@ function DockAction({
         width: 32 + hoverProgress * (expandedWidth - 32),
         bottom: delayIndex * DOCK_ACTION_STEP,
         opacity: entranceProgress,
-        boxShadow: `0 6px 16px rgba(43, 40, 34, ${shadowProgress * 0.14})`,
+        boxShadow: `0 3px 8px rgba(43, 40, 34, ${shadowProgress * 0.12}), 0 10px 28px rgba(43, 40, 34, ${shadowProgress * 0.22})`,
         pointerEvents: interactionReady ? "auto" : "none",
         transform: `translateY(${(1 - entranceProgress) * (delayIndex + 1) * DOCK_ACTION_STEP}px) scale(${0.58 + entranceProgress * 0.42})`,
       }}

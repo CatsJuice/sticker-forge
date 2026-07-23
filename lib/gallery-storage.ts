@@ -12,6 +12,7 @@ import {
   EVOLUTION_GALLERY_FOLDER_COLOR,
   EVOLUTION_GALLERY_FOLDER_ID,
 } from "./gallery-types";
+import { createRandomId } from "./random-id";
 
 const DATABASE_NAME = "sticker-forge-gallery";
 const DATABASE_VERSION = 5;
@@ -241,7 +242,7 @@ export async function createGalleryFolder(
 ): Promise<GalleryFolderRecord> {
   const folders = await listGalleryFolders();
   const folder: GalleryFolderRecord = {
-    id: crypto.randomUUID(),
+    id: createRandomId(),
     title: title.trim().slice(0, 80) || "Untitled",
     color,
     createdAt: Date.now(),
@@ -365,7 +366,7 @@ export async function createGalleryItem(
   payload: CreateGalleryPayload,
 ): Promise<GalleryItem> {
   const database = await openGalleryDatabase();
-  const id = crypto.randomUUID();
+  const id = createRandomId();
   const createdAt = Date.now();
   const item: GalleryItem = {
     id,
@@ -554,7 +555,7 @@ export async function importGalleryArchive(
   const done = transactionDone(transaction);
   for (const entry of archive.folders) {
     if (!entry?.folder || !Array.isArray(entry.items)) continue;
-    const folderId = crypto.randomUUID();
+    const folderId = createRandomId();
     const folder: GalleryFolderRecord = {
       ...entry.folder,
       id: folderId,
@@ -568,7 +569,7 @@ export async function importGalleryArchive(
     folders.push(folder);
     for (const entryItem of entry.items) {
       if (!entryItem?.item || !entryItem.asset || !entryItem.previewDataUrl) continue;
-      const itemId = crypto.randomUUID();
+      const itemId = createRandomId();
       const item: GalleryItem = {
         ...entryItem.item,
         id: itemId,

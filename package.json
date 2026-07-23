@@ -6,7 +6,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev --hostname 0.0.0.0",
     "typecheck": "tsc --noEmit --incremental false",
     "build:lib": "vite build --config vite.lib.config.ts",
     "build:pages": "GITHUB_PAGES=true NEXT_PUBLIC_SITE_URL=https://sticker.oooo.so next build --webpack",

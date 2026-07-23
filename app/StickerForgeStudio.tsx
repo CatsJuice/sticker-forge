@@ -8,7 +8,9 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type RefObject,
 } from "react";
+import { createPortal } from "react-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import {
@@ -24,12 +26,14 @@ import {
   faBold,
   faChevronDown,
   faFont,
+  faWandMagicSparkles,
   faPlus,
   faRotateLeft,
   faTextHeight,
   faUnderline,
 } from "@fortawesome/free-solid-svg-icons";
 import type {
+  PreparedStickerSource,
   StickerInstance,
   StickerOptions,
   StickerRichTextBlock,
@@ -37,7 +41,10 @@ import type {
   StickerRichTextRun,
   StickerSource,
 } from "@/lib/sticker-forge";
-import { sanitizeSvgMarkup } from "@/lib/sticker-forge";
+import {
+  imageSourceHasTransparency,
+  sanitizeSvgMarkup,
+} from "@/lib/sticker-forge";
 import {
   createGalleryPreview,
   type GalleryPreviewResult,
@@ -72,10 +79,28 @@ import {
   type GalleryAddFlightRect,
 } from "./GalleryAddFlight";
 import { ExportDialog } from "./ExportDialog";
+import { BackgroundRemovalEffect } from "./BackgroundRemovalEffect";
+import {
+  removeImageBackground,
+  type BackgroundRemovalResult,
+} from "@/lib/background-removal";
+import {
+  getLaserEffectSettings,
+  LASER_PREVIEW_EVENT,
+} from "@/lib/laser-debug";
+import { getParticleEffectSettings } from "@/lib/particle-debug";
+import { convertHeicToJpeg, isHeicFile } from "@/lib/heic";
 
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
 type Locale = "zh" | "en";
+type BackgroundRemovalPhase =
+  | "idle"
+  | "loading"
+  | "processing"
+  | "dissolving"
+  | "finishing"
+  | "error";
 
 type StudioSettings = {
   outline: { width: number; color: string };
@@ -104,6 +129,8 @@ const DEFAULT_INK = "#19191d";
 const DEFAULT_ACCENT = "rgb(36, 126, 245)";
 const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
 const DEFAULT_IMAGE_SRC = "/default-image.svg";
+const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
+  "sticker-forge-background-removal-tip-seen";
 const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
 const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
 const DEFAULT_RICH_TEXT = {
@@ -163,12 +190,22 @@ const UI = {
     uploadImage: "上传图像素材",
     uploadPrompt: "点击选择，或拖到这里",
     localOnly: "仅在浏览器本地处理",
+    removeBackground: "移除背景",
+    tryRemoveBackground: "试试移除背景",
+    removeBackgroundHint: "AI 模型在本机运行，图像不会上传",
+    loadingRemovalModel: "正在加载抠图模型",
+    removingBackground: "正在识别主体",
+    dissolvingBackground: "正在消散背景",
+    restoringOutline: "正在生成新描边",
+    backgroundRemoved: "背景已移除",
+    backgroundRemovalFailed: "背景移除失败，请重试",
     waitingMaterial: "等待材质就绪",
     assetFailed: "素材处理失败，已保留上一张贴纸",
     textFailed: "文字素材处理失败，已保留上一张贴纸",
     chooseImage: "请选择图像文件",
     imageTooLarge: "图像需要小于 15 MB",
     reading: "正在本地读取",
+    decodingHeic: "正在本地解码 HEIC",
     processed: "本地处理完成",
     invalidImage: "这个图像无法读取，请换一个试试",
     uploadFirst: "请先上传一个图像文件",
@@ -231,12 +268,22 @@ const UI = {
     uploadImage: "Upload image artwork",
     uploadPrompt: "Choose a file or drop it here",
     localOnly: "Processed locally in your browser",
+    removeBackground: "Remove background",
+    tryRemoveBackground: "Try removing the background",
+    removeBackgroundHint: "AI runs locally; your image is never uploaded",
+    loadingRemovalModel: "Loading cutout model",
+    removingBackground: "Finding the subject",
+    dissolvingBackground: "Dissolving background",
+    restoringOutline: "Drawing the new outline",
+    backgroundRemoved: "Background removed",
+    backgroundRemovalFailed: "Background removal failed. Please try again",
     waitingMaterial: "Preparing material",
     assetFailed: "Could not process this artwork; the previous sticker was kept",
     textFailed: "Could not process this text; the previous sticker was kept",
     chooseImage: "Please choose an image file",
     imageTooLarge: "Images must be smaller than 15 MB",
     reading: "Reading locally",
+    decodingHeic: "Decoding HEIC locally",
     processed: "Processed locally",
     invalidImage: "This image could not be read; please try another file",
     uploadFirst: "Upload an image file first",
@@ -707,12 +754,65 @@ function DropdownChevron() {
   return <FontAwesomeIcon className="number-preset-chevron" icon={faChevronDown} />;
 }
 
+function BackgroundRemovalTip({
+  anchor,
+  label,
+}: {
+  anchor: RefObject<HTMLButtonElement | null>;
+  label: string;
+}) {
+  const [position, setPosition] = useState<{
+    left: number;
+    top: number;
+    side: "left" | "above";
+  } | null>(null);
+
+  useEffect(() => {
+    const button = anchor.current;
+    if (!button) return;
+    const updatePosition = () => {
+      const bounds = button.getBoundingClientRect();
+      const side = bounds.left >= 180 ? "left" : "above";
+      setPosition({
+        left: side === "left" ? bounds.left - 12 : bounds.left + bounds.width / 2,
+        top: side === "left" ? bounds.top + bounds.height / 2 : bounds.top - 10,
+        side,
+      });
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(button);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [anchor]);
+
+  if (!position) return null;
+  return createPortal(
+    <span
+      className="background-removal-tip"
+      id="background-removal-tip"
+      role="tooltip"
+      data-side={position.side}
+      style={{ left: position.left, top: position.top }}
+    >
+      {label}
+    </span>,
+    document.body,
+  );
+}
+
 export function StickerForgeStudio() {
   const initialSource = useMemo(
     () => makeTextSource(DEFAULT_TEXT, DEFAULT_INK, DEFAULT_RICH_TEXT),
     [],
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  const backgroundRemovalButtonRef = useRef<HTMLButtonElement>(null);
   const galleryFolderRef = useRef<HTMLButtonElement>(null);
   const richEditorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
@@ -721,6 +821,16 @@ export function StickerForgeStudio() {
   const controllerRef = useRef<StickerController | null>(null);
   const textTimerRef = useRef<number | null>(null);
   const sourceRevisionRef = useRef(0);
+  const imageImportRevisionRef = useRef(0);
+  const backgroundRemovalRevisionRef = useRef(0);
+  const backgroundRemovalTipShownRef = useRef(false);
+  const backgroundParticlesReadyRef = useRef<number | null>(null);
+  const backgroundEntranceStartedRef = useRef<number | null>(null);
+  const preparedBackgroundOutlineRef = useRef<{
+    revision: number;
+    source: PreparedStickerSource;
+  } | null>(null);
+  const laserPreviewTimerRef = useRef<number | null>(null);
   const sourceRef = useRef<StickerSource>(initialSource);
   const settingsRef = useRef<StudioSettings>(DEFAULT_SETTINGS);
   const [sourceMode, setSourceMode] = useState<SourceMode>("text");
@@ -739,7 +849,21 @@ export function StickerForgeStudio() {
   const [locale, setLocale] = useState<Locale>("zh");
   const [isLanguageOpen, setIsLanguageOpen] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
+  const [imageImportBusy, setImageImportBusy] = useState(false);
+  const [showBackgroundRemovalTip, setShowBackgroundRemovalTip] =
+    useState(false);
   const [sourceMessage, setSourceMessage] = useState("");
+  const [backgroundRemoval, setBackgroundRemoval] = useState<{
+    phase: BackgroundRemovalPhase;
+    progress?: number;
+  }>({ phase: "idle" });
+  const [backgroundParticles, setBackgroundParticles] = useState<{
+    source: string;
+    result: BackgroundRemovalResult;
+    nextSource: StickerSource;
+    revision: number;
+    playing: boolean;
+  } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
   const [exportOptions, setExportOptions] =
@@ -775,6 +899,23 @@ export function StickerForgeStudio() {
     Record<string, GalleryEntryOrigin>
   >({});
   const t = UI[locale];
+  const backgroundRemovalBusy = !["idle", "error"].includes(
+    backgroundRemoval.phase,
+  );
+  const backgroundRemovalLabel =
+    backgroundRemoval.phase === "loading"
+      ? `${t.loadingRemovalModel}${
+          Number.isFinite(backgroundRemoval.progress)
+            ? ` ${Math.round(backgroundRemoval.progress ?? 0)}%`
+            : ""
+        }`
+      : backgroundRemoval.phase === "processing"
+        ? t.removingBackground
+        : backgroundRemoval.phase === "dissolving"
+          ? t.dissolvingBackground
+          : backgroundRemoval.phase === "finishing"
+            ? t.restoringOutline
+            : t.removeBackground;
 
   useEffect(() => {
     const stored = window.localStorage.getItem("sticker-forge-locale");
@@ -1406,12 +1547,25 @@ export function StickerForgeStudio() {
         return;
       }
 
+      backgroundRemovalRevisionRef.current += 1;
+      preparedBackgroundOutlineRef.current?.source.dispose();
+      preparedBackgroundOutlineRef.current = null;
+      setBackgroundRemoval({ phase: "idle" });
+      setBackgroundParticles(null);
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+      controllerRef.current?.setOptions({ outline: settingsRef.current.outline });
       clearPendingText();
       const readRevision = ++sourceRevisionRef.current;
-      setSourceMessage(`${file.name} · ${t.reading}`);
+      const importRevision = ++imageImportRevisionRef.current;
+      const heic = isHeicFile(file);
+      setImageImportBusy(true);
+      setSourceMessage(
+        `${file.name} · ${heic ? t.decodingHeic : t.reading}`,
+      );
       try {
         const isSvg =
           file.type === "image/svg+xml" || file.name.toLowerCase().endsWith(".svg");
+        const readableBlob = heic ? await convertHeicToJpeg(file) : file;
         const dataUrl = isSvg
           ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
               sanitizeSvgMarkup(await file.text()),
@@ -1424,9 +1578,27 @@ export function StickerForgeStudio() {
                 typeof reader.result === "string"
                   ? resolve(reader.result)
                   : reject(new Error("Read failed"));
-              reader.readAsDataURL(file);
+              reader.readAsDataURL(readableBlob);
             });
         if (readRevision !== sourceRevisionRef.current) return;
+        const backgroundRemovalTipSeen =
+          backgroundRemovalTipShownRef.current
+          || window.localStorage.getItem(
+            BACKGROUND_REMOVAL_TIP_SEEN_KEY,
+          ) === "true";
+        if (!backgroundRemovalTipSeen) {
+          const hasTransparency =
+            isSvg || await imageSourceHasTransparency(dataUrl);
+          if (readRevision !== sourceRevisionRef.current) return;
+          if (!hasTransparency) {
+            backgroundRemovalTipShownRef.current = true;
+            window.localStorage.setItem(
+              BACKGROUND_REMOVAL_TIP_SEEN_KEY,
+              "true",
+            );
+            setShowBackgroundRemovalTip(true);
+          }
+        }
         setImageDataUrl(dataUrl);
         setImageName(file.name);
         setSourceMode("image");
@@ -1434,14 +1606,210 @@ export function StickerForgeStudio() {
           { type: "image", src: dataUrl, name: file.name },
           `${file.name} · ${t.processed}`,
         );
-      } catch {
+      } catch (error) {
+        console.error(
+          "Could not load image file.",
+          error instanceof Error
+            ? `${error.name}: ${error.message}`
+            : JSON.stringify(error),
+        );
         if (readRevision === sourceRevisionRef.current) {
           setSourceMessage(t.invalidImage);
+        }
+      } finally {
+        if (importRevision === imageImportRevisionRef.current) {
+          setImageImportBusy(false);
         }
       }
     },
     [applySource, clearPendingText, t],
   );
+
+  const handleBackgroundParticlesStart = useCallback(
+    (revision: number) => {
+      if (backgroundEntranceStartedRef.current === revision) return;
+      backgroundEntranceStartedRef.current = revision;
+      window.setTimeout(() => {
+        if (revision !== backgroundRemovalRevisionRef.current) return;
+        const prepared = preparedBackgroundOutlineRef.current;
+        if (!prepared || prepared.revision !== revision) return;
+        prepared.source.commitWithEntrance();
+        preparedBackgroundOutlineRef.current = null;
+        setBackgroundRemoval({ phase: "finishing" });
+      }, getParticleEffectSettings().entranceDelay);
+    },
+    [],
+  );
+
+  const handleBackgroundParticlesReady = useCallback(
+    async (
+      revision: number,
+      nextSource: StickerSource,
+      resultDataUrl: string,
+    ) => {
+      if (
+        revision !== backgroundRemovalRevisionRef.current
+        || backgroundParticlesReadyRef.current === revision
+      ) {
+        return;
+      }
+      backgroundParticlesReadyRef.current = revision;
+      const controller = controllerRef.current;
+      if (!controller) return;
+
+      try {
+        // First install a cutout without an outline. The particle canvas is
+        // already paused on a complete first frame, so this is visually
+        // identical to the original image but ready to animate.
+        clearPendingText();
+        const sourceRevision = ++sourceRevisionRef.current;
+        sourceRef.current = nextSource;
+        await controller.setSource(nextSource);
+        if (sourceRevision !== sourceRevisionRef.current) return;
+        if (revision !== backgroundRemovalRevisionRef.current) return;
+
+        // Build and upload the outlined variant now, but do not expose it yet.
+        // The prepared texture is committed atomically in the exact callback
+        // that starts the sticker entrance animation.
+        const preparedOutline = await controller.prepareSource(nextSource, {
+          outline: settingsRef.current.outline,
+        });
+        if (revision !== backgroundRemovalRevisionRef.current) {
+          preparedOutline.dispose();
+          return;
+        }
+        preparedBackgroundOutlineRef.current?.source.dispose();
+        preparedBackgroundOutlineRef.current = {
+          revision,
+          source: preparedOutline,
+        };
+
+        // Let the texture upload and first WebGL render settle before the CPU
+        // particle loop starts, so the entrance animation cannot collide with
+        // source preparation on the main thread.
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+        if (revision !== backgroundRemovalRevisionRef.current) return;
+
+        setImageDataUrl(resultDataUrl);
+        setBackgroundRemoval({ phase: "dissolving" });
+        setBackgroundParticles((current) =>
+          current?.revision === revision
+            ? { ...current, playing: true }
+            : current,
+        );
+      } catch {
+        if (revision !== backgroundRemovalRevisionRef.current) return;
+        setBackgroundParticles(null);
+        preparedBackgroundOutlineRef.current?.source.dispose();
+        preparedBackgroundOutlineRef.current = null;
+        controller.setOptions({ outline: settingsRef.current.outline });
+        setBackgroundRemoval({ phase: "error" });
+        setSourceMessage(t.backgroundRemovalFailed);
+      }
+    },
+    [clearPendingText, t.backgroundRemovalFailed],
+  );
+
+  const handleBackgroundParticlesComplete = useCallback(() => {
+    preparedBackgroundOutlineRef.current?.source.dispose();
+    preparedBackgroundOutlineRef.current = null;
+    setBackgroundParticles(null);
+    setBackgroundRemoval({ phase: "idle" });
+    setSourceMessage(t.backgroundRemoved);
+  }, [t.backgroundRemoved]);
+
+  const removeCurrentImageBackground = useCallback(async () => {
+    if (
+      !imageDataUrl ||
+      imageImportBusy ||
+      !["idle", "error"].includes(backgroundRemoval.phase)
+    ) {
+      return;
+    }
+
+    const revision = ++backgroundRemovalRevisionRef.current;
+    preparedBackgroundOutlineRef.current?.source.dispose();
+    preparedBackgroundOutlineRef.current = null;
+    const originalSource = imageDataUrl;
+    const outline = settingsRef.current.outline;
+    setSourceMessage("");
+    setBackgroundParticles(null);
+    setBackgroundRemoval({ phase: "loading", progress: 0 });
+    controllerRef.current?.setOptions({
+      outline: { ...outline, width: 0 },
+    });
+    controllerRef.current?.setBackgroundRemovalEffect(true);
+
+    try {
+      const result = await removeImageBackground(originalSource, (progress) => {
+        if (revision !== backgroundRemovalRevisionRef.current) return;
+        setBackgroundRemoval({
+          phase: progress.phase,
+          progress: progress.progress,
+        });
+      });
+      if (revision !== backgroundRemovalRevisionRef.current) return;
+
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+      setBackgroundRemoval({ phase: "dissolving" });
+      const nextSource: StickerSource = {
+        type: "image",
+        src: result.dataUrl,
+        name: imageName,
+      };
+      setBackgroundParticles({
+        source: originalSource,
+        result,
+        nextSource,
+        revision,
+        playing: false,
+      });
+    } catch (error) {
+      if (revision !== backgroundRemovalRevisionRef.current) return;
+      console.error("Could not remove the image background.", error);
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+      controllerRef.current?.setOptions({ outline });
+      setBackgroundRemoval({ phase: "error" });
+      setSourceMessage(t.backgroundRemovalFailed);
+    }
+  }, [
+    backgroundRemoval.phase,
+    imageImportBusy,
+    imageDataUrl,
+    imageName,
+    t.backgroundRemovalFailed,
+  ]);
+
+  useEffect(() => {
+    const previewLaser = () => {
+      if (
+        sourceMode !== "image"
+        || !imageDataUrl
+        || !["idle", "error"].includes(backgroundRemoval.phase)
+      ) {
+        return;
+      }
+      if (laserPreviewTimerRef.current !== null) {
+        window.clearTimeout(laserPreviewTimerRef.current);
+      }
+      controllerRef.current?.setBackgroundRemovalEffect(true);
+      laserPreviewTimerRef.current = window.setTimeout(() => {
+        controllerRef.current?.setBackgroundRemovalEffect(false);
+        laserPreviewTimerRef.current = null;
+      }, getLaserEffectSettings().sweepDuration + 80);
+    };
+
+    window.addEventListener(LASER_PREVIEW_EVENT, previewLaser);
+    return () => {
+      window.removeEventListener(LASER_PREVIEW_EVENT, previewLaser);
+      if (laserPreviewTimerRef.current !== null) {
+        window.clearTimeout(laserPreviewTimerRef.current);
+        laserPreviewTimerRef.current = null;
+      }
+    };
+  }, [backgroundRemoval.phase, imageDataUrl, sourceMode]);
 
   const handleDrop = (event: DragEvent<HTMLLabelElement>) => {
     event.preventDefault();
@@ -1450,6 +1818,15 @@ export function StickerForgeStudio() {
   };
 
   const switchSourceMode = (mode: SourceMode) => {
+    backgroundRemovalRevisionRef.current += 1;
+    imageImportRevisionRef.current += 1;
+    setImageImportBusy(false);
+    preparedBackgroundOutlineRef.current?.source.dispose();
+    preparedBackgroundOutlineRef.current = null;
+    setBackgroundRemoval({ phase: "idle" });
+    setBackgroundParticles(null);
+    controllerRef.current?.setBackgroundRemovalEffect(false);
+    controllerRef.current?.setOptions({ outline: settingsRef.current.outline });
     setSourceMode(mode);
     if (mode === "text") {
       void applySource(makeTextSource(text, inkColor, richText ?? undefined));
@@ -1459,6 +1836,14 @@ export function StickerForgeStudio() {
   };
 
   const resetStudio = () => {
+    backgroundRemovalRevisionRef.current += 1;
+    imageImportRevisionRef.current += 1;
+    setImageImportBusy(false);
+    preparedBackgroundOutlineRef.current?.source.dispose();
+    preparedBackgroundOutlineRef.current = null;
+    setBackgroundRemoval({ phase: "idle" });
+    setBackgroundParticles(null);
+    controllerRef.current?.setBackgroundRemovalEffect(false);
     setText(DEFAULT_TEXT);
     setInkColor(DEFAULT_INK);
     setSourceMode("text");
@@ -1558,7 +1943,10 @@ export function StickerForgeStudio() {
       </header>
 
       <section className="stage-card" aria-label={t.preview}>
-        <div className="sticker-stage">
+        <div
+          className="sticker-stage"
+          data-background-removal={backgroundRemoval.phase}
+        >
           <div
             ref={stageRef}
             className="sticker-host"
@@ -1569,6 +1957,29 @@ export function StickerForgeStudio() {
             role="group"
             aria-label={t.interactiveSticker}
           />
+          {backgroundParticles ? (
+            <BackgroundRemovalEffect
+              source={backgroundParticles.source}
+              resultPixels={backgroundParticles.result.pixels}
+              resultWidth={backgroundParticles.result.width}
+              resultHeight={backgroundParticles.result.height}
+              tilt={settings.tilt}
+              playing={backgroundParticles.playing}
+              onReady={() =>
+                void handleBackgroundParticlesReady(
+                  backgroundParticles.revision,
+                  backgroundParticles.nextSource,
+                  backgroundParticles.result.dataUrl,
+                )
+              }
+              onStart={() =>
+                handleBackgroundParticlesStart(
+                  backgroundParticles.revision,
+                )
+              }
+              onComplete={handleBackgroundParticlesComplete}
+            />
+          ) : null}
         </div>
       </section>
 
@@ -1907,10 +2318,69 @@ export function StickerForgeStudio() {
                     <input
                       className="sr-only"
                       type="file"
-                      accept="image/*"
+                      accept="image/*,.heic,.heif"
                       onChange={(event) => void loadImageFile(event.target.files?.[0])}
                     />
                   </label>
+                  <div className="background-removal-control">
+                    <div
+                      className="background-removal-action"
+                      onPointerEnter={() =>
+                        setShowBackgroundRemovalTip(false)
+                      }
+                    >
+                      {showBackgroundRemovalTip ? (
+                        <BackgroundRemovalTip
+                          anchor={backgroundRemovalButtonRef}
+                          label={t.tryRemoveBackground}
+                        />
+                      ) : null}
+                      <button
+                        ref={backgroundRemovalButtonRef}
+                        className="background-removal-button"
+                        type="button"
+                        data-phase={backgroundRemoval.phase}
+                        disabled={backgroundRemovalBusy || imageImportBusy}
+                        aria-busy={backgroundRemovalBusy || imageImportBusy}
+                        aria-describedby={
+                          showBackgroundRemovalTip
+                            ? "background-removal-tip"
+                            : undefined
+                        }
+                        onPointerEnter={() =>
+                          setShowBackgroundRemovalTip(false)
+                        }
+                        onFocus={() => setShowBackgroundRemovalTip(false)}
+                        onClick={() => {
+                          setShowBackgroundRemovalTip(false);
+                          void removeCurrentImageBackground();
+                        }}
+                      >
+                        <FontAwesomeIcon icon={faWandMagicSparkles} aria-hidden="true" />
+                        <span>{backgroundRemovalLabel}</span>
+                        {backgroundRemoval.phase === "loading" ? (
+                          <span
+                            className="background-removal-progress"
+                            style={{
+                              "--background-removal-progress": `${backgroundRemoval.progress ?? 0}%`,
+                            } as CSSProperties}
+                            aria-hidden="true"
+                          />
+                        ) : null}
+                      </button>
+                    </div>
+                    <small
+                      className="background-removal-caption"
+                      data-error={backgroundRemoval.phase === "error"}
+                    >
+                      {backgroundRemoval.phase === "error"
+                        ? t.backgroundRemovalFailed
+                        : t.removeBackgroundHint}
+                    </small>
+                  </div>
+                  <span className="sr-only" aria-live="polite">
+                    {backgroundRemovalBusy ? backgroundRemovalLabel : ""}
+                  </span>
                 </>
               )}
             </div>

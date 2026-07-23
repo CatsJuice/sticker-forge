@@ -113,14 +113,29 @@ export interface StickerPlaybackMotion {
   target: StickerPoint;
 }
 
+export interface PreparedStickerSource {
+  /** Atomically installs the already decoded, outlined, and GPU-warmed source. */
+  commit(): void;
+  /** Crossfades and shrinks into the prepared source before replaying entrance. */
+  commitWithEntrance(): void;
+  /** Releases the staged GPU texture when the prepared source is no longer needed. */
+  dispose(): void;
+}
+
 export interface StickerInstance {
   setSource(source: StickerSource): Promise<void>;
+  prepareSource(
+    source: StickerSource,
+    options?: Partial<StickerOptions>,
+  ): Promise<PreparedStickerSource>;
   setOptions(options: Partial<StickerOptions>): void;
   reset(): void;
   /** Set a deterministic peel pose without synthesizing pointer events. */
   setPeelProgress(progress: number, motion?: StickerPlaybackMotion): void;
   /** Set a deterministic pose of the built-in scale-and-laser entrance. */
   setEntranceProgress(progress: number): void;
+  /** Toggle the material-bound scan used while removing an image background. */
+  setBackgroundRemovalEffect(active: boolean): void;
   /** Replay the built-in spring-and-sweep entrance animation. */
   reappear(): void;
   /** Increase the backing-buffer density without changing the logical layout. */

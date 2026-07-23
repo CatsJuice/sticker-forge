@@ -499,8 +499,13 @@ test("supports uploaded images and derives transparent silhouettes from alpha", 
   assert.match(source, /if \(pixels\[index\] < 255\) return true/);
   assert.match(source, /source\.type === "image"\s*\? await renderImageSource\(source\)/);
   assert.match(source, /const canvas = addOutline\(sourceCanvas, outline\)/);
+  assert.match(source, /const VISIBLE_ALPHA_THRESHOLD = 0\.1 \* 255/);
+  assert.match(
+    source,
+    /sourcePixels\[pixel \* 4 \+ 3\] >= VISIBLE_ALPHA_THRESHOLD/,
+  );
   assert.match(studio, /type SourceMode = "text" \| "image"/);
-  assert.match(studio, /accept="image\/\*"/);
+  assert.match(studio, /accept="image\/\*,\.heic,\.heif"/);
   assert.match(studio, /\{ type: "image", src: dataUrl, name: file\.name \}/);
   assert.match(declarations, /export interface StickerImageSource/);
 });
@@ -830,9 +835,10 @@ test("re-enters a detached sticker with a centered spring and laser sweep", asyn
   assert.match(shader, /base\.xy \*= sliceScale/);
   assert.doesNotMatch(shader, /startAnchor/);
   assert.match(shader, /uniform float uEntranceSweep/);
-  assert.match(shader, /float laserCore = 1\.0 - smoothstep/);
+  assert.match(shader, /float laserCore =\s*1\.0 - smoothstep/);
   assert.match(shader, /vec3 laserColor = 0\.58 \+ 0\.42 \* cos/);
-  assert.match(shader, /color \+= laserColor \* \(laserCore \* 0\.62 \+ laserHalo \* 0\.16\)/);
+  assert.match(shader, /laserCore \* uLaserHighlightIntensity/);
+  assert.match(shader, /laserHalo \* uLaserBandOpacity/);
   assert.match(renderer, /ENTRANCE_SWEEP_DURATION = 0\.42/);
 });
 

@@ -81,6 +81,7 @@ type ExportDialogProps = {
   options: StickerOptions;
   embedCode: string;
   locale: "zh" | "en";
+  entered?: boolean;
   standalonePwa?: boolean;
   onClosing?: () => void;
   onClose: () => void;
@@ -822,6 +823,7 @@ export function ExportDialog({
   options,
   embedCode,
   locale,
+  entered = true,
   standalonePwa = false,
   onClosing,
   onClose,
@@ -2201,6 +2203,7 @@ export function ExportDialog({
     <div
       className="export-backdrop"
       data-closing={isClosing || undefined}
+      data-open={entered || undefined}
       data-pwa-standalone={standalonePwa || undefined}
     >
       <div className="export-dialog-shell">
@@ -2208,6 +2211,7 @@ export function ExportDialog({
           ref={dialogRef}
           className="export-dialog"
           data-closing={isClosing || undefined}
+          data-open={entered || undefined}
           role="dialog"
           aria-modal="true"
           aria-labelledby="export-dialog-title"

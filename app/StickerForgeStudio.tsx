@@ -958,6 +958,7 @@ export function StickerForgeStudio() {
   } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportClosing, setExportClosing] = useState(false);
+  const [exportEntered, setExportEntered] = useState(false);
   const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
   const [exportOptions, setExportOptions] =
     useState<StickerOptions>(DEFAULT_SETTINGS);
@@ -1042,6 +1043,23 @@ export function StickerForgeStudio() {
       query.removeEventListener("change", updateStandaloneState);
     };
   }, []);
+
+  useEffect(() => {
+    if (!exportOpen) {
+      setExportEntered(false);
+      return;
+    }
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        setExportEntered(true);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [exportOpen]);
 
   useEffect(() => {
     if (
@@ -2385,7 +2403,7 @@ export function StickerForgeStudio() {
       data-gallery-open={galleryOpen}
       data-gallery-editing={galleryEditing}
       data-export-active={exportOpen}
-      data-export-open={exportOpen && !exportClosing}
+      data-export-open={exportOpen && exportEntered && !exportClosing}
       data-export-closing={exportClosing}
       data-pwa-standalone={isStandalonePwa}
     >
@@ -3124,6 +3142,7 @@ export function StickerForgeStudio() {
                 setExportSource(sourceRef.current);
                 setExportOptions(settingsRef.current);
                 setExportClosing(false);
+                setExportEntered(false);
                 setExportOpen(true);
               }}
             >
@@ -3184,11 +3203,13 @@ export function StickerForgeStudio() {
               options={exportOptions}
               embedCode={buildEmbedSnippet(exportSource, exportOptions)}
               locale={locale}
+              entered={exportEntered}
               standalonePwa={isStandalonePwa}
               onClosing={() => setExportClosing(true)}
               onClose={() => {
                 setExportOpen(false);
                 setExportClosing(false);
+                setExportEntered(false);
               }}
             />,
             document.body,
@@ -3245,6 +3266,7 @@ export function StickerForgeStudio() {
             setExportSource(asset.source);
             setExportOptions(asset.options);
             setExportClosing(false);
+            setExportEntered(false);
             setExportOpen(true);
           }}
           resolveEditTarget={(item) => {

@@ -4707,6 +4707,11 @@ body {
     box-shadow:
       0 -10px 32px rgba(10, 12, 19, 0.14),
       inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    transform: translateY(calc(100% + 64px));
+    animation: none;
+  }
+
+  .export-dialog[data-open="true"] {
     animation: export-sheet-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 

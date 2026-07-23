@@ -729,7 +729,9 @@ class StickerRenderer implements StickerInstance {
     shadowCamera.updateProjectionMatrix();
     if (this.artwork) this.updateMeshGeometry(this.artwork.aspect);
     this.applyOptionsToRenderer();
-    this.requestRender();
+    // setSize clears the backing buffer. Draw synchronously so the browser
+    // never gets a chance to present an empty frame after a resize.
+    this.renderer.render(this.scene, this.camera);
   };
 
   getState(): Readonly<StickerState> {

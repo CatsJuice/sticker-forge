@@ -1289,6 +1289,61 @@ test("keeps the export dialog modal and persists a viewport-clamped size", async
   );
 });
 
+test("persists the selected export mode", async () => {
+  const exportDialog = await readFile(
+    new URL("../app/ExportDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    exportDialog,
+    /EXPORT_DIALOG_MODE_STORAGE_KEY = "sticker-forge:export-dialog-mode"/,
+  );
+  assert.match(
+    exportDialog,
+    /window\.localStorage\.getItem\([\s\S]*?EXPORT_DIALOG_MODE_STORAGE_KEY/,
+  );
+  assert.match(
+    exportDialog,
+    /stored === "static" \|\| stored === "animated" \|\| stored === "embed"/,
+  );
+  assert.match(
+    exportDialog,
+    /window\.localStorage\.setItem\(EXPORT_DIALOG_MODE_STORAGE_KEY, nextMode\)/,
+  );
+});
+
+test("debounces export canvas resizing without presenting an empty WebGL frame", async () => {
+  const [exportDialog, stickerForge, styles] = await Promise.all([
+    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(exportDialog, /EXPORT_CANVAS_RESIZE_DEBOUNCE_MS = 120/);
+  assert.match(exportDialog, /new ResizeObserver\(scheduleSizeUpdate\)/);
+  assert.doesNotMatch(
+    exportDialog,
+    /setSize\(next\);\s*controllerRef\.current\?\.resize\(\)/,
+  );
+  assert.match(
+    exportDialog,
+    /useLayoutEffect\(\(\) => \{\s*controllerRef\.current\?\.resize\(\);/,
+  );
+  assert.match(
+    exportDialog,
+    /className="export-sticker-host"\s*style=\{\{ width: size\.width, height: size\.height \}\}/,
+  );
+  assert.match(
+    styles,
+    /\.export-sticker-host \{[^}]*position: absolute;[^}]*top: 50%;[^}]*left: 50%;[^}]*translate\(-50%, -50%\);/s,
+  );
+  assert.match(
+    stickerForge,
+    /this\.renderer\.setSize\(width, height, false\);[\s\S]*?this\.renderer\.render\(this\.scene, this\.camera\);/,
+  );
+});
+
 test("starts manual recording from the first direct peel", async () => {
   const exportDialog = await readFile(
     new URL("../app/ExportDialog.tsx", import.meta.url),

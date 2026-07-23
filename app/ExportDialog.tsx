@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -90,7 +91,9 @@ const MOV_FRAME_RATES = [24, 30, 60] as const;
 const DEFAULT_GIF_FRAME_RATE = 20;
 const DEFAULT_APNG_FRAME_RATE = 30;
 const DEFAULT_MOV_FRAME_RATE = 30;
+const EXPORT_DIALOG_MODE_STORAGE_KEY = "sticker-forge:export-dialog-mode";
 const EXPORT_DIALOG_SIZE_STORAGE_KEY = "sticker-forge:export-dialog-size";
+const EXPORT_CANVAS_RESIZE_DEBOUNCE_MS = 120;
 const EXPORT_DIALOG_MOBILE_BREAKPOINT = 620;
 const EXPORT_DIALOG_MIN_WIDTH = 620;
 const EXPORT_DIALOG_MIN_HEIGHT = 560;
@@ -135,6 +138,19 @@ const DEFAULT_PLAYBACK_MOTION: StickerPlaybackMotion = {
   origin: { x: 0, y: 0.5 },
   target: { x: 1, y: 0.5 },
 };
+
+function storedExportMode(): ExportMode {
+  if (typeof window === "undefined") return "static";
+  try {
+    const stored = window.localStorage.getItem(EXPORT_DIALOG_MODE_STORAGE_KEY);
+    if (stored === "static" || stored === "animated" || stored === "embed") {
+      return stored;
+    }
+  } catch {
+    // Ignore unavailable storage and malformed values.
+  }
+  return "static";
+}
 
 const COPY = {
   zh: {
@@ -861,7 +877,7 @@ export function ExportDialog({
     maxHeight: number;
   } | null>(null);
 
-  const [mode, setMode] = useState<ExportMode>("static");
+  const [mode, setMode] = useState<ExportMode>(storedExportMode);
   const [animationMethod, setAnimationMethod] =
     useState<AnimationMethod>("manual");
   const [manualState, setManualState] = useState<ManualState>("idle");
@@ -1157,7 +1173,9 @@ export function ExportDialog({
     const preview = previewRef.current;
     if (!preview) return;
     let previous = size;
-    const updateSize = () => {
+    let resizeTimer: number | null = null;
+    const commitSize = () => {
+      resizeTimer = null;
       const rect = preview.getBoundingClientRect();
       const next = {
         width: Math.max(
@@ -1172,7 +1190,6 @@ export function ExportDialog({
       if (next.width === previous.width && next.height === previous.height) return;
       previous = next;
       setSize(next);
-      controllerRef.current?.resize();
       if (recordedFramesRef.current.length) {
         setRecordedFramesSynced([]);
         setManualStateSynced("idle");
@@ -1180,10 +1197,20 @@ export function ExportDialog({
         setStatus("");
       }
     };
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
+    const scheduleSizeUpdate = () => {
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(
+        commitSize,
+        EXPORT_CANVAS_RESIZE_DEBOUNCE_MS,
+      );
+    };
+    commitSize();
+    const observer = new ResizeObserver(scheduleSizeUpdate);
     observer.observe(preview);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+    };
     // The observer owns subsequent size updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspectRatio, mode, setManualStateSynced, setRecordedFramesSynced]);
@@ -1238,6 +1265,10 @@ export function ExportDialog({
   useEffect(() => {
     controllerRef.current?.setRenderScale(Math.max(1, transform.zoom));
   }, [transform.zoom]);
+
+  useLayoutEffect(() => {
+    controllerRef.current?.resize();
+  }, [size.height, size.width]);
 
   useEffect(() => {
     if (mode !== "animated" || animationMethod !== "automatic") {
@@ -2019,6 +2050,11 @@ export function ExportDialog({
     setIntervalOpen(false);
     setExportMenuOpen(null);
     setMode(nextMode);
+    try {
+      window.localStorage.setItem(EXPORT_DIALOG_MODE_STORAGE_KEY, nextMode);
+    } catch {
+      // Persistence is optional when storage is unavailable.
+    }
     setVisualMotion(EMPTY_MOTION);
     setStatus("");
     setRecordingPhase("idle");
@@ -2255,7 +2291,11 @@ export function ExportDialog({
                   style={layerStyle}
                   aria-hidden={manualState === "recorded"}
                 >
-                  <div ref={stickerHostRef} className="export-sticker-host" />
+                  <div
+                    ref={stickerHostRef}
+                    className="export-sticker-host"
+                    style={{ width: size.width, height: size.height }}
+                  />
                 </div>
                 <div
                   ref={exportStickerHostRef}

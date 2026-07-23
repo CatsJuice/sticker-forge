@@ -57,7 +57,7 @@ type RecordingPhase = "idle" | "waiting" | "peeling" | "finishing";
 type TransformState = { x: number; y: number; zoom: number };
 type MotionAnchor = keyof StickerPlaybackMotion;
 type AspectRatioPreset = "free" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
-type ExportScale = 1 | 2 | 3;
+type ExportScale = 0.25 | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2 | 3 | 4;
 type VisualMotion = {
   x: number;
   y: number;
@@ -82,6 +82,12 @@ const MOV_FRAME_RATES = [24, 30, 60] as const;
 const DEFAULT_GIF_FRAME_RATE = 20;
 const DEFAULT_APNG_FRAME_RATE = 30;
 const DEFAULT_MOV_FRAME_RATE = 30;
+const EXPORT_DIALOG_SIZE_STORAGE_KEY = "sticker-forge:export-dialog-size";
+const EXPORT_DIALOG_MOBILE_BREAKPOINT = 620;
+const EXPORT_DIALOG_MIN_WIDTH = 620;
+const EXPORT_DIALOG_MIN_HEIGHT = 560;
+const EXPORT_DIALOG_VIEWPORT_INSET = 64;
+const FOUR_K_PIXEL_COUNT = 3840 * 2160;
 const ASPECT_RATIO_PRESETS = [
   ["free", null],
   ["1:1", 1],
@@ -90,7 +96,17 @@ const ASPECT_RATIO_PRESETS = [
   ["16:9", 16 / 9],
   ["9:16", 9 / 16],
 ] as const satisfies readonly (readonly [AspectRatioPreset, number | null])[];
-const EXPORT_SCALES = [1, 2, 3] as const satisfies readonly ExportScale[];
+const EXPORT_SCALES = [
+  0.25,
+  0.5,
+  0.75,
+  1,
+  1.25,
+  1.5,
+  2,
+  3,
+  4,
+] as const satisfies readonly ExportScale[];
 const MIN_SPEED = 0.25;
 const MAX_SPEED = 4;
 const SPEED_STEP = 0.05;
@@ -123,7 +139,7 @@ const COPY = {
     ratio: "比例",
     freeRatio: "自由",
     quality: "清晰度",
-    transparent: "透明画布",
+    highResolutionWarning: "分辨率过高，可能影响导出性能",
     moveHint: "滚轮缩放 · 拖拽空白处平移 · 交互模式按住 Shift 平移",
     zoomOut: "缩小",
     zoomIn: "放大",
@@ -177,7 +193,8 @@ const COPY = {
     ratio: "Ratio",
     freeRatio: "Free",
     quality: "Quality",
-    transparent: "Transparent canvas",
+    highResolutionWarning:
+      "Very high resolutions may affect export performance",
     moveHint: "Wheel to zoom · drag empty space to pan · hold Shift in interactive modes",
     zoomOut: "Zoom out",
     zoomIn: "Zoom in",
@@ -225,6 +242,25 @@ const COPY = {
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function exportDialogBounds() {
+  const maxWidth = Math.max(1, window.innerWidth - EXPORT_DIALOG_VIEWPORT_INSET);
+  const maxHeight = Math.max(1, window.innerHeight - EXPORT_DIALOG_VIEWPORT_INSET);
+  return {
+    minWidth: Math.min(EXPORT_DIALOG_MIN_WIDTH, maxWidth),
+    minHeight: Math.min(EXPORT_DIALOG_MIN_HEIGHT, maxHeight),
+    maxWidth,
+    maxHeight,
+  };
+}
+
+function clampExportDialogSize(width: number, height: number) {
+  const bounds = exportDialogBounds();
+  return {
+    width: clamp(width, bounds.minWidth, bounds.maxWidth),
+    height: clamp(height, bounds.minHeight, bounds.maxHeight),
+  };
 }
 
 function formatSpeed(value: number) {
@@ -355,6 +391,17 @@ function canvasBlob(canvas: HTMLCanvasElement, type: string) {
   });
 }
 
+function scaledExportSize(
+  width: number,
+  height: number,
+  outputScale: ExportScale,
+) {
+  return {
+    width: Math.max(2, Math.round((width * outputScale) / 2) * 2),
+    height: Math.max(2, Math.round((height * outputScale) / 2) * 2),
+  };
+}
+
 function drawCompositedFrame(
   destination: HTMLCanvasElement,
   source: CanvasImageSource,
@@ -362,10 +409,13 @@ function drawCompositedFrame(
   height: number,
   transform: TransformState,
   visual: VisualMotion = EMPTY_MOTION,
-  outputScale = 1,
+  outputScale: ExportScale = 1,
 ) {
-  const outputWidth = Math.max(2, Math.round(width * outputScale));
-  const outputHeight = Math.max(2, Math.round(height * outputScale));
+  const { width: outputWidth, height: outputHeight } = scaledExportSize(
+    width,
+    height,
+    outputScale,
+  );
   if (destination.width !== outputWidth) destination.width = outputWidth;
   if (destination.height !== outputHeight) destination.height = outputHeight;
   const context = destination.getContext("2d", { willReadFrequently: true });
@@ -415,8 +465,11 @@ function scaleExportFrames(frames: ExportFrame[], outputScale: ExportScale) {
       0,
       0,
     );
-    const width = frame.width * outputScale;
-    const height = frame.height * outputScale;
+    const { width, height } = scaledExportSize(
+      frame.width,
+      frame.height,
+      outputScale,
+    );
     destination.width = width;
     destination.height = height;
     destinationContext.imageSmoothingEnabled = true;
@@ -806,6 +859,10 @@ export function ExportDialog({
   const speedRef = useRef(1);
   const playbackIntervalRef = useRef(0);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const preferredDialogSizeRef = useRef<{
+    width: number;
+    height: number;
+  } | null>(null);
   const panRef = useRef<{
     pointerId: number;
     startX: number;
@@ -888,6 +945,12 @@ export function ExportDialog({
       null,
     [aspectRatioPreset],
   );
+  const outputSize = useMemo(
+    () => scaledExportSize(size.width, size.height, exportScale),
+    [exportScale, size.height, size.width],
+  );
+  const outputExceeds4k =
+    outputSize.width * outputSize.height > FOUR_K_PIXEL_COUNT;
 
   const setTransformSynced = useCallback((next: TransformState) => {
     transformRef.current = next;
@@ -925,6 +988,50 @@ export function ExportDialog({
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     closeRef.current?.focus();
     return () => previousFocusRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    try {
+      const stored = window.localStorage.getItem(
+        EXPORT_DIALOG_SIZE_STORAGE_KEY,
+      );
+      if (stored) {
+        const parsed = JSON.parse(stored) as {
+          width?: unknown;
+          height?: unknown;
+        };
+        if (
+          typeof parsed.width === "number" &&
+          Number.isFinite(parsed.width) &&
+          typeof parsed.height === "number" &&
+          Number.isFinite(parsed.height)
+        ) {
+          preferredDialogSizeRef.current = {
+            width: parsed.width,
+            height: parsed.height,
+          };
+        }
+      }
+    } catch {
+      // Ignore unavailable storage and malformed values.
+    }
+    const applyPreferredSize = () => {
+      if (window.innerWidth <= EXPORT_DIALOG_MOBILE_BREAKPOINT) {
+        dialog.style.removeProperty("width");
+        dialog.style.removeProperty("height");
+        return;
+      }
+      const preferred = preferredDialogSizeRef.current;
+      if (!preferred) return;
+      const next = clampExportDialogSize(preferred.width, preferred.height);
+      dialog.style.width = `${next.width}px`;
+      dialog.style.height = `${next.height}px`;
+    };
+    applyPreferredSize();
+    window.addEventListener("resize", applyPreferredSize);
+    return () => window.removeEventListener("resize", applyPreferredSize);
   }, []);
 
   useEffect(() => {
@@ -1617,8 +1724,11 @@ export function ExportDialog({
       );
       await nextFrame();
       const { canvas, context } = composeCurrent(EMPTY_MOTION, exportScale);
-      const outputWidth = size.width * exportScale;
-      const outputHeight = size.height * exportScale;
+      const { width: outputWidth, height: outputHeight } = scaledExportSize(
+        size.width,
+        size.height,
+        exportScale,
+      );
       const imageData = context.getImageData(0, 0, outputWidth, outputHeight);
       imageData.data.set(
         repairTransparentEdgeColors(
@@ -1660,8 +1770,11 @@ export function ExportDialog({
         controllerRef.current?.setEntranceProgress(state.entranceProgress);
       }
       const { context } = composeCurrent(state.visual, exportScale);
-      const outputWidth = size.width * exportScale;
-      const outputHeight = size.height * exportScale;
+      const { width: outputWidth, height: outputHeight } = scaledExportSize(
+        size.width,
+        size.height,
+        exportScale,
+      );
       frames.push({
         rgba: new Uint8ClampedArray(
           context.getImageData(0, 0, outputWidth, outputHeight).data,
@@ -1675,8 +1788,11 @@ export function ExportDialog({
     controllerRef.current?.setPeelProgress(0, motion);
     if (playbackInterval > 0) {
       const { context } = composeCurrent(EMPTY_MOTION, exportScale);
-      const outputWidth = size.width * exportScale;
-      const outputHeight = size.height * exportScale;
+      const { width: outputWidth, height: outputHeight } = scaledExportSize(
+        size.width,
+        size.height,
+        exportScale,
+      );
       frames.push({
         rgba: new Uint8ClampedArray(
           context.getImageData(0, 0, outputWidth, outputHeight).data,
@@ -1821,6 +1937,7 @@ export function ExportDialog({
     event.preventDefault();
     event.stopPropagation();
     const rect = dialog.getBoundingClientRect();
+    const bounds = exportDialogBounds();
     event.currentTarget.setPointerCapture(event.pointerId);
     dialogResizeRef.current = {
       pointerId: event.pointerId,
@@ -1828,8 +1945,8 @@ export function ExportDialog({
       startY: event.clientY,
       width: rect.width,
       height: rect.height,
-      maxWidth: window.innerWidth - 76,
-      maxHeight: window.innerHeight - 76,
+      maxWidth: bounds.maxWidth,
+      maxHeight: bounds.maxHeight,
     };
   };
 
@@ -1839,12 +1956,12 @@ export function ExportDialog({
     if (!resize || resize.pointerId !== event.pointerId || !dialog) return;
     dialog.style.width = `${clamp(
       resize.width + (event.clientX - resize.startX) * 2,
-      620,
+      Math.min(EXPORT_DIALOG_MIN_WIDTH, resize.maxWidth),
       resize.maxWidth,
     )}px`;
     dialog.style.height = `${clamp(
       resize.height + (event.clientY - resize.startY) * 2,
-      560,
+      Math.min(EXPORT_DIALOG_MIN_HEIGHT, resize.maxHeight),
       resize.maxHeight,
     )}px`;
   };
@@ -1852,18 +1969,29 @@ export function ExportDialog({
   const onDialogResizeEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (dialogResizeRef.current?.pointerId !== event.pointerId) return;
     dialogResizeRef.current = null;
+    const dialog = dialogRef.current;
+    if (dialog && window.innerWidth > EXPORT_DIALOG_MOBILE_BREAKPOINT) {
+      const rect = dialog.getBoundingClientRect();
+      const next = clampExportDialogSize(rect.width, rect.height);
+      preferredDialogSizeRef.current = next;
+      dialog.style.width = `${next.width}px`;
+      dialog.style.height = `${next.height}px`;
+      try {
+        window.localStorage.setItem(
+          EXPORT_DIALOG_SIZE_STORAGE_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // Persistence is optional when storage is unavailable.
+      }
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   };
 
   return (
-    <div
-      className="export-backdrop"
-      onPointerDown={(event) => {
-        if (event.target === event.currentTarget && !busy) onClose();
-      }}
-    >
+    <div className="export-backdrop">
       <div className="export-dialog-shell">
         <div
           ref={dialogRef}
@@ -1989,9 +2117,14 @@ export function ExportDialog({
                   onPointerCancel={onPreviewPointerUp}
                   onWheel={onPreviewWheel}
                 >
-                <div className="export-pixel-size">
-                  <span>{size.width} × {size.height} px</span>
-                  <small>{t.transparent}</small>
+                <div
+                  className="export-pixel-size"
+                  data-warning={outputExceeds4k}
+                >
+                  <span>{outputSize.width} × {outputSize.height} px</span>
+                  {outputExceeds4k ? (
+                    <small>{t.highResolutionWarning}</small>
+                  ) : null}
                 </div>
                 <div
                   ref={layerRef}

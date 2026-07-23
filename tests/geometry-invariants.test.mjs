@@ -1103,11 +1103,11 @@ test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => 
   );
   assert.match(
     styles,
-    /\.export-motion-panel \{[^}]*min-height: 68px;/s,
+    /\.export-motion-panel \{[^}]*min-height: 44px;/s,
   );
   assert.match(
     styles,
-    /\.export-motion-panel\[data-method="manual"\] \{[^}]*min-height: 68px;/s,
+    /\.export-motion-panel\[data-method="manual"\] \{[^}]*min-height: 44px;/s,
   );
   assert.match(
     styles,
@@ -1125,7 +1125,11 @@ test("locks export canvas ratios and scales every export format", async () => {
     exportDialog,
     /ASPECT_RATIO_PRESETS = \[[\s\S]*?\["free", null\][\s\S]*?\["1:1", 1\][\s\S]*?\["16:9", 16 \/ 9\][\s\S]*?\["9:16", 9 \/ 16\]/,
   );
-  assert.match(exportDialog, /EXPORT_SCALES = \[1, 2, 3\]/);
+  assert.match(
+    exportDialog,
+    /EXPORT_SCALES = \[[\s\S]*?0\.25,[\s\S]*?0\.5,[\s\S]*?0\.75,[\s\S]*?1\.25,[\s\S]*?1\.5,[\s\S]*?3,[\s\S]*?4,/,
+  );
+  assert.match(exportDialog, /function scaledExportSize\(/);
   assert.match(exportDialog, /data-aspect-locked=\{aspectRatio !== null\}/);
   assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
   assert.match(exportDialog, /composeCurrent\(state\.visual, exportScale\)/);
@@ -1133,6 +1137,22 @@ test("locks export canvas ratios and scales every export format", async () => {
     exportDialog,
     /scaleExportFrames\([\s\S]*?resampleExportFrames\(recordedFramesRef\.current, frameRate\),[\s\S]*?exportScale/,
   );
+  assert.match(
+    exportDialog,
+    /const outputSize = useMemo\([\s\S]*?scaledExportSize\(size\.width, size\.height, exportScale\)/,
+  );
+  assert.match(
+    exportDialog,
+    /\{outputSize\.width\} × \{outputSize\.height\} px/,
+  );
+  assert.match(exportDialog, /FOUR_K_PIXEL_COUNT = 3840 \* 2160/);
+  assert.match(
+    exportDialog,
+    /outputSize\.width \* outputSize\.height > FOUR_K_PIXEL_COUNT/,
+  );
+  assert.match(exportDialog, /data-warning=\{outputExceeds4k\}/);
+  assert.match(exportDialog, /t\.highResolutionWarning/);
+  assert.doesNotMatch(exportDialog, /t\.transparent/);
   assert.match(
     styles,
     /\.export-canvas-slot \{[^}]*container-type: size;/s,
@@ -1144,6 +1164,38 @@ test("locks export canvas ratios and scales every export format", async () => {
   assert.match(
     styles,
     /\.export-output-select select \{[^}]*position: absolute;[^}]*inset: 0;[^}]*height: 100%;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-pixel-size\[data-warning="true"\] \{[^}]*background: rgba\(255, 245, 194, 0\.92\);/s,
+  );
+});
+
+test("keeps the export dialog modal and persists a viewport-clamped size", async () => {
+  const exportDialog = await readFile(
+    new URL("../app/ExportDialog.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    exportDialog,
+    /EXPORT_DIALOG_SIZE_STORAGE_KEY = "sticker-forge:export-dialog-size"/,
+  );
+  assert.match(exportDialog, /function clampExportDialogSize\(/);
+  assert.match(
+    exportDialog,
+    /window\.addEventListener\("resize", applyPreferredSize\)/,
+  );
+  assert.match(
+    exportDialog,
+    /window\.localStorage\.setItem\([\s\S]*?EXPORT_DIALOG_SIZE_STORAGE_KEY/,
+  );
+  assert.match(exportDialog, /if \(!busy\) onClose\(\)/);
+  assert.match(exportDialog, /disabled=\{Boolean\(busy\)\}/);
+  assert.match(exportDialog, /<div className="export-backdrop">/);
+  assert.doesNotMatch(
+    exportDialog,
+    /className="export-backdrop"[\s\S]{0,120}onPointerDown=/,
   );
 });
 

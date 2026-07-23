@@ -359,8 +359,9 @@ function GalleryDeleteControl({
   });
   const keepWidth = 31 + progress * 45;
   const deleteWidth = 31 + progress * 45;
-  // The resting edit/export/delete trio is centered beneath the frame.
-  const deleteLeft = 24 + progress * 37;
+  // Keep the resting edit/export/delete trio centered, but converge to the
+  // original compact 6px confirmation gap once the labels have expanded.
+  const deleteLeft = 24 + progress * 17;
   const labelProgress = clamp((progress - 0.18) / 0.72, 0, 1);
   const iconProgress = clamp(1 - progress / 0.62, 0, 1);
 

@@ -715,6 +715,19 @@ test("can peel disconnected artwork regions as independent pieces", async () => 
   assert.match(renderer, /this\.connectedPieces\.set\(componentId, piece\)/);
 });
 
+test("keeps released connected pieces interactive until every piece is torn away", async () => {
+  const renderer = await readFile(
+    new URL("../lib/sticker-forge.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(renderer, /private hitVisibleEdge/);
+  assert.match(renderer, /this\.pieceLocalOffset\(piece\)/);
+  assert.match(renderer, /const connectedPiece = this\.activeComponentId !== null/);
+  assert.match(renderer, /!connectedPiece[\s\S]*?release === "snap" && !shouldDetach/);
+  assert.match(renderer, /this\.detachedComponentIds\.size >= \(this\.artwork\?\.components\.length \?\? 0\)/);
+});
+
 test("continues moving a sticker after the peel reaches full progress", async () => {
   const renderer = await readFile(
     new URL("../lib/sticker-forge.ts", import.meta.url),

@@ -134,6 +134,7 @@ type EdgeHit = {
 
 type ConnectedPiece = {
   id: number;
+  removed: boolean;
   mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   residue: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   material: THREE.ShaderMaterial;
@@ -200,8 +201,10 @@ class StickerRenderer implements StickerInstance {
   private claimedTexture: THREE.DataTexture | null = null;
   private claimedPixels = new Uint8Array();
   private readonly connectedPieces = new Map<number, ConnectedPiece>();
+  private readonly detachedComponentIds = new Set<number>();
   private basePiece: ConnectedPiece | null = null;
   private activeComponentId: number | null = null;
+  private readonly dragStartOffset = new THREE.Vector2();
   private artwork: PreparedArtwork | null = null;
   private options: ResolvedStickerOptions;
   private source: StickerSource = DEFAULT_SOURCE;
@@ -234,6 +237,7 @@ class StickerRenderer implements StickerInstance {
   private detachedExitActive = false;
   private detachedExitElapsed = 0;
   private detachedExitSpin = 0;
+  private detachedExitComponentId: number | null = null;
   private entranceActive = false;
   private entranceElapsed = 0;
   private preparedEntrance: PreparedEntrance | null = null;
@@ -419,6 +423,7 @@ class StickerRenderer implements StickerInstance {
     this.scene.add(this.stickerMesh);
     this.basePiece = {
       id: 0,
+      removed: false,
       mesh: this.stickerMesh,
       residue: this.residueMesh,
       material: this.stickerMaterial,
@@ -924,8 +929,20 @@ class StickerRenderer implements StickerInstance {
       piece.depthMaterial.dispose();
     }
     this.connectedPieces.clear();
+    this.detachedComponentIds.clear();
     this.claimedPixels.fill(0);
     if (this.claimedTexture) this.claimedTexture.needsUpdate = true;
+    if (!this.basePiece) return;
+    this.stickerMesh = this.basePiece.mesh;
+    this.residueMesh = this.basePiece.residue;
+    this.stickerMaterial = this.basePiece.material;
+    this.residueMaterial = this.basePiece.residueMaterial;
+    this.peelShadowDepthMaterial = this.basePiece.depthMaterial;
+    this.uniforms = this.basePiece.uniforms;
+    this.activeComponentId = null;
+  }
+
+  private selectBasePiece() {
     if (!this.basePiece) return;
     this.stickerMesh = this.basePiece.mesh;
     this.residueMesh = this.basePiece.residue;
@@ -941,10 +958,21 @@ class StickerRenderer implements StickerInstance {
       this.options.peel.segments !== "connected" ||
       !this.artwork ||
       this.artwork.components.length < 2 ||
-      this.connectedPieces.has(componentId) ||
       !this.basePiece
     ) {
       return false;
+    }
+    const existing = this.connectedPieces.get(componentId);
+    if (existing) {
+      if (existing.removed) return false;
+      this.stickerMesh = existing.mesh;
+      this.residueMesh = existing.residue;
+      this.stickerMaterial = existing.material;
+      this.residueMaterial = existing.residueMaterial;
+      this.peelShadowDepthMaterial = existing.depthMaterial;
+      this.uniforms = existing.uniforms;
+      this.activeComponentId = componentId;
+      return true;
     }
     const uniforms = THREE.UniformsUtils.clone(this.basePiece.material.uniforms);
     uniforms.uComponentMode.value = 2;
@@ -968,6 +996,7 @@ class StickerRenderer implements StickerInstance {
     this.scene.add(residue, mesh);
     const piece = {
       id: componentId,
+      removed: false,
       mesh,
       residue,
       material,
@@ -1275,10 +1304,10 @@ class StickerRenderer implements StickerInstance {
     const flatteningCompensation =
       this.grabProjection - this.grabExtent * 2;
     const compensatedX =
-      localX +
+      localX + this.dragStartOffset.x +
       this.activeDirection.x * flatteningCompensation * this.detachedTension;
     const compensatedY =
-      localY +
+      localY + this.dragStartOffset.y +
       this.activeDirection.y * flatteningCompensation * this.detachedTension;
     this.stickerMesh.position.set(
       compensatedX * cosine - compensatedY * sine,
@@ -1322,7 +1351,7 @@ class StickerRenderer implements StickerInstance {
     return this.artwork.exteriorAlpha[pixelY * this.artwork.width + pixelX] === 1;
   }
 
-  private hitEdge(local: THREE.Vector2): EdgeHit | null {
+  private hitEdge(local: THREE.Vector2, componentId?: number): EdgeHit | null {
     if (!this.artwork) return null;
     const u = local.x / this.meshWidth + 0.5;
     const v = local.y / this.meshHeight + 0.5;
@@ -1363,6 +1392,12 @@ class StickerRenderer implements StickerInstance {
         }
         const alpha = this.sampleAlpha(candidateX, candidateY);
         if (alpha < 0.1) continue;
+        if (
+          componentId !== undefined &&
+          this.artwork.componentLabels[
+            candidateY * this.artwork.width + candidateX
+          ] !== componentId
+        ) continue;
         const isOuterBoundary =
           this.sampleExterior(candidateX - 1, candidateY) ||
           this.sampleExterior(candidateX + 1, candidateY) ||
@@ -1401,6 +1436,39 @@ class StickerRenderer implements StickerInstance {
     };
   }
 
+  private pieceLocalOffset(piece: ConnectedPiece) {
+    const angle = THREE.MathUtils.degToRad(this.options.tilt);
+    const cosine = Math.cos(angle);
+    const sine = Math.sin(angle);
+    return new THREE.Vector2(
+      piece.mesh.position.x * cosine + piece.mesh.position.y * sine,
+      -piece.mesh.position.x * sine + piece.mesh.position.y * cosine,
+    );
+  }
+
+  private hitVisibleEdge(local: THREE.Vector2): EdgeHit | null {
+    const connected =
+      this.options.peel.segments === "connected" &&
+      (this.artwork?.components.length ?? 0) > 1;
+    if (!connected) return this.hitEdge(local);
+
+    const pieces = [...this.connectedPieces.values()].reverse();
+    for (const piece of pieces) {
+      if (piece.removed) continue;
+      const hit = this.hitEdge(
+        local.clone().sub(this.pieceLocalOffset(piece)),
+        piece.id,
+      );
+      if (hit) return hit;
+    }
+    const hit = this.hitEdge(local);
+    if (!hit) return null;
+    return this.connectedPieces.has(hit.componentId) ||
+      this.detachedComponentIds.has(hit.componentId)
+      ? null
+      : hit;
+  }
+
   private projectionExtent(origin: THREE.Vector2, direction: THREE.Vector2) {
     if (!this.artwork) return Math.max(this.meshHeight * 0.35, this.meshWidth);
     let maximum = this.meshHeight * 0.35;
@@ -1430,7 +1498,7 @@ class StickerRenderer implements StickerInstance {
       event.button !== 0
     ) return;
     const local = this.screenToLocal(event.clientX, event.clientY);
-    const hit = this.hitEdge(local);
+    const hit = this.hitVisibleEdge(local);
     if (!hit) {
       this.startInteractionHint();
       return;
@@ -1464,7 +1532,7 @@ class StickerRenderer implements StickerInstance {
     this.dragDetached = false;
     this.state.dragging = true;
     this.state.grabPoint = { x: hit.local.x, y: hit.local.y };
-    this.state.pointer = { x: local.x, y: local.y };
+    this.state.pointer = { x: hit.local.x, y: hit.local.y };
     this.renderer.domElement.style.cursor = "grabbing";
     this.peelAudio.unlock();
     this.peelAudio.begin(this.state.progress, event.timeStamp);
@@ -1489,14 +1557,20 @@ class StickerRenderer implements StickerInstance {
     }
     const local = this.screenToLocal(event.clientX, event.clientY);
     if (!this.state.dragging || event.pointerId !== this.pointerId) {
-      this.renderer.domElement.style.cursor = this.hitEdge(local)
+      this.renderer.domElement.style.cursor = this.hitVisibleEdge(local)
         ? "grab"
         : "default";
       return;
     }
+    this.dragStartOffset.copy(
+      this.activeComponentId === null
+        ? new THREE.Vector2()
+        : this.pieceLocalOffset(this.connectedPieces.get(this.activeComponentId)!),
+    );
 
     event.preventDefault();
-    const drag = local.clone().sub(this.grabStart);
+    const activeLocal = local.clone().sub(this.dragStartOffset);
+    const drag = activeLocal.clone().sub(this.grabStart);
     const distance = drag.length();
     let pointerDistance = 0;
     let shouldReturnFromInvalidDirection = false;
@@ -1607,7 +1681,7 @@ class StickerRenderer implements StickerInstance {
       event.timeStamp,
       this.activeDirection.x,
     );
-    this.state.pointer = { x: local.x, y: local.y };
+    this.state.pointer = { x: activeLocal.x, y: activeLocal.y };
     this.updatePeelUniforms();
     this.emit("peelchange", {
       amount: this.state.progress,
@@ -1667,6 +1741,7 @@ class StickerRenderer implements StickerInstance {
       : this.state.progress;
     const shouldDetach =
       release === "snap" && releaseProgress >= SNAP_DETACH_THRESHOLD;
+    const connectedPiece = this.activeComponentId !== null;
     if (shouldDetach) {
       this.setCreaseDepth(this.grabExtent);
       this.state.pointer = {
@@ -1681,8 +1756,11 @@ class StickerRenderer implements StickerInstance {
       );
     }
     this.peelAudio.end(this.state.progress);
+    // A partially peeled connected fragment is a persistent object. It must not
+    // play the global reappear animation merely because the pointer was released.
     const shouldReset =
-      release === "reset" || (release === "snap" && !shouldDetach);
+      !connectedPiece &&
+      (release === "reset" || (release === "snap" && !shouldDetach));
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
@@ -1703,9 +1781,16 @@ class StickerRenderer implements StickerInstance {
     });
     if (shouldDetach) {
       if (reducedMotion) {
-        this.reset();
+        if (connectedPiece) {
+          this.finishConnectedPieceExit(this.activeComponentId!);
+        } else {
+          this.reset();
+        }
         return;
       }
+      this.detachedExitComponentId = connectedPiece
+        ? this.activeComponentId
+        : null;
       this.detachedExitActive = true;
       this.detachedExitElapsed = 0;
       this.detachedExitSpin = this.activeDirection.x >= 0 ? -0.42 : 0.42;
@@ -1715,6 +1800,25 @@ class StickerRenderer implements StickerInstance {
       return;
     }
     this.requestRender();
+  }
+
+  private finishConnectedPieceExit(componentId: number) {
+    const piece = this.connectedPieces.get(componentId);
+    if (!piece) return;
+    piece.removed = true;
+    this.scene.remove(piece.mesh, piece.residue);
+    this.detachedComponentIds.add(componentId);
+    this.selectBasePiece();
+    this.state = {
+      ready: true,
+      dragging: false,
+      progress: 0,
+      grabPoint: null,
+      pointer: null,
+    };
+    if (this.detachedComponentIds.size >= (this.artwork?.components.length ?? 0)) {
+      this.startEntranceAnimation();
+    }
   }
 
   private onPointerLeave = () => {
@@ -1918,6 +2022,14 @@ class StickerRenderer implements StickerInstance {
         this.activeDirection.y * exitSpeed * delta;
       this.stickerMesh.rotation.z += this.detachedExitSpin * delta;
       if (this.detachedExitElapsed >= 0.46) {
+        this.detachedExitActive = false;
+        const exitingComponentId = this.detachedExitComponentId;
+        this.detachedExitComponentId = null;
+        if (exitingComponentId !== null) {
+          this.finishConnectedPieceExit(exitingComponentId);
+          this.requestRender();
+          return;
+        }
         this.startEntranceAnimation();
         return;
       }

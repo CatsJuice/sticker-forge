@@ -667,13 +667,13 @@ test("smoothly returns a lifted sticker when the drag enters an invalid directio
   );
 });
 
-test("snaps a sufficiently peeled sticker to full detachment on release", async () => {
+test("keeps threshold detachment as the SDK release default", async () => {
   const [renderer, types] = await Promise.all([
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(types, /release: "stay" as const/);
+  assert.match(types, /release: "snap" as const/);
   assert.match(renderer, /SNAP_DETACH_THRESHOLD = 0\.74/);
   assert.match(
     renderer,
@@ -685,6 +685,20 @@ test("snaps a sufficiently peeled sticker to full detachment on release", async 
   );
   assert.match(renderer, /if \(shouldDetach\) \{\s*this\.setCreaseDepth\(this\.grabExtent\)/);
   assert.match(renderer, /release === "snap" && !shouldDetach/);
+});
+
+test("persists global peel preferences while keeping Studio controls as overrides", async () => {
+  const studio = await readFile(
+    new URL("../app/StickerForgeStudio.tsx", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(studio, /STUDIO_PEEL_PREFERENCES_KEY/);
+  assert.match(studio, /function readPeelPreferences/);
+  assert.match(studio, /window\.localStorage\.setItem\(\s*STUDIO_PEEL_PREFERENCES_KEY/);
+  assert.match(studio, /applyGlobalPeelPreferences/);
+  assert.match(studio, /release: event\.target\.value as PeelRelease/);
+  assert.match(studio, /segments: event\.target\.value as PeelSegments/);
 });
 
 test("can peel disconnected artwork regions as independent pieces", async () => {

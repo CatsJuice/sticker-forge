@@ -16923,7 +16923,7 @@ var tf = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "stay",
+    release: "snap",
     segments: "whole"
   },
   back: {

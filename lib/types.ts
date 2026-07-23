@@ -162,7 +162,9 @@ export const DEFAULT_STICKER_OPTIONS = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "stay" as const,
+    // Preserve the existing SDK interaction contract. Studio may opt into a
+    // different persisted preference without changing embedded stickers.
+    release: "snap" as const,
     segments: "whole" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },

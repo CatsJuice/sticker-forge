@@ -101,6 +101,12 @@ type BackgroundRemovalPhase =
   | "dissolving"
   | "finishing"
   | "error";
+type PeelRelease = "reset" | "stay" | "snap";
+type PeelSegments = "whole" | "connected";
+type PeelPreferences = {
+  release: PeelRelease;
+  segments: PeelSegments;
+};
 
 type StudioSettings = {
   outline: { width: number; color: string };
@@ -116,8 +122,8 @@ type StudioSettings = {
     stiffness: number;
     grabWidth: number;
     maxAngle: number;
-    release: "stay";
-    segments: "whole" | "connected";
+    release: PeelRelease;
+    segments: PeelSegments;
   };
   sound: { enabled: boolean; volume: number };
   back: { color: string; gloss: number; roughness: number };
@@ -132,6 +138,11 @@ const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
 const DEFAULT_IMAGE_SRC = "/default-image.svg";
 const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
+const STUDIO_PEEL_PREFERENCES_KEY = "sticker-forge-peel-preferences-v1";
+const DEFAULT_PEEL_PREFERENCES: PeelPreferences = {
+  release: "snap",
+  segments: "whole",
+};
 const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
 const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
 const DEFAULT_RICH_TEXT = {
@@ -225,6 +236,13 @@ const UI = {
     wind: "风动",
     volume: "撕开音量",
     peelPieces: "撕片模式",
+    releaseBehavior: "松开后的行为",
+    globalPeelPreferences: "全局撕片偏好",
+    applyGlobalPeelPreferences: "应用全局偏好到当前工作区",
+    studioOverride: "当前工作区覆盖项",
+    releaseSnap: "达到阈值后完整撕下",
+    releaseStay: "停留在当前位置",
+    releaseReset: "松手后回弹",
     wholeSticker: "整张贴纸",
     connectedPieces: "按实际连接分片",
     material: "材质与阴影",
@@ -306,6 +324,13 @@ const UI = {
     wind: "Wind",
     volume: "Peel volume",
     peelPieces: "Peel pieces",
+    releaseBehavior: "On release",
+    globalPeelPreferences: "Global peel preferences",
+    applyGlobalPeelPreferences: "Apply global preferences to this workspace",
+    studioOverride: "Workspace override",
+    releaseSnap: "Detach after threshold",
+    releaseStay: "Keep current position",
+    releaseReset: "Snap back on release",
     wholeSticker: "Whole sticker",
     connectedPieces: "Separate connected pieces",
     material: "Material & shadow",
@@ -339,7 +364,7 @@ const DEFAULT_SETTINGS: StudioSettings = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "stay",
+    release: "snap",
     segments: "whole",
   },
   sound: { enabled: true, volume: 0.68 },
@@ -348,6 +373,43 @@ const DEFAULT_SETTINGS: StudioSettings = {
   wind: 0.25,
   quality: "high",
 };
+
+function isPeelRelease(value: unknown): value is PeelRelease {
+  return value === "reset" || value === "stay" || value === "snap";
+}
+
+function isPeelSegments(value: unknown): value is PeelSegments {
+  return value === "whole" || value === "connected";
+}
+
+function readPeelPreferences(): PeelPreferences {
+  if (typeof window === "undefined") return DEFAULT_PEEL_PREFERENCES;
+  try {
+    const stored = JSON.parse(
+      window.localStorage.getItem(STUDIO_PEEL_PREFERENCES_KEY) ?? "null",
+    ) as Partial<PeelPreferences> | null;
+    return {
+      release: isPeelRelease(stored?.release)
+        ? stored.release
+        : DEFAULT_PEEL_PREFERENCES.release,
+      segments: isPeelSegments(stored?.segments)
+        ? stored.segments
+        : DEFAULT_PEEL_PREFERENCES.segments,
+    };
+  } catch {
+    return DEFAULT_PEEL_PREFERENCES;
+  }
+}
+
+function withPeelPreferences(
+  settings: StudioSettings,
+  preferences: PeelPreferences,
+): StudioSettings {
+  return {
+    ...settings,
+    peel: { ...settings.peel, ...preferences },
+  };
+}
 
 function makeTextSource(
   text: string,
@@ -541,7 +603,6 @@ function studioSettingsFrom(options: StickerOptions): StudioSettings {
     peel: {
       ...DEFAULT_SETTINGS.peel,
       ...options.peel,
-      release: "stay",
     },
     sound: { ...DEFAULT_SETTINGS.sound, ...options.sound },
     back: { ...DEFAULT_SETTINGS.back, ...options.back },
@@ -854,6 +915,8 @@ export function StickerForgeStudio() {
   const [imageName, setImageName] = useState("");
   const [settings, setSettings] =
     useState<StudioSettings>(DEFAULT_SETTINGS);
+  const [peelPreferences, setPeelPreferences] =
+    useState<PeelPreferences>(DEFAULT_PEEL_PREFERENCES);
   const [locale, setLocale] = useState<Locale>("zh");
   const [isLanguageOpen, setIsLanguageOpen] = useState(false);
   const [draggingFile, setDraggingFile] = useState(false);
@@ -930,6 +993,14 @@ export function StickerForgeStudio() {
     if (stored === "zh" || stored === "en") {
       window.queueMicrotask(() => setLocale(stored));
     }
+  }, []);
+
+  useEffect(() => {
+    const preferences = readPeelPreferences();
+    const next = withPeelPreferences(settingsRef.current, preferences);
+    settingsRef.current = next;
+    setPeelPreferences(preferences);
+    setSettings(next);
   }, []);
 
   useEffect(() => {
@@ -1206,6 +1277,29 @@ export function StickerForgeStudio() {
     },
     [updateOptions],
   );
+
+  const updateGlobalPeelPreference = useCallback(
+    <K extends keyof PeelPreferences>(key: K, value: PeelPreferences[K]) => {
+      const next = { ...peelPreferences, [key]: value } as PeelPreferences;
+      setPeelPreferences(next);
+      try {
+        window.localStorage.setItem(
+          STUDIO_PEEL_PREFERENCES_KEY,
+          JSON.stringify(next),
+        );
+      } catch {
+        // The current workspace still works when browser storage is unavailable.
+      }
+    },
+    [peelPreferences],
+  );
+
+  const applyGlobalPeelPreferences = useCallback(() => {
+    updateSetting(
+      "peel",
+      { ...settingsRef.current.peel, ...peelPreferences },
+    );
+  }, [peelPreferences, updateSetting]);
 
   const clearPendingText = useCallback(() => {
     if (textTimerRef.current !== null) {
@@ -1852,6 +1946,10 @@ export function StickerForgeStudio() {
     setBackgroundRemoval({ phase: "idle" });
     setBackgroundParticles(null);
     controllerRef.current?.setBackgroundRemovalEffect(false);
+    const resetSettings = withPeelPreferences(
+      DEFAULT_SETTINGS,
+      peelPreferences,
+    );
     setText(DEFAULT_TEXT);
     setInkColor(DEFAULT_INK);
     setSourceMode("text");
@@ -1861,11 +1959,11 @@ export function StickerForgeStudio() {
     setEditorFontSize("28");
     setEditorLineHeightValue("1.2");
     setEditorAlign("center");
-    setSettings(DEFAULT_SETTINGS);
-    settingsRef.current = DEFAULT_SETTINGS;
+    setSettings(resetSettings);
+    settingsRef.current = resetSettings;
     setSourceMessage(t.resetDone);
     controllerRef.current?.reset();
-    controllerRef.current?.setOptions(DEFAULT_SETTINGS);
+    controllerRef.current?.setOptions(resetSettings);
     if (richEditorRef.current) {
       richEditorRef.current.innerHTML =
         '<div data-line-height="1.2" style="text-align:center;line-height:33.6px"><span style="color:#19191d;font-size:28px;font-weight:900">PEEL </span><span style="color:rgb(36, 126, 245);font-size:28px;font-weight:900">ME</span></div><div data-line-height="0.8" style="text-align:center;line-height:8px"><span style="color:#19191d;font-size:10px;font-weight:500">@cats_juice</span></div>';
@@ -2455,8 +2553,54 @@ export function StickerForgeStudio() {
 
             <div className="section-divider" />
             <div className="section-heading">
+              <h3>{t.globalPeelPreferences}</h3>
+              <span>Browser</span>
+            </div>
+            <div className="range-stack">
+              <label className="compact-select">
+                <span>{t.releaseBehavior}</span>
+                <select
+                  value={peelPreferences.release}
+                  onChange={(event) =>
+                    updateGlobalPeelPreference(
+                      "release",
+                      event.target.value as PeelRelease,
+                    )
+                  }
+                >
+                  <option value="snap">{t.releaseSnap}</option>
+                  <option value="stay">{t.releaseStay}</option>
+                  <option value="reset">{t.releaseReset}</option>
+                </select>
+              </label>
+              <label className="compact-select">
+                <span>{t.peelPieces}</span>
+                <select
+                  value={peelPreferences.segments}
+                  onChange={(event) =>
+                    updateGlobalPeelPreference(
+                      "segments",
+                      event.target.value as PeelSegments,
+                    )
+                  }
+                >
+                  <option value="whole">{t.wholeSticker}</option>
+                  <option value="connected">{t.connectedPieces}</option>
+                </select>
+              </label>
+              <button
+                className="preference-button"
+                type="button"
+                onClick={applyGlobalPeelPreferences}
+              >
+                {t.applyGlobalPeelPreferences}
+              </button>
+            </div>
+
+            <div className="section-divider" />
+            <div className="section-heading">
               <h3>{t.peel}</h3>
-              <span>Peel physics</span>
+              <span>{t.studioOverride}</span>
             </div>
             <div className="range-stack">
               <RangeRow
@@ -2484,13 +2628,29 @@ export function StickerForgeStudio() {
                 }
               />
               <label className="compact-select">
+                <span>{t.releaseBehavior}</span>
+                <select
+                  value={settings.peel.release}
+                  onChange={(event) =>
+                    updateSetting("peel", {
+                      ...settings.peel,
+                      release: event.target.value as PeelRelease,
+                    })
+                  }
+                >
+                  <option value="snap">{t.releaseSnap}</option>
+                  <option value="stay">{t.releaseStay}</option>
+                  <option value="reset">{t.releaseReset}</option>
+                </select>
+              </label>
+              <label className="compact-select">
                 <span>{t.peelPieces}</span>
                 <select
                   value={settings.peel.segments}
                   onChange={(event) =>
                     updateSetting("peel", {
                       ...settings.peel,
-                      segments: event.target.value as "whole" | "connected",
+                      segments: event.target.value as PeelSegments,
                     })
                   }
                 >

@@ -129,6 +129,17 @@ type PreparedEntrance = {
 type EdgeHit = {
   local: THREE.Vector2;
   inward: THREE.Vector2;
+  componentId: number;
+};
+
+type ConnectedPiece = {
+  id: number;
+  mesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  residue: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  material: THREE.ShaderMaterial;
+  residueMaterial: THREE.ShaderMaterial;
+  depthMaterial: THREE.ShaderMaterial;
+  uniforms: Record<string, THREE.IUniform>;
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -168,15 +179,15 @@ class StickerRenderer implements StickerInstance {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 10);
   private readonly scene = new THREE.Scene();
-  private readonly uniforms: Record<string, THREE.IUniform>;
-  private readonly stickerMaterial: THREE.ShaderMaterial;
-  private readonly residueMaterial: THREE.ShaderMaterial;
+  private uniforms: Record<string, THREE.IUniform>;
+  private stickerMaterial: THREE.ShaderMaterial;
+  private residueMaterial: THREE.ShaderMaterial;
   private readonly peelAudio = new PeelAudioEngine();
-  private readonly peelShadowDepthMaterial: THREE.ShaderMaterial;
+  private peelShadowDepthMaterial: THREE.ShaderMaterial;
   private readonly groundShadowGeometry = new THREE.PlaneGeometry(1, 1);
   private readonly groundShadowMaterial: THREE.ShadowMaterial;
-  private readonly stickerMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
-  private readonly residueMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private stickerMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
+  private residueMesh: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly groundShadowMesh: THREE.Mesh<
     THREE.PlaneGeometry,
     THREE.ShadowMaterial
@@ -185,6 +196,12 @@ class StickerRenderer implements StickerInstance {
   private readonly peelShadowTarget = new THREE.Object3D();
   private geometry = new THREE.PlaneGeometry(1, 1, 2, 2);
   private texture: THREE.CanvasTexture | null = null;
+  private componentTexture: THREE.DataTexture | null = null;
+  private claimedTexture: THREE.DataTexture | null = null;
+  private claimedPixels = new Uint8Array();
+  private readonly connectedPieces = new Map<number, ConnectedPiece>();
+  private basePiece: ConnectedPiece | null = null;
+  private activeComponentId: number | null = null;
   private artwork: PreparedArtwork | null = null;
   private options: ResolvedStickerOptions;
   private source: StickerSource = DEFAULT_SOURCE;
@@ -317,22 +334,32 @@ class StickerRenderer implements StickerInstance {
       },
       uPreserveFrontColor: { value: 0 },
       uOpacity: { value: 1 },
+      uComponentMap: { value: null },
+      uClaimedMap: { value: null },
+      uComponentMode: { value: 0 },
+      uComponentId: { value: 0 },
     };
 
-    const stickerUniforms = {
-      ...THREE.UniformsUtils.clone(THREE.UniformsLib.lights),
-      ...this.uniforms,
-    };
+    const stickerUniforms = THREE.UniformsUtils.merge([
+      THREE.UniformsLib.lights,
+      this.uniforms,
+    ]);
     this.stickerMaterial = new THREE.ShaderMaterial({
       uniforms: stickerUniforms,
       vertexShader: stickerVertexShader,
       fragmentShader: stickerFragmentShader,
-      lights: true,
+      // The fragment shader provides its own directional lighting. Keeping
+      // Three's automatic light-uniform injection off also makes cloned
+      // segment materials independent from renderer light-state internals.
+      lights: false,
       side: THREE.DoubleSide,
       transparent: true,
       depthTest: true,
       depthWrite: true,
     });
+    // Keep the renderer state on the same complete uniform collection used by
+    // the visible material. Segment meshes clone this collection later.
+    this.uniforms = this.stickerMaterial.uniforms;
     this.stickerMaterial.alphaTest = 0.008;
     this.stickerMesh = new THREE.Mesh(this.geometry, this.stickerMaterial);
     this.stickerMesh.renderOrder = 20;
@@ -390,6 +417,15 @@ class StickerRenderer implements StickerInstance {
     this.scene.add(this.groundShadowMesh);
     this.scene.add(this.residueMesh);
     this.scene.add(this.stickerMesh);
+    this.basePiece = {
+      id: 0,
+      mesh: this.stickerMesh,
+      residue: this.residueMesh,
+      material: this.stickerMaterial,
+      residueMaterial: this.residueMaterial,
+      depthMaterial: this.peelShadowDepthMaterial,
+      uniforms: this.stickerMaterial.uniforms,
+    };
 
     const canvas = this.renderer.domElement;
     canvas.addEventListener("pointerdown", this.onPointerDown);
@@ -502,7 +538,12 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) return;
     const previousOutline = this.options.outline;
     const previousQuality = this.options.quality;
+    const previousSegments = this.options.peel.segments;
     this.options = resolveStickerOptions(this.options, patch);
+    if (this.options.peel.segments !== previousSegments) {
+      this.clearConnectedPieces();
+      this.updateComponentRenderingMode();
+    }
     this.applyOptionsToRenderer();
 
     if (patch.source) {
@@ -532,6 +573,7 @@ class StickerRenderer implements StickerInstance {
   }
 
   reset(): void {
+    if (this.connectedPieces.size) this.clearConnectedPieces();
     const activePointerId = this.pointerId;
     this.pointerId = null;
     this.state.dragging = false;
@@ -769,6 +811,9 @@ class StickerRenderer implements StickerInstance {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
 
     this.texture?.dispose();
+    this.clearConnectedPieces();
+    this.componentTexture?.dispose();
+    this.claimedTexture?.dispose();
     this.geometry.dispose();
     this.groundShadowGeometry.dispose();
     this.stickerMaterial.dispose();
@@ -808,6 +853,7 @@ class StickerRenderer implements StickerInstance {
     artwork: PreparedArtwork,
     nextTexture = this.createArtworkTexture(artwork),
   ) {
+    this.clearConnectedPieces();
     this.artwork = artwork;
     const previousTexture = this.texture;
     this.texture = nextTexture;
@@ -815,6 +861,37 @@ class StickerRenderer implements StickerInstance {
     this.uniforms.uPreparedMap.value = nextTexture;
     this.uniforms.uPreparedMix.value = 0;
     this.uniforms.uPreEntranceProgress.value = 0;
+    const componentPixels = new Uint8Array(artwork.width * artwork.height * 4);
+    this.claimedPixels = new Uint8Array(componentPixels.length);
+    for (let index = 0; index < artwork.componentLabels.length; index += 1) {
+      componentPixels[index * 4] = artwork.componentLabels[index];
+    }
+    this.componentTexture?.dispose();
+    this.claimedTexture?.dispose();
+    this.componentTexture = new THREE.DataTexture(
+      componentPixels,
+      artwork.width,
+      artwork.height,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    this.claimedTexture = new THREE.DataTexture(
+      this.claimedPixels,
+      artwork.width,
+      artwork.height,
+      THREE.RGBAFormat,
+      THREE.UnsignedByteType,
+    );
+    for (const texture of [this.componentTexture, this.claimedTexture]) {
+      texture.flipY = true;
+      texture.minFilter = THREE.NearestFilter;
+      texture.magFilter = THREE.NearestFilter;
+      texture.generateMipmaps = false;
+      texture.needsUpdate = true;
+    }
+    this.uniforms.uComponentMap.value = this.componentTexture;
+    this.uniforms.uClaimedMap.value = this.claimedTexture;
+    this.updateComponentRenderingMode();
     (this.uniforms.uTexel.value as THREE.Vector2).set(
       1 / artwork.width,
       1 / artwork.height,
@@ -828,6 +905,98 @@ class StickerRenderer implements StickerInstance {
       height: artwork.height,
       hasTransparency: artwork.hasTransparency,
     });
+  }
+
+  private updateComponentRenderingMode() {
+    const connected =
+      this.options.peel.segments === "connected" &&
+      (this.artwork?.components.length ?? 0) > 1;
+    if (!this.basePiece) return;
+    this.basePiece.uniforms.uComponentMode.value = connected ? 1 : 0;
+    this.basePiece.uniforms.uComponentId.value = 0;
+  }
+
+  private clearConnectedPieces() {
+    for (const piece of this.connectedPieces.values()) {
+      this.scene.remove(piece.mesh, piece.residue);
+      piece.material.dispose();
+      piece.residueMaterial.dispose();
+      piece.depthMaterial.dispose();
+    }
+    this.connectedPieces.clear();
+    this.claimedPixels.fill(0);
+    if (this.claimedTexture) this.claimedTexture.needsUpdate = true;
+    if (!this.basePiece) return;
+    this.stickerMesh = this.basePiece.mesh;
+    this.residueMesh = this.basePiece.residue;
+    this.stickerMaterial = this.basePiece.material;
+    this.residueMaterial = this.basePiece.residueMaterial;
+    this.peelShadowDepthMaterial = this.basePiece.depthMaterial;
+    this.uniforms = this.basePiece.uniforms;
+    this.activeComponentId = null;
+  }
+
+  private activateConnectedPiece(componentId: number) {
+    if (
+      this.options.peel.segments !== "connected" ||
+      !this.artwork ||
+      this.artwork.components.length < 2 ||
+      this.connectedPieces.has(componentId) ||
+      !this.basePiece
+    ) {
+      return false;
+    }
+    const uniforms = THREE.UniformsUtils.clone(this.basePiece.material.uniforms);
+    uniforms.uComponentMode.value = 2;
+    uniforms.uComponentId.value = componentId;
+    const material = this.basePiece.material.clone();
+    material.uniforms = uniforms;
+    const residueMaterial = this.basePiece.residueMaterial.clone();
+    residueMaterial.uniforms = uniforms;
+    const depthMaterial = this.basePiece.depthMaterial.clone();
+    depthMaterial.uniforms = uniforms;
+    const mesh = new THREE.Mesh(this.geometry, material);
+    mesh.rotation.z = THREE.MathUtils.degToRad(this.options.tilt);
+    mesh.renderOrder = 30 + this.connectedPieces.size;
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    mesh.customDepthMaterial = depthMaterial;
+    const residue = new THREE.Mesh(this.geometry, residueMaterial);
+    residue.position.z = -0.006;
+    residue.rotation.z = mesh.rotation.z;
+    residue.renderOrder = 20 + this.connectedPieces.size;
+    this.scene.add(residue, mesh);
+    const piece = {
+      id: componentId,
+      mesh,
+      residue,
+      material,
+      residueMaterial,
+      depthMaterial,
+      uniforms,
+    };
+    this.connectedPieces.set(componentId, piece);
+    for (let index = 0; index < this.artwork.componentLabels.length; index += 1) {
+      if (this.artwork.componentLabels[index] === componentId) {
+        this.claimedPixels[index * 4] = 255;
+      }
+    }
+    if (this.claimedTexture) this.claimedTexture.needsUpdate = true;
+    this.stickerMesh = mesh;
+    this.residueMesh = residue;
+    this.stickerMaterial = material;
+    this.residueMaterial = residueMaterial;
+    this.peelShadowDepthMaterial = depthMaterial;
+    this.uniforms = uniforms;
+    this.activeComponentId = componentId;
+    this.state = {
+      ready: true,
+      dragging: false,
+      progress: 0,
+      grabPoint: null,
+      pointer: null,
+    };
+    return true;
   }
 
   private updateMeshGeometry(aspect: number) {
@@ -872,6 +1041,22 @@ class StickerRenderer implements StickerInstance {
     this.geometry = nextGeometry;
     this.stickerMesh.geometry = nextGeometry;
     this.residueMesh.geometry = nextGeometry;
+    if (this.basePiece) {
+      this.basePiece.mesh.geometry = nextGeometry;
+      this.basePiece.residue.geometry = nextGeometry;
+      (this.basePiece.uniforms.uMeshSize.value as THREE.Vector2).set(
+        this.meshWidth,
+        this.meshHeight,
+      );
+    }
+    for (const piece of this.connectedPieces.values()) {
+      piece.mesh.geometry = nextGeometry;
+      piece.residue.geometry = nextGeometry;
+      (piece.uniforms.uMeshSize.value as THREE.Vector2).set(
+        this.meshWidth,
+        this.meshHeight,
+      );
+    }
     previousGeometry.dispose();
     (this.uniforms.uMeshSize.value as THREE.Vector2).set(
       this.meshWidth,
@@ -1207,15 +1392,26 @@ class StickerRenderer implements StickerInstance {
     if (gradient.lengthSq() < 0.008) gradient.set(-edgeLocal.x, -edgeLocal.y);
     if (gradient.lengthSq() < 0.0001) gradient.set(1, 0);
     gradient.normalize();
-    return { local: edgeLocal, inward: gradient };
+    return {
+      local: edgeLocal,
+      inward: gradient,
+      componentId: this.artwork.componentLabels[
+        nearestY * this.artwork.width + nearestX
+      ],
+    };
   }
 
   private projectionExtent(origin: THREE.Vector2, direction: THREE.Vector2) {
     if (!this.artwork) return Math.max(this.meshHeight * 0.35, this.meshWidth);
     let maximum = this.meshHeight * 0.35;
-    for (let index = 0; index < this.artwork.support.length; index += 2) {
-      const localX = (this.artwork.support[index] - 0.5) * this.meshWidth;
-      const localY = (0.5 - this.artwork.support[index + 1]) * this.meshHeight;
+    const support = this.activeComponentId
+      ? (this.artwork.components.find(
+          (component) => component.id === this.activeComponentId,
+        )?.support ?? this.artwork.support)
+      : this.artwork.support;
+    for (let index = 0; index < support.length; index += 2) {
+      const localX = (support[index] - 0.5) * this.meshWidth;
+      const localY = (0.5 - support[index + 1]) * this.meshHeight;
       maximum = Math.max(
         maximum,
         (localX - origin.x) * direction.x +
@@ -1237,6 +1433,13 @@ class StickerRenderer implements StickerInstance {
     const hit = this.hitEdge(local);
     if (!hit) {
       this.startInteractionHint();
+      return;
+    }
+    if (
+      this.options.peel.segments === "connected" &&
+      (this.artwork?.components.length ?? 0) > 1 &&
+      !this.activateConnectedPiece(hit.componentId)
+    ) {
       return;
     }
     this.interactionHintActive = false;

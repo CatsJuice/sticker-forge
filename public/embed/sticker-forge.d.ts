@@ -84,6 +84,8 @@ export interface StickerPeelOptions {
   maxAngle?: number;
   /** What happens after a pointer is released. */
   release?: "reset" | "stay" | "snap";
+  /** Treat disconnected opaque regions as individually peelable pieces. */
+  segments?: "whole" | "connected";
 }
 
 export interface StickerOptions {

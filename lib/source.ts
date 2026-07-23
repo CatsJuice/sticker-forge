@@ -16,8 +16,16 @@ export interface PreparedArtwork {
   exteriorAlpha: Uint8Array;
   /** Normalized left/right silhouette extremes for every occupied scanline. */
   support: Float32Array;
+  /** 4-connected opaque regions, numbered from 1. Zero is transparent. */
+  componentLabels: Uint8Array;
+  components: PreparedArtworkComponent[];
   /** Whether the decoded source image contained non-opaque pixels. */
   hasTransparency: boolean;
+}
+
+export interface PreparedArtworkComponent {
+  id: number;
+  support: Float32Array;
 }
 
 // The export workspace supports up to 260% zoom. A 2K source keeps generated
@@ -70,6 +78,59 @@ export function createExteriorAlphaMask(
   }
 
   return exterior;
+}
+
+function findConnectedComponents(
+  alpha: Uint8ClampedArray,
+  width: number,
+  height: number,
+) {
+  const labels = new Uint8Array(width * height);
+  const queue = new Int32Array(width * height);
+  const components: PreparedArtworkComponent[] = [];
+  const threshold = 0.1 * 255;
+  let nextId = 1;
+
+  for (let start = 0; start < labels.length; start += 1) {
+    if (labels[start] || alpha[start] < threshold || nextId > 255) continue;
+    const id = nextId++;
+    let head = 0;
+    let tail = 0;
+    queue[tail++] = start;
+    labels[start] = id;
+    const rowBounds = new Int32Array(height * 2);
+    rowBounds.fill(-1);
+    while (head < tail) {
+      const index = queue[head++];
+      const x = index % width;
+      const y = Math.floor(index / width);
+      const bound = y * 2;
+      if (rowBounds[bound] < 0 || x < rowBounds[bound]) rowBounds[bound] = x;
+      if (x > rowBounds[bound + 1]) rowBounds[bound + 1] = x;
+      const visit = (candidate: number) => {
+        if (labels[candidate] || alpha[candidate] < threshold) return;
+        labels[candidate] = id;
+        queue[tail++] = candidate;
+      };
+      if (x > 0) visit(index - 1);
+      if (x + 1 < width) visit(index + 1);
+      if (y > 0) visit(index - width);
+      if (y + 1 < height) visit(index + width);
+    }
+    const support: number[] = [];
+    for (let y = 0; y < height; y += 1) {
+      const left = rowBounds[y * 2];
+      const right = rowBounds[y * 2 + 1];
+      if (left < 0) continue;
+      const normalizedY = y / Math.max(height - 1, 1);
+      support.push(left / Math.max(width - 1, 1), normalizedY);
+      if (right !== left) {
+        support.push(right / Math.max(width - 1, 1), normalizedY);
+      }
+    }
+    components.push({ id, support: new Float32Array(support) });
+  }
+  return { labels, components };
 }
 
 function parseSvgNumber(value: string | null): number | null {
@@ -634,6 +695,7 @@ export async function prepareArtwork(
       support.push(right / Math.max(canvas.width - 1, 1), normalizedY);
     }
   }
+  const connected = findConnectedComponents(alpha, canvas.width, canvas.height);
   return {
     canvas,
     width: canvas.width,
@@ -642,6 +704,8 @@ export async function prepareArtwork(
     alpha,
     exteriorAlpha: createExteriorAlphaMask(alpha, canvas.width, canvas.height),
     support: new Float32Array(support),
+    componentLabels: connected.labels,
+    components: connected.components,
     hasTransparency: rendered.hasTransparency,
   };
 }

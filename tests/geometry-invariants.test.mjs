@@ -627,7 +627,8 @@ test("recomputes the peel extent for the live drag direction", async () => {
   ]);
 
   assert.match(source, /support: new Float32Array\(support\)/);
-  assert.match(renderer, /this\.artwork\.support\.length/);
+  assert.match(renderer, /const support = this\.activeComponentId/);
+  assert.match(renderer, /this\.artwork\.support/);
   assert.match(
     renderer,
     /this\.grabExtent = this\.projectionExtent\(\s*this\.grabOrigin,\s*this\.activeDirection,/,
@@ -672,7 +673,7 @@ test("snaps a sufficiently peeled sticker to full detachment on release", async 
     readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
   ]);
 
-  assert.match(types, /release: "snap" as const/);
+  assert.match(types, /release: "stay" as const/);
   assert.match(renderer, /SNAP_DETACH_THRESHOLD = 0\.74/);
   assert.match(
     renderer,
@@ -684,6 +685,20 @@ test("snaps a sufficiently peeled sticker to full detachment on release", async 
   );
   assert.match(renderer, /if \(shouldDetach\) \{\s*this\.setCreaseDepth\(this\.grabExtent\)/);
   assert.match(renderer, /release === "snap" && !shouldDetach/);
+});
+
+test("can peel disconnected artwork regions as independent pieces", async () => {
+  const [renderer, source, types] = await Promise.all([
+    readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/source.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(source, /findConnectedComponents/);
+  assert.match(source, /componentLabels/);
+  assert.match(types, /segments\?: "whole" \| "connected"/);
+  assert.match(renderer, /activateConnectedPiece/);
+  assert.match(renderer, /this\.connectedPieces\.set\(componentId, piece\)/);
 });
 
 test("continues moving a sticker after the peel reaches full progress", async () => {
@@ -923,7 +938,7 @@ test("renders editor line height against each line's actual font size", async ()
   assert.match(studio, /anchorElement\.closest<HTMLElement>\("div, p"\)/);
 });
 
-test("projects shadows in the sticker material without a receiver seam", async () => {
+test("projects shadows onto the ground without a receiver seam", async () => {
   const [shader, renderer] = await Promise.all([
     readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
@@ -948,10 +963,11 @@ test("projects shadows in the sticker material without a receiver seam", async (
   assert.match(shader, /float flutterEnvelope = sin\(normalizedPeel \* 3\.14159265\)/);
   assert.match(shader, /curved\.xy \+= tangent \* windDisplacement \* 0\.04/);
   assert.match(shader, /curved\.xy \+= direction \* windDisplacement \* 0\.01/);
-  assert.match(shader, /float projectedShadow = \(1\.0 - getShadowMask\(\)\) \* vAdhered/);
+  assert.doesNotMatch(shader, /getShadowMask\(\)/);
   assert.match(shader, /float frontDiffuse = mix\(1\.0, 0\.76 \+ 0\.24 \* normalLight, frontDeformation\)/);
   assert.match(shader, /#include <colorspace_fragment>/);
   assert.match(renderer, /renderer\.shadowMap\.enabled = true/);
+  assert.match(renderer, /lights: false/);
   assert.match(renderer, /stickerMesh\.castShadow = true/);
   assert.match(renderer, /stickerMesh\.receiveShadow = true/);
   assert.match(renderer, /groundShadowMesh\.receiveShadow = true/);

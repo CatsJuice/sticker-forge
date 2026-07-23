@@ -115,7 +115,6 @@ const deformation = /* glsl */ `
 export const stickerVertexShader = /* glsl */ `
   ${deformation}
   #include <common>
-  #include <shadowmap_pars_vertex>
 
   varying vec2 vUv;
   varying vec3 vNormalView;
@@ -154,9 +153,6 @@ export const stickerVertexShader = /* glsl */ `
     vec4 viewPosition = modelViewMatrix * vec4(deformed, 1.0);
     vViewPosition = viewPosition.xyz;
     vNormalView = normalize(normalMatrix * localNormal);
-    vec3 transformedNormal = vNormalView;
-    vec4 worldPosition = modelMatrix * vec4(deformed, 1.0);
-    #include <shadowmap_vertex>
     gl_Position = projectionMatrix * viewPosition;
   }
 `;
@@ -251,6 +247,10 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uTime;
   uniform float uPreserveFrontColor;
   uniform float uOpacity;
+  uniform sampler2D uComponentMap;
+  uniform sampler2D uClaimedMap;
+  uniform float uComponentMode;
+  uniform float uComponentId;
 
   varying vec2 vUv;
   varying vec3 vNormalView;
@@ -261,9 +261,6 @@ export const stickerFragmentShader = /* glsl */ `
 
   #include <common>
   #include <packing>
-  #include <lights_pars_begin>
-  #include <shadowmap_pars_fragment>
-  #include <shadowmask_pars_fragment>
 
   float hash21(vec2 point) {
     point = fract(point * vec2(123.34, 456.21));
@@ -306,7 +303,17 @@ export const stickerFragmentShader = /* glsl */ `
       * (1.0 - smoothstep(0.08, 0.72, sampledAlpha));
   }
 
+  bool showComponent(vec2 uv) {
+    if (uComponentMode < 0.5) return true;
+    float label = texture2D(uComponentMap, uv).r * 255.0;
+    if (uComponentMode < 1.5) {
+      return texture2D(uClaimedMap, uv).r < 0.5;
+    }
+    return abs(label - uComponentId) < 0.5;
+  }
+
   void main() {
+    if (!showComponent(vUv)) discard;
     vec2 surfaceUv = vUv;
     if (uBackgroundRemovalDistortion > 0.5 && uEntranceSweep >= 0.0) {
       vec2 scanDirection = abs(uEntranceAxis.x) > 0.5
@@ -411,12 +418,6 @@ export const stickerFragmentShader = /* glsl */ `
 
     vec3 color = mix(backColor, frontColor, frontMix);
 
-    float projectedShadow = (1.0 - getShadowMask()) * vAdhered;
-    color = mix(
-      color,
-      uShadowColor,
-      clamp(projectedShadow * uShadowOpacity, 0.0, 1.0)
-    );
 
     if (uEntranceSweep >= 0.0) {
       float sweepCoordinate = abs(uEntranceAxis.x) > 0.5
@@ -527,6 +528,10 @@ export const residueVertexShader = /* glsl */ `
 export const residueFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
   uniform float uOpacity;
+  uniform sampler2D uComponentMap;
+  uniform sampler2D uClaimedMap;
+  uniform float uComponentMode;
+  uniform float uComponentId;
 
   varying vec2 vResidueUv;
   varying float vResidueReveal;
@@ -538,6 +543,13 @@ export const residueFragmentShader = /* glsl */ `
   }
 
   void main() {
+    if (uComponentMode >= 0.5) {
+      float label = texture2D(uComponentMap, vResidueUv).r * 255.0;
+      bool show = uComponentMode < 1.5
+        ? texture2D(uClaimedMap, vResidueUv).r < 0.5
+        : abs(label - uComponentId) < 0.5;
+      if (!show) discard;
+    }
     float artworkAlpha = texture2D(uMap, vResidueUv).a;
     if (artworkAlpha < 0.1 || vResidueReveal < 0.001) discard;
 
@@ -562,9 +574,20 @@ export const peelShadowDepthVertexShader = /* glsl */ `
 
 export const peelShadowDepthFragmentShader = /* glsl */ `
   uniform sampler2D uMap;
+  uniform sampler2D uComponentMap;
+  uniform sampler2D uClaimedMap;
+  uniform float uComponentMode;
+  uniform float uComponentId;
   varying vec2 vDepthUv;
 
   void main() {
+    if (uComponentMode >= 0.5) {
+      float label = texture2D(uComponentMap, vDepthUv).r * 255.0;
+      bool show = uComponentMode < 1.5
+        ? texture2D(uClaimedMap, vDepthUv).r < 0.5
+        : abs(label - uComponentId) < 0.5;
+      if (!show) discard;
+    }
     float artworkAlpha = texture2D(uMap, vDepthUv).a;
     if (artworkAlpha < 0.04) discard;
     gl_FragColor = vec4(1.0);

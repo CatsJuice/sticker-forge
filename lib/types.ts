@@ -76,6 +76,8 @@ export interface StickerPeelOptions {
   /** Maximum curl angle in radians; degree values are also accepted when > 2π. */
   maxAngle?: number;
   release?: "reset" | "stay" | "snap";
+  /** Treat disconnected opaque regions as individually peelable pieces. */
+  segments?: "whole" | "connected";
 }
 
 export interface StickerOptions {
@@ -160,7 +162,8 @@ export const DEFAULT_STICKER_OPTIONS = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "snap" as const,
+    release: "stay" as const,
+    segments: "whole" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
   sound: { src: "", volume: 0.7, enabled: true },

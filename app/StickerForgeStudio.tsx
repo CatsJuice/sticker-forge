@@ -116,7 +116,8 @@ type StudioSettings = {
     stiffness: number;
     grabWidth: number;
     maxAngle: number;
-    release: "snap";
+    release: "stay";
+    segments: "whole" | "connected";
   };
   sound: { enabled: boolean; volume: number };
   back: { color: string; gloss: number; roughness: number };
@@ -223,6 +224,9 @@ const UI = {
     stiffness: "贴纸硬度",
     wind: "风动",
     volume: "撕开音量",
+    peelPieces: "撕片模式",
+    wholeSticker: "整张贴纸",
+    connectedPieces: "按实际连接分片",
     material: "材质与阴影",
     shadowOpacity: "阴影强度",
     shadowBlur: "阴影柔度",
@@ -301,6 +305,9 @@ const UI = {
     stiffness: "Sticker stiffness",
     wind: "Wind",
     volume: "Peel volume",
+    peelPieces: "Peel pieces",
+    wholeSticker: "Whole sticker",
+    connectedPieces: "Separate connected pieces",
     material: "Material & shadow",
     shadowOpacity: "Shadow opacity",
     shadowBlur: "Shadow softness",
@@ -332,7 +339,8 @@ const DEFAULT_SETTINGS: StudioSettings = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
-    release: "snap",
+    release: "stay",
+    segments: "whole",
   },
   sound: { enabled: true, volume: 0.68 },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
@@ -533,7 +541,7 @@ function studioSettingsFrom(options: StickerOptions): StudioSettings {
     peel: {
       ...DEFAULT_SETTINGS.peel,
       ...options.peel,
-      release: "snap",
+      release: "stay",
     },
     sound: { ...DEFAULT_SETTINGS.sound, ...options.sound },
     back: { ...DEFAULT_SETTINGS.back, ...options.back },
@@ -2475,6 +2483,21 @@ export function StickerForgeStudio() {
                   updateSetting("peel", { ...settings.peel, stiffness })
                 }
               />
+              <label className="compact-select">
+                <span>{t.peelPieces}</span>
+                <select
+                  value={settings.peel.segments}
+                  onChange={(event) =>
+                    updateSetting("peel", {
+                      ...settings.peel,
+                      segments: event.target.value as "whole" | "connected",
+                    })
+                  }
+                >
+                  <option value="whole">{t.wholeSticker}</option>
+                  <option value="connected">{t.connectedPieces}</option>
+                </select>
+              </label>
               <RangeRow
                 id="wind"
                 label={t.wind}

@@ -6,12 +6,12 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "dev": "cross-env WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
     "typecheck": "tsc --noEmit --incremental false",
     "build:lib": "vite build --config vite.lib.config.ts",
-    "build:pages": "GITHUB_PAGES=true NEXT_PUBLIC_SITE_URL=https://sticker.oooo.so next build --webpack",
-    "build": "npm run typecheck && npm run build:lib && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
-    "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "build:pages": "cross-env GITHUB_PAGES=true NEXT_PUBLIC_SITE_URL=https://sticker.oooo.so next build --webpack",
+    "build": "npm run typecheck && npm run build:lib && cross-env WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "start": "cross-env WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate"
@@ -43,13 +43,14 @@
     "@types/three": "^0.185.1",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
-    "drizzle-kit": "0.31.10",
+    "cross-env": "^10.1.0",
+    "drizzle-kit": "1.0.0-rc.4",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "react-server-dom-webpack": "19.2.6",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
-    "vinext": "0.0.50",
+    "vinext": "1.0.0-beta.3",
     "vite": "8.0.13",
     "wrangler": "4.92.0"
   },

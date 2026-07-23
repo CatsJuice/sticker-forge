@@ -56,6 +56,8 @@ type ManualState = "idle" | "armed" | "capturing" | "recorded";
 type RecordingPhase = "idle" | "waiting" | "peeling" | "finishing";
 type TransformState = { x: number; y: number; zoom: number };
 type MotionAnchor = keyof StickerPlaybackMotion;
+type AspectRatioPreset = "free" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
+type ExportScale = 1 | 2 | 3;
 type VisualMotion = {
   x: number;
   y: number;
@@ -80,6 +82,15 @@ const MOV_FRAME_RATES = [24, 30, 60] as const;
 const DEFAULT_GIF_FRAME_RATE = 20;
 const DEFAULT_APNG_FRAME_RATE = 30;
 const DEFAULT_MOV_FRAME_RATE = 30;
+const ASPECT_RATIO_PRESETS = [
+  ["free", null],
+  ["1:1", 1],
+  ["4:3", 4 / 3],
+  ["3:4", 3 / 4],
+  ["16:9", 16 / 9],
+  ["9:16", 9 / 16],
+] as const satisfies readonly (readonly [AspectRatioPreset, number | null])[];
+const EXPORT_SCALES = [1, 2, 3] as const satisfies readonly ExportScale[];
 const MIN_SPEED = 0.25;
 const MAX_SPEED = 4;
 const SPEED_STEP = 0.05;
@@ -109,6 +120,9 @@ const COPY = {
     static: "静态",
     animated: "动态",
     embed: "嵌入代码",
+    ratio: "比例",
+    freeRatio: "自由",
+    quality: "清晰度",
     transparent: "透明画布",
     moveHint: "滚轮缩放 · 拖拽空白处平移 · 交互模式按住 Shift 平移",
     zoomOut: "缩小",
@@ -160,6 +174,9 @@ const COPY = {
     static: "Still",
     animated: "Motion",
     embed: "Embed code",
+    ratio: "Ratio",
+    freeRatio: "Free",
+    quality: "Quality",
     transparent: "Transparent canvas",
     moveHint: "Wheel to zoom · drag empty space to pan · hold Shift in interactive modes",
     zoomOut: "Zoom out",
@@ -345,25 +362,76 @@ function drawCompositedFrame(
   height: number,
   transform: TransformState,
   visual: VisualMotion = EMPTY_MOTION,
+  outputScale = 1,
 ) {
-  if (destination.width !== width) destination.width = width;
-  if (destination.height !== height) destination.height = height;
+  const outputWidth = Math.max(2, Math.round(width * outputScale));
+  const outputHeight = Math.max(2, Math.round(height * outputScale));
+  if (destination.width !== outputWidth) destination.width = outputWidth;
+  if (destination.height !== outputHeight) destination.height = outputHeight;
   const context = destination.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Canvas 2D is unavailable.");
-  context.clearRect(0, 0, width, height);
+  context.clearRect(0, 0, outputWidth, outputHeight);
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
   context.save();
   context.globalAlpha = visual.opacity;
   context.translate(
-    width / 2 + transform.x + visual.x,
-    height / 2 + transform.y + visual.y,
+    outputWidth / 2 + (transform.x + visual.x) * outputScale,
+    outputHeight / 2 + (transform.y + visual.y) * outputScale,
   );
   context.rotate(visual.rotation);
   context.scale(transform.zoom * visual.scale, transform.zoom * visual.scale);
-  context.drawImage(source, -width / 2, -height / 2, width, height);
+  context.drawImage(
+    source,
+    -outputWidth / 2,
+    -outputHeight / 2,
+    outputWidth,
+    outputHeight,
+  );
   context.restore();
   return context;
+}
+
+function scaleExportFrames(frames: ExportFrame[], outputScale: ExportScale) {
+  if (outputScale === 1) return frames;
+  const source = document.createElement("canvas");
+  const destination = document.createElement("canvas");
+  const sourceContext = source.getContext("2d");
+  const destinationContext = destination.getContext("2d", {
+    willReadFrequently: true,
+  });
+  if (!sourceContext || !destinationContext) {
+    throw new Error("Canvas 2D is unavailable.");
+  }
+  return frames.map((frame) => {
+    source.width = frame.width;
+    source.height = frame.height;
+    sourceContext.putImageData(
+      new ImageData(
+        new Uint8ClampedArray(frame.rgba),
+        frame.width,
+        frame.height,
+      ),
+      0,
+      0,
+    );
+    const width = frame.width * outputScale;
+    const height = frame.height * outputScale;
+    destination.width = width;
+    destination.height = height;
+    destinationContext.imageSmoothingEnabled = true;
+    destinationContext.imageSmoothingQuality = "high";
+    destinationContext.clearRect(0, 0, width, height);
+    destinationContext.drawImage(source, 0, 0, width, height);
+    return {
+      rgba: new Uint8ClampedArray(
+        destinationContext.getImageData(0, 0, width, height).data,
+      ),
+      width,
+      height,
+      durationMs: frame.durationMs,
+    };
+  });
 }
 
 function BezierCurveEditor({
@@ -767,6 +835,9 @@ export function ExportDialog({
     useState<RecordingPhase>("idle");
   const [recordedFrames, setRecordedFrames] = useState<ExportFrame[]>([]);
   const [size, setSize] = useState({ width: 720, height: 480 });
+  const [aspectRatioPreset, setAspectRatioPreset] =
+    useState<AspectRatioPreset>("free");
+  const [exportScale, setExportScale] = useState<ExportScale>(1);
   const [transform, setTransform] = useState<TransformState>({
     x: 0,
     y: 0,
@@ -810,6 +881,13 @@ export function ExportDialog({
     if (easingPreset === "custom") return bezier;
     return [0.25, 0.1, 0.25, 1];
   }, [bezier, easingPreset]);
+
+  const aspectRatio = useMemo(
+    () =>
+      ASPECT_RATIO_PRESETS.find(([preset]) => preset === aspectRatioPreset)?.[1] ??
+      null,
+    [aspectRatioPreset],
+  );
 
   const setTransformSynced = useCallback((next: TransformState) => {
     transformRef.current = next;
@@ -901,8 +979,14 @@ export function ExportDialog({
     const updateSize = () => {
       const rect = preview.getBoundingClientRect();
       const next = {
-        width: Math.max(240, Math.round(rect.width / 2) * 2),
-        height: Math.max(180, Math.round(rect.height / 2) * 2),
+        width: Math.max(
+          aspectRatio === null ? 240 : 2,
+          Math.round(rect.width / 2) * 2,
+        ),
+        height: Math.max(
+          aspectRatio === null ? 180 : 2,
+          Math.round(rect.height / 2) * 2,
+        ),
       };
       if (next.width === previous.width && next.height === previous.height) return;
       previous = next;
@@ -921,7 +1005,7 @@ export function ExportDialog({
     return () => observer.disconnect();
     // The observer owns subsequent size updates.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, setManualStateSynced, setRecordedFramesSynced]);
+  }, [aspectRatio, mode, setManualStateSynced, setRecordedFramesSynced]);
 
   useEffect(() => {
     if (mode === "embed") return;
@@ -1504,7 +1588,10 @@ export function ExportDialog({
   } as CSSProperties;
 
   const composeCurrent = useCallback(
-    (visual: VisualMotion = EMPTY_MOTION) => {
+    (
+      visual: VisualMotion = EMPTY_MOTION,
+      outputScale: ExportScale = 1,
+    ) => {
       const canvas = composeCanvasRef.current ?? document.createElement("canvas");
       composeCanvasRef.current = canvas;
       const context = drawCompositedFrame(
@@ -1514,6 +1601,7 @@ export function ExportDialog({
         size.height,
         transformRef.current,
         visual,
+        outputScale,
       );
       return { canvas, context };
     },
@@ -1524,13 +1612,19 @@ export function ExportDialog({
     setBusy("png");
     setStatus(t.exporting);
     try {
-      const { canvas, context } = composeCurrent();
-      const imageData = context.getImageData(0, 0, size.width, size.height);
+      controllerRef.current?.setRenderScale(
+        Math.max(1, transformRef.current.zoom * exportScale),
+      );
+      await nextFrame();
+      const { canvas, context } = composeCurrent(EMPTY_MOTION, exportScale);
+      const outputWidth = size.width * exportScale;
+      const outputHeight = size.height * exportScale;
+      const imageData = context.getImageData(0, 0, outputWidth, outputHeight);
       imageData.data.set(
         repairTransparentEdgeColors(
           imageData.data,
-          size.width,
-          size.height,
+          outputWidth,
+          outputHeight,
         ),
       );
       context.putImageData(imageData, 0, 0);
@@ -1539,6 +1633,9 @@ export function ExportDialog({
     } catch {
       setStatus(t.exportFailed);
     } finally {
+      controllerRef.current?.setRenderScale(
+        Math.max(1, transformRef.current.zoom),
+      );
       setBusy(null);
     }
   };
@@ -1562,26 +1659,30 @@ export function ExportDialog({
       } else {
         controllerRef.current?.setEntranceProgress(state.entranceProgress);
       }
-      const { context } = composeCurrent(state.visual);
+      const { context } = composeCurrent(state.visual, exportScale);
+      const outputWidth = size.width * exportScale;
+      const outputHeight = size.height * exportScale;
       frames.push({
         rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, size.width, size.height).data,
+          context.getImageData(0, 0, outputWidth, outputHeight).data,
         ),
-        width: size.width,
-        height: size.height,
+        width: outputWidth,
+        height: outputHeight,
         durationMs: frameDuration,
       });
       if (index % 4 === 3) await nextFrame();
     }
     controllerRef.current?.setPeelProgress(0, motion);
     if (playbackInterval > 0) {
-      const { context } = composeCurrent();
+      const { context } = composeCurrent(EMPTY_MOTION, exportScale);
+      const outputWidth = size.width * exportScale;
+      const outputHeight = size.height * exportScale;
       frames.push({
         rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, size.width, size.height).data,
+          context.getImageData(0, 0, outputWidth, outputHeight).data,
         ),
-        width: size.width,
-        height: size.height,
+        width: outputWidth,
+        height: outputHeight,
         durationMs: frameDuration,
       });
     }
@@ -1589,7 +1690,10 @@ export function ExportDialog({
   };
 
   const prepareRecordedFrames = async (frameRate: number) => {
-    return resampleExportFrames(recordedFramesRef.current, frameRate);
+    return scaleExportFrames(
+      resampleExportFrames(recordedFramesRef.current, frameRate),
+      exportScale,
+    );
   };
 
   const exportAnimation = async (
@@ -1603,6 +1707,12 @@ export function ExportDialog({
     setBusy(format);
     setStatus(t.exporting);
     try {
+      if (animationMethod === "automatic") {
+        controllerRef.current?.setRenderScale(
+          Math.max(1, transformRef.current.zoom * exportScale),
+        );
+        await nextFrame();
+      }
       const animationFrames =
         animationMethod === "automatic"
           ? await prepareAutomaticFrames(frameRate)
@@ -1662,6 +1772,9 @@ export function ExportDialog({
       console.error("Sticker export failed.", error);
       setStatus(t.exportFailed);
     } finally {
+      controllerRef.current?.setRenderScale(
+        Math.max(1, transformRef.current.zoom),
+      );
       setBusy(null);
     }
   };
@@ -1776,32 +1889,72 @@ export function ExportDialog({
           </button>
         </header>
 
-        <div
-          className="export-mode-tabs"
-          role="tablist"
-          aria-label={t.title}
-          data-mode={mode}
-        >
-          <span className="export-mode-slider" aria-hidden="true" />
-          {(
-            [
-              ["static", t.static, faImage],
-              ["animated", t.animated, faFilm],
-              ["embed", t.embed, faCode],
-            ] as const
-          ).map(([value, label, icon]) => (
-            <button
-              key={value}
-              type="button"
-              role="tab"
-              aria-selected={mode === value}
-              data-active={mode === value}
-              onClick={() => switchMode(value)}
-            >
-              <FontAwesomeIcon icon={icon} />
-              {label}
-            </button>
-          ))}
+        <div className="export-toolbar">
+          <div
+            className="export-mode-tabs"
+            role="tablist"
+            aria-label={t.title}
+            data-mode={mode}
+          >
+            <span className="export-mode-slider" aria-hidden="true" />
+            {(
+              [
+                ["static", t.static, faImage],
+                ["animated", t.animated, faFilm],
+                ["embed", t.embed, faCode],
+              ] as const
+            ).map(([value, label, icon]) => (
+              <button
+                key={value}
+                type="button"
+                role="tab"
+                aria-selected={mode === value}
+                data-active={mode === value}
+                onClick={() => switchMode(value)}
+              >
+                <FontAwesomeIcon icon={icon} />
+                {label}
+              </button>
+            ))}
+          </div>
+          {mode !== "embed" ? (
+            <div className="export-output-controls">
+              <label className="export-output-select">
+                <span>{t.ratio}</span>
+                <select
+                  value={aspectRatioPreset}
+                  disabled={Boolean(busy)}
+                  onChange={(event) =>
+                    setAspectRatioPreset(
+                      event.target.value as AspectRatioPreset,
+                    )
+                  }
+                >
+                  {ASPECT_RATIO_PRESETS.map(([preset]) => (
+                    <option key={preset} value={preset}>
+                      {preset === "free" ? t.freeRatio : preset}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="export-output-select">
+                <span>{t.quality}</span>
+                <select
+                  value={exportScale}
+                  disabled={Boolean(busy)}
+                  onChange={(event) =>
+                    setExportScale(Number(event.target.value) as ExportScale)
+                  }
+                >
+                  {EXPORT_SCALES.map((scale) => (
+                    <option key={scale} value={scale}>
+                      x{scale}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          ) : null}
         </div>
 
         <div className="export-dialog-body">
@@ -1817,16 +1970,25 @@ export function ExportDialog({
             </div>
           ) : (
             <>
-              <div
-                ref={previewRef}
-                className="export-canvas-frame"
-                data-playback={manualState === "recorded"}
-                onPointerDownCapture={onPreviewPointerDown}
-                onPointerMove={onPreviewPointerMove}
-                onPointerUp={onPreviewPointerUp}
-                onPointerCancel={onPreviewPointerUp}
-                onWheel={onPreviewWheel}
-              >
+              <div className="export-canvas-slot">
+                <div
+                  ref={previewRef}
+                  className="export-canvas-frame"
+                  data-playback={manualState === "recorded"}
+                  data-aspect-locked={aspectRatio !== null}
+                  style={
+                    aspectRatio === null
+                      ? undefined
+                      : ({
+                          "--export-aspect-ratio": aspectRatio,
+                        } as CSSProperties)
+                  }
+                  onPointerDownCapture={onPreviewPointerDown}
+                  onPointerMove={onPreviewPointerMove}
+                  onPointerUp={onPreviewPointerUp}
+                  onPointerCancel={onPreviewPointerUp}
+                  onWheel={onPreviewWheel}
+                >
                 <div className="export-pixel-size">
                   <span>{size.width} × {size.height} px</span>
                   <small>{t.transparent}</small>
@@ -1878,9 +2040,9 @@ export function ExportDialog({
                     ))}
                   </div>
                 ) : null}
-                <span className="export-guide export-guide-x" data-visible={snapping.x} />
-                <span className="export-guide export-guide-y" data-visible={snapping.y} />
-                <div className="export-canvas-tools">
+                  <span className="export-guide export-guide-x" data-visible={snapping.x} />
+                  <span className="export-guide export-guide-y" data-visible={snapping.y} />
+                  <div className="export-canvas-tools">
                   <button
                     type="button"
                     aria-label={t.zoomOut}
@@ -1914,6 +2076,7 @@ export function ExportDialog({
                   <span>{t.moveHint}</span>
                   <strong aria-live="polite">{recordingTip || "\u00a0"}</strong>
                 </p>
+              </div>
               </div>
 
               {mode === "animated" ? (

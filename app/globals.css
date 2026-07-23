@@ -1462,17 +1462,99 @@ body {
   height: 13px;
 }
 
-.export-mode-tabs {
+.export-toolbar {
   position: relative;
   z-index: 10;
-  width: max-content;
   margin: 0 22px 12px;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.export-mode-tabs {
+  position: relative;
+  z-index: 1;
+  width: max-content;
   padding: 3px;
   display: grid;
   grid-template-columns: repeat(3, minmax(112px, 1fr));
   gap: 3px;
   border-radius: 13px;
   background: rgba(30, 31, 36, 0.065);
+}
+
+.export-output-controls {
+  display: flex;
+  align-items: stretch;
+  gap: 7px;
+}
+
+.export-output-select {
+  position: relative;
+  min-width: 84px;
+  padding: 4px 25px 4px 9px;
+  display: grid;
+  align-content: center;
+  gap: 1px;
+  border: 1px solid rgba(23, 23, 27, 0.09);
+  border-radius: 11px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.export-output-select > span {
+  position: relative;
+  z-index: 1;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1;
+  font-weight: 720;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.export-output-select select {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 14px 25px 2px 9px;
+  border: 0;
+  outline: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 720;
+  cursor: pointer;
+  appearance: none;
+}
+
+.export-output-select::after {
+  position: absolute;
+  z-index: 3;
+  right: 9px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid #77767d;
+  border-bottom: 1.5px solid #77767d;
+  content: "";
+  pointer-events: none;
+  transform: translateY(-70%) rotate(45deg);
+}
+
+.export-output-select:focus-within {
+  border-color: rgba(36, 126, 245, 0.48);
+  box-shadow: 0 0 0 3px rgba(36, 126, 245, 0.1);
+}
+
+.export-output-select:has(select:disabled) {
+  opacity: 0.48;
 }
 
 .export-mode-slider {
@@ -1548,11 +1630,22 @@ body {
   overflow: hidden;
 }
 
-.export-canvas-frame {
-  position: relative;
+.export-canvas-slot {
   min-width: 0;
   min-height: 220px;
   flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  container-type: size;
+}
+
+.export-canvas-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  flex: none;
   overflow: hidden;
   border: 1.5px dashed var(--accent);
   border-radius: 17px;
@@ -1567,6 +1660,11 @@ body {
   cursor: grab;
   touch-action: none;
   isolation: isolate;
+}
+
+.export-canvas-frame[data-aspect-locked="true"] {
+  width: min(100cqw, calc(100cqh * var(--export-aspect-ratio)));
+  height: min(100cqh, calc(100cqw / var(--export-aspect-ratio)));
 }
 
 .export-canvas-frame:active {
@@ -3908,10 +4006,24 @@ body {
     padding: 14px 14px 9px 16px;
   }
 
-  .export-mode-tabs {
-    width: auto;
+  .export-toolbar {
     margin: 0 14px 10px;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+
+  .export-mode-tabs {
+    width: 100%;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .export-output-controls {
+    width: 100%;
+  }
+
+  .export-output-select {
+    min-height: 38px;
+    flex: 1 1 0;
   }
 
   .export-mode-tabs button {
@@ -3923,7 +4035,7 @@ body {
     padding: 0 14px 10px;
   }
 
-  .export-canvas-frame {
+  .export-canvas-slot {
     min-height: 190px;
   }
 

@@ -30,6 +30,7 @@ type GalleryFolderProps = {
   dropOpen?: boolean;
   dropPreview?: GalleryFolderDropPreview | null;
   showPreviews?: boolean;
+  collapsePreviewsImmediately?: boolean;
   receiving?: boolean;
   receivingItemId?: string;
   flight?: ReactNode;
@@ -206,6 +207,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   dropOpen = false,
   dropPreview = null,
   showPreviews = true,
+  collapsePreviewsImmediately = false,
   receiving = false,
   receivingItemId,
   flight,
@@ -226,6 +228,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
         : [],
     [items, receivingItemId, showPreviews],
   );
+
   const previewLayouts = useMemo(() => {
     const layouts = previews.map((item, index) => {
       const aspect =
@@ -337,8 +340,12 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
       stiffness: 250,
       damping: 19,
       precision: 0.001,
+      reducedMotion: collapsePreviewsImmediately,
     },
   );
+  const renderedPreviewProgress = collapsePreviewsImmediately
+    ? 0
+    : previewProgress;
   const receivedRef = useRef(false);
 
   useLayoutEffect(() => {
@@ -380,6 +387,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
 
   const handleOpen = () => {
     if (loading) return;
+    setHovered(false);
     const origins: Record<string, GalleryEntryOrigin> = {};
     for (const item of previews) {
       const element = previewRefs.current.get(item.id);
@@ -410,6 +418,9 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
       aria-label={isExit ? t.exit : t.open}
       title={isExit ? t.exit : t.open}
       onPointerEnter={() => {
+        if (!loading && !interactionDisabled) setHovered(true);
+      }}
+      onPointerMove={() => {
         if (!loading && !interactionDisabled) setHovered(true);
       }}
       onPointerLeave={() => setHovered(false)}
@@ -448,24 +459,28 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
             const layout = previewLayouts[index];
             const width =
               layout.collapsed.width +
-              (layout.expanded.width - layout.collapsed.width) * previewProgress;
+              (layout.expanded.width - layout.collapsed.width) *
+                renderedPreviewProgress;
             const height =
               layout.collapsed.height +
-              (layout.expanded.height - layout.collapsed.height) * previewProgress;
+              (layout.expanded.height - layout.collapsed.height) *
+                renderedPreviewProgress;
             const left =
               layout.collapsedLeft +
-              (layout.expandedLeft - layout.collapsedLeft) * previewProgress;
+              (layout.expandedLeft - layout.collapsedLeft) *
+                renderedPreviewProgress;
             const bottom =
               layout.collapsedBottom +
-              (layout.expandedBottom - layout.collapsedBottom) * previewProgress;
+              (layout.expandedBottom - layout.collapsedBottom) *
+                renderedPreviewProgress;
             const style = {
               zIndex: 20 - index,
               width,
               height,
               left,
               bottom,
-              opacity: 0.82 + previewProgress * 0.18,
-              transform: `rotate(${layout.collapsedRotation * (1 - previewProgress)}deg)`,
+              opacity: 0.82 + renderedPreviewProgress * 0.18,
+              transform: `rotate(${layout.collapsedRotation * (1 - renderedPreviewProgress)}deg)`,
             } as CSSProperties;
             return (
               <GalleryPreviewImage
@@ -499,9 +514,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
           </span>
         ) : null}
 
-        {flight ? (
-          <span className="gallery-folder-flight-layer">{flight}</span>
-        ) : null}
+        <span className="gallery-folder-flight-layer">{flight}</span>
 
         <span
           className="gallery-folder-front-layer"

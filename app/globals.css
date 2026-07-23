@@ -3345,11 +3345,6 @@ body {
   opacity: 1;
 }
 
-.studio-shell[data-gallery-editing="true"] .gallery-folder {
-  opacity: 0;
-  pointer-events: none;
-}
-
 .gallery-folder:focus-visible .gallery-folder-art {
   filter: drop-shadow(0 0 0.45rem rgba(36, 126, 245, 0.5));
 }
@@ -3451,6 +3446,15 @@ body {
   display: block;
   overflow: visible;
   pointer-events: none;
+}
+
+.gallery-folder-direct-flight {
+  position: absolute;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 3px rgba(19, 26, 43, 0.18));
+  transform-origin: 50% 50%;
+  will-change: left, top, width, height, transform;
+  user-select: none;
 }
 
 .gallery-folder-preview {

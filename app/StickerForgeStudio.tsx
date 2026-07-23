@@ -893,6 +893,8 @@ export function StickerForgeStudio() {
   const [galleryEntryComplete, setGalleryEntryComplete] = useState(false);
   const [gallerySurfaceHeld, setGallerySurfaceHeld] = useState(false);
   const [galleryEditing, setGalleryEditing] = useState(false);
+  const [collapseGalleryPreviewsImmediately, setCollapseGalleryPreviewsImmediately] =
+    useState(false);
   const [galleryEditorReady, setGalleryEditorReady] = useState(false);
   const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
     Record<string, GalleryEntryOrigin>
@@ -2626,6 +2628,7 @@ export function StickerForgeStudio() {
           onEditStart={() => {
             setGalleryEditorReady(false);
             setGalleryEditing(true);
+            setCollapseGalleryPreviewsImmediately(true);
           }}
           interactionBlocked={exportOpen}
           onExport={(asset) => {
@@ -2653,6 +2656,9 @@ export function StickerForgeStudio() {
             window.requestAnimationFrame(() => {
               setGalleryEditing(false);
               setGalleryEditorReady(false);
+              window.requestAnimationFrame(() => {
+                setCollapseGalleryPreviewsImmediately(false);
+              });
             });
           }}
           onClose={() => {
@@ -2662,6 +2668,7 @@ export function StickerForgeStudio() {
             setGalleryEntryComplete(false);
             setGalleryEntryOrigins({});
             setGalleryEditing(false);
+            setCollapseGalleryPreviewsImmediately(false);
             setGalleryEditorReady(false);
             setGalleryDropPreview(null);
             setGallerySurfaceHeld(false);
@@ -2677,6 +2684,9 @@ export function StickerForgeStudio() {
         activeFolderId={activeGalleryFolderId}
         galleryOpen={galleryOpen}
         showActivePreviews={!galleryOpen || !galleryFlightStarted}
+        collapseActivePreviewsImmediately={
+          collapseGalleryPreviewsImmediately
+        }
         dropPreview={galleryDropPreview}
         loading={
           galleryLoading ||
@@ -2727,6 +2737,7 @@ export function StickerForgeStudio() {
           setGalleryClosing(false);
           setGalleryFlightStarted(false);
           setGalleryEntryComplete(false);
+          setCollapseGalleryPreviewsImmediately(false);
           setGalleryOpen(true);
         }}
       />

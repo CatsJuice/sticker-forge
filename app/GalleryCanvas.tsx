@@ -10,6 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faPenToSquare,
@@ -39,6 +40,7 @@ import {
   GalleryRenderer,
   type GalleryScreenTransform,
 } from "@/lib/gallery-renderer";
+import { GalleryPreviewImage } from "./GalleryPreviewImage";
 import { useSpringValue, useSpringVector } from "./gallery-spring";
 
 export type GalleryEntryOrigin = {
@@ -897,12 +899,98 @@ function GalleryTransitionMotion({
   return null;
 }
 
+function DirectFolderExitMotion({
+  item,
+  flightLayer,
+  viewport,
+  view,
+  onSettled,
+}: {
+  item: GalleryItem;
+  flightLayer: HTMLElement;
+  viewport: Size;
+  view: ViewState;
+  onSettled: (id: string) => void;
+}) {
+  const folder = flightLayer.getBoundingClientRect();
+  const initial = galleryScreenTarget(item, viewport, view);
+  const aspect = initial.width / Math.max(1, initial.height);
+  const targetMaxWidth = Math.min(folder.width * 0.78, initial.width * 0.34);
+  const targetMaxHeight = Math.min(folder.height * 0.72, initial.height * 0.34);
+  let targetWidth = targetMaxWidth;
+  let targetHeight = targetWidth / Math.max(0.05, aspect);
+  if (targetHeight > targetMaxHeight) {
+    targetHeight = targetMaxHeight;
+    targetWidth = targetHeight * aspect;
+  }
+  const target = {
+    left: folder.left + (folder.width - targetWidth) / 2,
+    top: folder.top + folder.height * 0.54 - targetHeight / 2,
+    width: targetWidth,
+    height: targetHeight,
+    rotation: 0,
+  };
+  const travel = Math.hypot(
+    target.left - initial.left,
+    target.top - initial.top,
+  );
+  const arcHeight = clamp(travel * 0.2, 72, 210);
+  const { value: progress, settled } = useSpringValue(1, {
+    initial: 0,
+    mass: 0.82,
+    stiffness: 176,
+    damping: 23,
+    precision: 0.002,
+  });
+  const clampedProgress = clamp(progress, 0, 1);
+  const arc = 4 * clampedProgress * (1 - clampedProgress) * arcHeight;
+  const left =
+    initial.left -
+    folder.left +
+    (target.left - initial.left) * clampedProgress;
+  const top =
+    initial.top -
+    folder.top +
+    (target.top - initial.top) * clampedProgress -
+    arc;
+  const width =
+    initial.width + (target.width - initial.width) * clampedProgress;
+  const height =
+    initial.height + (target.height - initial.height) * clampedProgress;
+  const rotation =
+    initial.rotation +
+    (target.rotation - initial.rotation) * clampedProgress;
+
+  useEffect(() => {
+    if (settled) onSettled(item.id);
+  }, [item.id, onSettled, settled]);
+
+  return createPortal(
+    <GalleryPreviewImage
+      itemId={item.id}
+      className="gallery-folder-direct-flight"
+      alt=""
+      draggable={false}
+      style={{
+        left,
+        top,
+        width,
+        height,
+        transform: `rotate(${rotation}deg)`,
+      }}
+    />,
+    flightLayer,
+  );
+}
+
 function GalleryTransitionMotions({
   items,
   origins,
   viewport,
   view,
   phase,
+  exitMode = "preview",
+  folderFlightLayer,
   onFrame,
   onSettled,
 }: {
@@ -911,12 +999,26 @@ function GalleryTransitionMotions({
   viewport: Size;
   view: ViewState;
   phase: "enter" | "exit";
+  exitMode?: "preview" | "folder";
+  folderFlightLayer?: HTMLElement | null;
   onFrame: (id: string, transform: GalleryScreenTransform) => void;
   onSettled: (id: string) => void;
 }) {
   return (
     <>
       {items.slice(0, 10).map((item) => {
+        if (phase === "exit" && exitMode === "folder" && folderFlightLayer) {
+          return (
+            <DirectFolderExitMotion
+              key={`${phase}-folder-${item.id}`}
+              item={item}
+              flightLayer={folderFlightLayer}
+              viewport={viewport}
+              view={view}
+              onSettled={onSettled}
+            />
+          );
+        }
         const origin = origins[item.id];
         if (!origin) return null;
         return (
@@ -973,6 +1075,7 @@ export function GalleryCanvas({
     item: GalleryItem;
     asset: GalleryAsset;
     target: GalleryEditTarget;
+    folderFlightLayer: HTMLElement | null;
   } | null>(null);
   const [editHandoffReady, setEditHandoffReady] = useState(false);
   const [dropVisual, setDropVisual] = useState<{
@@ -1009,6 +1112,15 @@ export function GalleryCanvas({
   const exitTransitionItems = useMemo(
     () => items.filter((item) => transitionIds.has(item.id)),
     [items, transitionIds],
+  );
+  const editExitTransitionItems = useMemo(
+    () =>
+      editTransition
+        ? exitTransitionItems.filter(
+            (item) => item.id !== editTransition.item.id,
+          )
+        : [],
+    [editTransition, exitTransitionItems],
   );
   const entryStarted =
     !closing &&
@@ -1244,32 +1356,25 @@ export function GalleryCanvas({
   useEffect(() => {
     rendererRef.current?.sync(
       visibleItems.map((item) => ({
-        item: (() => {
-          const currentItem = transientLayoutsRef.current.has(item.id)
+        item: transientLayoutsRef.current.has(item.id)
           ? {
               ...item,
               layout: transientLayoutsRef.current.get(item.id)!,
             }
-            : item;
-          if (!editTransition || item.id === editTransition.item.id) {
-            return currentItem;
-          }
-          const scale = 0.72 + editPresence * 0.28;
-          return {
-            ...currentItem,
-            layout: {
-              ...currentItem.layout,
-              width: currentItem.layout.width * scale,
-              height: currentItem.layout.height * scale,
-            },
-          };
-        })(),
+          : item,
         asset: assets[item.id],
         interactive: interactiveIds.has(item.id),
         hidden: false,
         opacity:
-          (editTransition && item.id !== editTransition.item.id
-            ? combinedPresence
+          (editTransition
+            ? item.id === editTransition.item.id
+              ? 1
+              : transitionIds.has(item.id)
+                ? editTransition.folderFlightLayer ||
+                  exitSettledIds.has(item.id)
+                  ? 0
+                  : 1
+                : combinedPresence
             : transitionIds.has(item.id)
               ? 1
               : presence) *
@@ -1284,9 +1389,9 @@ export function GalleryCanvas({
     combinedPresence,
     dropVisual,
     dropVisualProgress,
-    editPresence,
     editHandoffOpacity,
     editTransition,
+    exitSettledIds,
     interactiveIds,
     presence,
     transitionIds,
@@ -1515,15 +1620,30 @@ export function GalleryCanvas({
         ...targetRect,
         rotation: visualRotation,
       };
+      const folderFlightLayer = document.querySelector<HTMLElement>(
+        `[data-gallery-folder-id="${currentFolderId}"] .gallery-folder-flight-layer`,
+      );
       editCompleteRef.current = false;
       editHandoffCompleteRef.current = false;
       setEditHandoffReady(false);
       setDeleteCandidate(null);
       setSelectedId(item.id);
-      setEditTransition({ item, asset: editableAsset, target });
+      setEditTransition({
+        item,
+        asset: editableAsset,
+        target,
+        folderFlightLayer,
+      });
       onEditStart();
     },
-    [assets, closing, editTransition, onEditStart, resolveEditTarget],
+    [
+      assets,
+      closing,
+      currentFolderId,
+      editTransition,
+      onEditStart,
+      resolveEditTarget,
+    ],
   );
 
   const handleExport = useCallback(
@@ -1549,6 +1669,9 @@ export function GalleryCanvas({
       !editHandoffReady ||
       !editHandoffSettled ||
       editHandoffOpacity > 0.002 ||
+      editExitTransitionItems.some(
+        (item) => !exitSettledIds.has(item.id),
+      ) ||
       editHandoffCompleteRef.current
     ) {
       return;
@@ -1559,6 +1682,8 @@ export function GalleryCanvas({
     editHandoffOpacity,
     editHandoffReady,
     editHandoffSettled,
+    editExitTransitionItems,
+    exitSettledIds,
     onEditHandoffComplete,
   ]);
 
@@ -1868,8 +1993,15 @@ export function GalleryCanvas({
               onRequestDelete={setDeleteCandidate}
               entryHidden={entryPendingIds.has(item.id)}
               opacity={
-                (editTransition && item.id !== editTransition.item.id
-                  ? combinedPresence
+                (editTransition
+                  ? item.id === editTransition.item.id
+                    ? 1
+                    : transitionIds.has(item.id)
+                      ? editTransition.folderFlightLayer ||
+                        exitSettledIds.has(item.id)
+                        ? 0
+                        : 1
+                      : combinedPresence
                   : transitionIds.has(item.id)
                     ? 1
                     : presence) *
@@ -1917,6 +2049,22 @@ export function GalleryCanvas({
             viewport={viewport}
             view={view}
             phase="exit"
+            onFrame={handleEntryFrame}
+            onSettled={handleExitSettled}
+          />
+        ) : null}
+
+        {editTransition ? (
+          <GalleryTransitionMotions
+            items={editExitTransitionItems.filter(
+              (item) => !exitSettledIds.has(item.id),
+            )}
+            origins={entryOrigins}
+            viewport={viewport}
+            view={view}
+            phase="exit"
+            exitMode="folder"
+            folderFlightLayer={editTransition.folderFlightLayer}
             onFrame={handleEntryFrame}
             onSettled={handleExitSettled}
           />

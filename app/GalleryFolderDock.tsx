@@ -50,6 +50,7 @@ type GalleryFolderDockProps = {
   galleryOpen: boolean;
   loading: boolean;
   showActivePreviews: boolean;
+  collapseActivePreviewsImmediately: boolean;
   receiving: boolean;
   receivingItemId?: string;
   dropPreview: GalleryFolderDropPreview | null;
@@ -450,6 +451,7 @@ export function GalleryFolderDock({
   galleryOpen,
   loading,
   showActivePreviews,
+  collapseActivePreviewsImmediately,
   receiving,
   receivingItemId,
   dropPreview,
@@ -675,7 +677,8 @@ export function GalleryFolderDock({
         <div className="gallery-folder-list">
           {folders.map((folder, folderIndex) => {
             const isDefault = folder.id === DEFAULT_GALLERY_FOLDER_ID;
-            const isActive = galleryOpen && activeFolderId === folder.id;
+            const isCurrent = activeFolderId === folder.id;
+            const isActive = galleryOpen && isCurrent;
             const folderItems = items.filter((item) => item.folderId === folder.id);
             const selectedForShare = shareSelection.has(folder.id);
             const isExiting = exitingFolderIds.has(folder.id);
@@ -737,6 +740,9 @@ export function GalleryFolderDock({
                   dropPreview={dropPreview?.folderId === folder.id ? dropPreview : null}
                   variant={isActive && mode === null ? "exit" : "launcher"}
                   showPreviews={!galleryOpen || !isActive || showActivePreviews}
+                  collapsePreviewsImmediately={
+                    collapseActivePreviewsImmediately && isCurrent
+                  }
                   receiving={isDefault && receiving}
                   receivingItemId={isDefault ? receivingItemId : undefined}
                   flight={isDefault ? flight : undefined}

@@ -176,24 +176,49 @@ test("tears a gallery sticker away before deleting its local record", async () =
 });
 
 test("moves an immutable gallery sticker into the editor through a Spring transition", async () => {
-  const [gallery, studio, styles] = await Promise.all([
+  const [gallery, studio, styles, folder] = await Promise.all([
     readFile(new URL("../app/GalleryCanvas.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/StickerForgeStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/GalleryFolder.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(gallery, /aria-label="Edit sticker"/);
   assert.match(gallery, /aria-label=\{exportLabel\}/);
   assert.match(gallery, /function GalleryEditMotion\(/);
   assert.match(gallery, /useSpringVector\(/);
-  assert.match(gallery, /width: currentItem\.layout\.width \* scale/);
+  assert.doesNotMatch(gallery, /width: currentItem\.layout\.width \* scale/);
   assert.match(gallery, /onEdit\(latestLayoutRef\.current\)/);
   assert.match(gallery, /handleEdit\(\{ \.\.\.item, layout \}\)/);
   assert.match(gallery, /const visualRotation = previewRotation\(item\)/);
   assert.match(gallery, /tilt: -visualRotation/);
   assert.match(gallery, /const targetRect = resolveEditTarget\(item\)/);
   assert.match(gallery, /rotation: visualRotation/);
-  assert.match(gallery, /setEditTransition\(\{ item, asset: editableAsset, target \}\)/);
+  assert.match(gallery, /function DirectFolderExitMotion\(/);
+  assert.match(
+    gallery,
+    /4 \* clampedProgress \* \(1 - clampedProgress\) \* arcHeight/,
+  );
+  assert.match(gallery, /exitMode\?: "preview" \| "folder"/);
+  assert.match(gallery, /exitMode="folder"/);
+  assert.match(
+    gallery,
+    /folderFlightLayer=\{editTransition\.folderFlightLayer\}/,
+  );
+  assert.match(gallery, /createPortal\(/);
+  assert.match(gallery, /className="gallery-folder-direct-flight"/);
+  assert.match(
+    gallery,
+    /transitionIds\.has\(item\.id\)[\s\S]*?exitSettledIds\.has\(item\.id\)[\s\S]*?\? 0/,
+  );
+  assert.match(
+    gallery,
+    /editExitTransitionItems\.filter\([\s\S]*?phase="exit"/,
+  );
+  assert.match(
+    gallery,
+    /editExitTransitionItems\.some\([\s\S]*?!exitSettledIds\.has\(item\.id\)/,
+  );
   assert.match(gallery, /onEditComplete\(editTransition\.asset\)/);
   assert.match(gallery, /useSpringValue\(editHandoffReady \? 0 : 1/);
   assert.match(gallery, /editHandoffOpacity > 0\.002/);
@@ -206,12 +231,23 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   assert.match(studio, /await new Promise<void>\(\(resolve\) => \{/);
   assert.match(studio, /setGalleryEditorReady\(true\)/);
   assert.match(studio, /onEditHandoffComplete=\{\(\) => \{/);
+  assert.match(
+    studio,
+    /collapseActivePreviewsImmediately=\{\s*collapseGalleryPreviewsImmediately\s*\}/,
+  );
+  assert.match(
+    studio,
+    /requestAnimationFrame\(\(\) => \{\s*setCollapseGalleryPreviewsImmediately\(false\)/,
+  );
+  assert.match(folder, /const handleOpen = \(\) => \{\s*if \(loading\) return;\s*setHovered\(false\)/);
+  assert.match(folder, /onPointerMove=\{\(\) => \{/);
   assert.match(styles, /\.gallery-edit-button \{[^}]*right: 24px;/s);
   assert.match(styles, /\.gallery-export-button \{[^}]*left: -15\.5px;/s);
   assert.match(studio, /onExport=\{\(asset\) => \{/);
   assert.match(studio, /setExportSource\(asset\.source\)/);
   assert.match(studio, /setExportOptions\(asset\.options\)/);
   assert.match(styles, /\.sticker-host canvas \{[^}]*transition: opacity 110ms/s);
+  assert.match(styles, /\.gallery-folder-direct-flight \{[^}]*position: absolute;/s);
   assert.match(
     styles,
     /\.sticker-host\[data-gallery-editing="true"\]\[data-gallery-editor-ready="false"\] canvas \{[^}]*opacity: 0;/s,
@@ -312,7 +348,15 @@ test("stacks folder previews without overlap when expanded", async () => {
   assert.match(folder, /const EXPANDED_GAP = 10/);
   assert.match(folder, /function seededFraction\(/);
   assert.match(folder, /previous\.expanded\.height \+ EXPANDED_GAP/);
-  assert.match(folder, /layout\.collapsedRotation \* \(1 - previewProgress\)/);
+  assert.match(
+    folder,
+    /layout\.collapsedRotation \* \(1 - renderedPreviewProgress\)/,
+  );
+  assert.match(
+    folder,
+    /const renderedPreviewProgress = collapsePreviewsImmediately/,
+  );
+  assert.match(folder, /reducedMotion: collapsePreviewsImmediately/);
   assert.match(folder, /const COLLAPSED_MAX_WIDTH = 46/);
   assert.match(folder, /const COLLAPSED_MAX_HEIGHT = 54/);
   assert.match(folder, /const COLLAPSED_TOP_EXPOSURE_MAX = 0\.48/);

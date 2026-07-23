@@ -9,6 +9,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -18,8 +19,6 @@ import {
   faAlignCenter,
   faAlignLeft,
   faAlignRight,
-  faArrowLeft,
-  faArrowRight,
   faArrowUpFromBracket,
   faBold,
   faCheck,
@@ -134,8 +133,37 @@ const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
 const ADD_TO_GALLERY_FOLDER_STORAGE_KEY =
   "sticker-forge:add-to-gallery-folder";
+const PANEL_DRAG_CLICK_SLOP = 6;
+const PANEL_MIN_OPEN_VIEWPORT_RATIO = 0.45;
 const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
 const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
+
+function resolvePanelLength(panel: HTMLElement, cssValue: string) {
+  const probe = document.createElement("span");
+  probe.style.cssText =
+    `position:absolute;visibility:hidden;width:0;height:${cssValue};pointer-events:none`;
+  panel.appendChild(probe);
+  const height = probe.getBoundingClientRect().height;
+  probe.remove();
+  return height;
+}
+
+function panelContentOpacity(
+  offset: number,
+  fadeStartOffset: number,
+  collapseOffset: number,
+) {
+  const fadeProgress = Math.min(
+    1,
+    Math.max(
+      0,
+      (offset - fadeStartOffset) /
+        Math.max(1, collapseOffset - fadeStartOffset),
+    ),
+  );
+  return 1 - fadeProgress * 0.8;
+}
+
 const DEFAULT_RICH_TEXT = {
   blocks: [
     {
@@ -855,6 +883,18 @@ export function StickerForgeStudio() {
     [],
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  const studioShellRef = useRef<HTMLElement>(null);
+  const controlsCardRef = useRef<HTMLElement>(null);
+  const panelDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startOffset: number;
+    collapseOffset: number;
+    fadeStartOffset: number;
+    maxPanelHeight: number;
+    startedOpen: boolean;
+  } | null>(null);
+  const panelDragClickSuppressedUntilRef = useRef(0);
   const backgroundRemovalButtonRef = useRef<HTMLButtonElement>(null);
   const galleryFolderRef = useRef<HTMLButtonElement>(null);
   const galleryAddControlRef = useRef<HTMLDivElement>(null);
@@ -2136,8 +2176,146 @@ export function StickerForgeStudio() {
     }
   };
 
+  const resetPanelSettledPosition = () => {
+    const shell = studioShellRef.current;
+    shell?.style.removeProperty("--panel-settled-y");
+    shell?.style.removeProperty("--panel-settled-content-opacity");
+  };
+
+  const startPanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    const panel = controlsCardRef.current;
+    const shell = studioShellRef.current;
+    if (!panel || !shell) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const minimumStageHeight = resolvePanelLength(
+      panel,
+      "var(--mobile-stage-min-height)",
+    );
+    const startOffset = Math.max(
+      0,
+      panel.getBoundingClientRect().top - minimumStageHeight,
+    );
+    const peekHeight = resolvePanelLength(
+      panel,
+      "var(--mobile-panel-peek-height)",
+    );
+    const maxPanelHeight = window.innerHeight - minimumStageHeight;
+    const fadeStartOffset = Math.max(
+      0,
+      maxPanelHeight -
+        window.innerHeight * PANEL_MIN_OPEN_VIEWPORT_RATIO,
+    );
+    const collapseOffset = Math.max(1, maxPanelHeight - peekHeight);
+    shell.style.setProperty("--panel-drag-y", `${startOffset}px`);
+    shell.style.setProperty(
+      "--panel-content-opacity",
+      `${panelContentOpacity(startOffset, fadeStartOffset, collapseOffset)}`,
+    );
+    panelDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startOffset,
+      collapseOffset,
+      fadeStartOffset,
+      maxPanelHeight,
+      startedOpen: isPanelOpen,
+    };
+    shell.setAttribute("data-panel-dragging", "true");
+    panel.setAttribute("data-dragging", "true");
+  };
+
+  const movePanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = panelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const offset = Math.max(
+      0,
+      Math.min(
+        drag.collapseOffset,
+        drag.startOffset + event.clientY - drag.startY,
+      ),
+    );
+    studioShellRef.current?.style.setProperty(
+      "--panel-drag-y",
+      `${offset}px`,
+    );
+    studioShellRef.current?.style.setProperty(
+      "--panel-content-opacity",
+      `${panelContentOpacity(
+        offset,
+        drag.fadeStartOffset,
+        drag.collapseOffset,
+      )}`,
+    );
+  };
+
+  const finishPanelDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    cancelled = false,
+  ) => {
+    const drag = panelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    panelDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const panel = controlsCardRef.current;
+    const shell = studioShellRef.current;
+    const travel = event.clientY - drag.startY;
+    if (!cancelled && Math.abs(travel) > PANEL_DRAG_CLICK_SLOP) {
+      panelDragClickSuppressedUntilRef.current = performance.now() + 350;
+    }
+    const finalOffset = Math.max(
+      0,
+      Math.min(drag.collapseOffset, drag.startOffset + travel),
+    );
+    const visiblePanelHeight = drag.maxPanelHeight - finalOffset;
+    const reachedUsableHeight =
+      visiblePanelHeight >=
+      window.innerHeight * PANEL_MIN_OPEN_VIEWPORT_RATIO;
+    const hasReopenIntent =
+      !drag.startedOpen && travel < -PANEL_DRAG_CLICK_SLOP;
+    const targetOpen = cancelled
+      ? drag.startedOpen
+      : drag.startedOpen
+        ? reachedUsableHeight
+        : hasReopenIntent;
+
+    panel?.removeAttribute("data-dragging");
+    shell?.removeAttribute("data-panel-dragging");
+    if (panel) {
+      // Commit the dragged position before restoring transitions so a
+      // canceled gesture springs back instead of snapping.
+      panel.getBoundingClientRect();
+    }
+    if (!cancelled && targetOpen && reachedUsableHeight && shell) {
+      shell.style.setProperty(
+        "--panel-settled-y",
+        `${(finalOffset / window.innerHeight) * 100}dvh`,
+      );
+      shell.style.setProperty(
+        "--panel-settled-content-opacity",
+        `${panelContentOpacity(
+          finalOffset,
+          drag.fadeStartOffset,
+          drag.collapseOffset,
+        )}`,
+      );
+    } else if (!cancelled && targetOpen && !reachedUsableHeight) {
+      resetPanelSettledPosition();
+    }
+    setIsPanelOpen(targetOpen);
+    window.requestAnimationFrame(() => {
+      shell?.style.removeProperty("--panel-drag-y");
+      shell?.style.removeProperty("--panel-content-opacity");
+    });
+  };
+
   return (
     <main
+      ref={studioShellRef}
       className="studio-shell"
       data-panel-open={isPanelOpen}
       data-gallery-open={galleryOpen}
@@ -2188,27 +2366,33 @@ export function StickerForgeStudio() {
         </div>
       </section>
 
-      <button
-        className="panel-toggle"
-        data-open={isPanelOpen}
-        type="button"
-        aria-label={isPanelOpen ? t.closePanel : t.openPanel}
-        aria-expanded={isPanelOpen}
-        aria-controls="sticker-controls"
-        onClick={() => setIsPanelOpen((open) => !open)}
-      >
-        <span className="panel-toggle-arrow" aria-hidden="true">
-          <FontAwesomeIcon icon={isPanelOpen ? faArrowRight : faArrowLeft} />
-        </span>
-      </button>
-
         <aside
+          ref={controlsCardRef}
           id="sticker-controls"
           className="controls-card"
           data-open={isPanelOpen}
           aria-label={t.controls}
-          aria-hidden={!isPanelOpen}
         >
+          <button
+            className="controls-drag-region"
+            type="button"
+            aria-label={isPanelOpen ? t.closePanel : t.openPanel}
+            aria-expanded={isPanelOpen}
+            aria-controls="sticker-controls"
+            onPointerDown={startPanelDrag}
+            onPointerMove={movePanelDrag}
+            onPointerUp={finishPanelDrag}
+            onPointerCancel={(event) => finishPanelDrag(event, true)}
+            onClick={() => {
+              if (performance.now() < panelDragClickSuppressedUntilRef.current) {
+                return;
+              }
+              resetPanelSettledPosition();
+              setIsPanelOpen((open) => !open);
+            }}
+          >
+            <span className="controls-drag-handle" aria-hidden="true" />
+          </button>
           <div className="controls-header">
             <div className="controls-heading-row">
               <h2 className="controls-title">{t.title}</h2>
@@ -2278,7 +2462,11 @@ export function StickerForgeStudio() {
           </div>
 
           <div className="controls-scroll">
-            <div className="source-tabs" aria-label={t.sourceType}>
+            <div
+              className="source-tabs"
+              data-mode={sourceMode}
+              aria-label={t.sourceType}
+            >
               <button
                 className="source-tab"
                 type="button"

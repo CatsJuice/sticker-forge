@@ -411,6 +411,7 @@ input[type="color"] {
 }
 
 .source-tabs {
+  position: relative;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
@@ -419,7 +420,29 @@ input[type="color"] {
   background: rgba(33, 32, 38, 0.065);
 }
 
+.source-tabs::before {
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 12px) / 2);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(27, 26, 31, 0.08);
+  content: "";
+  pointer-events: none;
+  transition: transform 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.source-tabs[data-mode="image"]::before {
+  transform: translateX(calc(100% + 4px));
+}
+
 .source-tab {
+  position: relative;
+  z-index: 1;
   min-height: 36px;
   border: 0;
   border-radius: 10px;
@@ -428,12 +451,11 @@ input[type="color"] {
   font-size: 12px;
   font-weight: 680;
   cursor: pointer;
+  transition: color 180ms ease;
 }
 
 .source-tab[data-active="true"] {
   color: var(--ink);
-  background: #fff;
-  box-shadow: 0 3px 12px rgba(27, 26, 31, 0.08);
 }
 
 .source-panel {
@@ -1184,47 +1206,6 @@ body {
   inset: 0;
 }
 
-.panel-toggle {
-  position: fixed;
-  z-index: 40;
-  top: 36px;
-  right: 36px;
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 1px solid rgba(24, 23, 29, 0.1);
-  border-radius: 10px;
-  color: #4f4e56;
-  background: rgba(255, 255, 255, 0.8);
-  box-shadow: 0 14px 42px rgba(27, 26, 33, 0.14);
-  backdrop-filter: blur(20px) saturate(1.15);
-  cursor: pointer;
-  transition: transform 180ms ease, background 180ms ease, box-shadow 180ms ease;
-}
-
-.panel-toggle:hover {
-  background: rgba(255, 255, 255, 0.96);
-  transform: translateX(-2px);
-}
-
-.panel-toggle[data-open="true"] {
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 8px 24px rgba(27, 26, 33, 0.1);
-}
-
-.panel-toggle-arrow {
-  display: grid;
-  place-items: center;
-  transform: translateY(-1px);
-}
-
-.panel-toggle-arrow svg {
-  width: 14px;
-  height: 14px;
-}
-
 .controls-card {
   position: fixed;
   z-index: 30;
@@ -1252,6 +1233,10 @@ body {
   clip-path: circle(160% at calc(100% - 37px) 37px);
   transform: scale(1);
   transition-delay: 0s;
+}
+
+.controls-drag-region {
+  display: none;
 }
 
 .controls-header {
@@ -3093,36 +3078,38 @@ body {
   bottom: 8px;
   display: block;
   max-width: none;
-  isolation: isolate;
   pointer-events: none;
 }
 
 .gallery-folder-dock::before {
   position: absolute;
-  z-index: -1;
-  top: -74px;
+  z-index: 0;
+  top: -124px;
   right: -13px;
   bottom: -8px;
   left: -13px;
   content: "";
   background: linear-gradient(
     to bottom,
-    rgba(247, 246, 242, 0),
-    rgba(247, 246, 242, 0.08) 42%,
-    rgba(247, 246, 242, 0.58) 100%
+    rgba(247, 246, 242, 0) 0%,
+    rgba(247, 246, 242, 0.06) 24%,
+    rgba(247, 246, 242, 0.24) 58%,
+    rgba(247, 246, 242, 0.62) 100%
   );
   -webkit-backdrop-filter: blur(15px) saturate(1.08);
   backdrop-filter: blur(15px) saturate(1.08);
   -webkit-mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.08) 28%,
+    rgba(0, 0, 0, 0.16) 18%,
+    rgba(0, 0, 0, 0.58) 56%,
     #000 100%
   );
   mask-image: linear-gradient(
     to bottom,
     transparent 0%,
-    rgba(0, 0, 0, 0.08) 28%,
+    rgba(0, 0, 0, 0.16) 18%,
+    rgba(0, 0, 0, 0.58) 56%,
     #000 100%
   );
   pointer-events: none;
@@ -3134,6 +3121,8 @@ body {
 }
 
 .gallery-folder-scroll {
+  position: relative;
+  z-index: 1;
   min-width: 0;
   width: 100%;
   max-width: none;
@@ -4267,6 +4256,15 @@ body {
   .studio-shell {
     --controls-width: calc(100vw - 20px);
     --controls-reserve: 100vw;
+    --mobile-stage-height: 36dvh;
+    --mobile-stage-min-height: 20dvh;
+    --mobile-panel-default-offset: calc(
+      var(--mobile-stage-height) - var(--mobile-stage-min-height)
+    );
+    --mobile-folder-reserve: calc(112px + env(safe-area-inset-bottom));
+    --mobile-panel-peek-height: calc(
+      116px + env(safe-area-inset-bottom)
+    );
     padding: 0;
   }
 
@@ -4283,27 +4281,135 @@ body {
   }
 
   .stage-card {
+    top: -16px;
+    right: 0;
+    bottom: -20px;
     min-height: 0;
     border-radius: 0;
+    transition: bottom 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .studio-shell:not([data-panel-open="true"]) .stage-card {
+    bottom: calc(var(--mobile-panel-peek-height) - 20px);
+  }
+
+  .studio-shell[data-panel-open="true"] .stage-card {
+    right: 0;
+    bottom: calc(
+      100dvh - var(--mobile-stage-min-height) -
+        var(
+          --panel-drag-y,
+          var(--panel-settled-y, var(--mobile-panel-default-offset))
+        ) -
+        20px
+    );
+  }
+
+  .studio-shell[data-panel-dragging="true"] .stage-card {
+    bottom: max(
+      calc(var(--mobile-panel-peek-height) - 20px),
+      calc(
+        100dvh - var(--mobile-stage-min-height) -
+          var(--panel-drag-y, var(--mobile-panel-default-offset)) -
+          20px
+      )
+    );
+    transition: none;
   }
 
   .sticker-stage {
     inset: 0;
   }
 
-  .panel-toggle {
-    top: 30px;
-    right: 26px;
-    width: 34px;
-    height: 34px;
+  .controls-card {
+    top: calc(100dvh - var(--mobile-panel-peek-height));
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    border-radius: 22px 22px 0 0;
+    opacity: 1;
+    visibility: visible;
+    clip-path: none;
+    transform: none;
+    transform-origin: bottom center;
+    box-shadow:
+      0 -18px 52px rgba(24, 23, 29, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.86);
+    transition: top 360ms cubic-bezier(0.22, 1, 0.36, 1);
+    overscroll-behavior: contain;
   }
 
-  .controls-card {
-    top: 10px;
-    right: 10px;
-    bottom: 10px;
-    width: calc(100vw - 20px);
-    border-radius: 20px;
+  .controls-card[data-open="true"] {
+    top: calc(
+      var(--mobile-stage-min-height) +
+        var(
+          --panel-drag-y,
+          var(--panel-settled-y, var(--mobile-panel-default-offset))
+        )
+    );
+    opacity: 1;
+    visibility: visible;
+    clip-path: none;
+    transform: none;
+    transition-delay: 0s;
+  }
+
+  .controls-card[data-dragging="true"] {
+    top: calc(
+      var(--mobile-stage-min-height) + var(--panel-drag-y, 0px)
+    );
+    transform: none;
+    transition: none;
+  }
+
+  .controls-drag-region {
+    position: relative;
+    z-index: 9;
+    width: 100%;
+    height: 26px;
+    flex: 0 0 26px;
+    padding: 0;
+    display: grid;
+    place-items: center;
+    border: 0;
+    color: inherit;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+    pointer-events: auto;
+  }
+
+  .controls-drag-region:active {
+    cursor: grabbing;
+  }
+
+  .controls-drag-handle {
+    width: 64px;
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(74, 73, 80, 0.28);
+    pointer-events: none;
+  }
+
+  .controls-card .controls-header,
+  .controls-card .controls-scroll,
+  .controls-card .controls-footer {
+    opacity: 0.2;
+    transition: opacity 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .controls-card[data-open="true"] .controls-header,
+  .controls-card[data-open="true"] .controls-scroll,
+  .controls-card[data-open="true"] .controls-footer {
+    opacity: var(--panel-settled-content-opacity, 1);
+  }
+
+  .controls-card[data-dragging="true"] .controls-header,
+  .controls-card[data-dragging="true"] .controls-scroll,
+  .controls-card[data-dragging="true"] .controls-footer {
+    opacity: var(--panel-content-opacity, 1);
+    transition: none;
   }
 
   .controls-header,
@@ -4314,12 +4420,14 @@ body {
   }
 
   .controls-header {
-    padding-right: 54px;
+    padding-top: 8px;
+    padding-right: 16px;
   }
 
   .controls-footer {
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
     gap: 6px;
+    padding-bottom: var(--mobile-folder-reserve);
   }
 
   .controls-footer .primary-button {
@@ -4336,6 +4444,7 @@ body {
   }
 
   .gallery-folder-dock {
+    z-index: 120;
     left: 3px;
     right: 3px;
     bottom: 0;
@@ -4398,12 +4507,6 @@ body {
   .gallery-folder-art {
     width: 61px;
     height: 45px;
-  }
-
-  .studio-shell[data-panel-open="true"]
-    .gallery-folder:not([data-variant="exit"]) {
-    visibility: hidden;
-    pointer-events: none;
   }
 
   .gallery-view-controls {

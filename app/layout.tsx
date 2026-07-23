@@ -13,6 +13,11 @@ export const metadata: Metadata = {
   description:
     "A tactile web sticker maker for text and uploaded images. Drag an edge to peel it up.",
   applicationName: "Sticker Forge",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Sticker Forge",
+  },
   keywords: ["sticker", "image", "PNG", "WebGL", "interactive", "generator"],
   openGraph: {
     type: "website",
@@ -38,6 +43,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  viewportFit: "cover",
   themeColor: "#ecebe7",
 };
 
@@ -49,6 +55,15 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, viewport-fit=cover"
+        />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta
+          name="apple-mobile-web-app-status-bar-style"
+          content="black-translucent"
+        />
         <script
           defer
           src="https://vibeloft.ai/telemetry/v1.js"

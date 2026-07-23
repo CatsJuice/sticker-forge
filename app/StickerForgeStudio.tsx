@@ -961,6 +961,7 @@ export function StickerForgeStudio() {
   const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
   const [exportOptions, setExportOptions] =
     useState<StickerOptions>(DEFAULT_SETTINGS);
+  const [isStandalonePwa, setIsStandalonePwa] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [galleryFolders, setGalleryFolders] = useState<GalleryFolderRecord[]>([]);
@@ -1024,6 +1025,21 @@ export function StickerForgeStudio() {
     return () => {
       window.cancelAnimationFrame(frame);
       query.removeEventListener("change", collapseForNarrowViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    const query = window.matchMedia("(display-mode: standalone)");
+    const updateStandaloneState = () => {
+      const iosNavigator = window.navigator as Navigator & {
+        standalone?: boolean;
+      };
+      setIsStandalonePwa(query.matches || iosNavigator.standalone === true);
+    };
+    updateStandaloneState();
+    query.addEventListener("change", updateStandaloneState);
+    return () => {
+      query.removeEventListener("change", updateStandaloneState);
     };
   }, []);
 
@@ -2371,6 +2387,7 @@ export function StickerForgeStudio() {
       data-export-active={exportOpen}
       data-export-open={exportOpen && !exportClosing}
       data-export-closing={exportClosing}
+      data-pwa-standalone={isStandalonePwa}
     >
       <header className="studio-header">
         <span className="brand-mark" role="img" aria-label="Sticker Forge" />
@@ -3167,6 +3184,7 @@ export function StickerForgeStudio() {
               options={exportOptions}
               embedCode={buildEmbedSnippet(exportSource, exportOptions)}
               locale={locale}
+              standalonePwa={isStandalonePwa}
               onClosing={() => setExportClosing(true)}
               onClose={() => {
                 setExportOpen(false);

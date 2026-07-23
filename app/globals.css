@@ -1630,7 +1630,7 @@ body {
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   border: 1px solid rgba(17, 18, 22, 0.12);
   border-radius: 24px;
-  background: rgba(249, 249, 247, 0.97);
+  background: #f9f9f7;
   box-shadow: 0 38px 110px rgba(10, 12, 19, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.9);
   animation: export-dialog-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
@@ -3123,14 +3123,18 @@ body {
   }
   to {
     border-radius: 30px;
-    transform: translateY(12px) scale(0.97);
+    transform:
+      translateY(var(--export-background-offset-y, 12px))
+      scale(var(--export-background-scale, 0.97));
   }
 }
 
 @keyframes export-background-out {
   from {
     border-radius: 30px;
-    transform: translateY(12px) scale(0.97);
+    transform:
+      translateY(var(--export-background-offset-y, 12px))
+      scale(var(--export-background-scale, 0.97));
   }
   to {
     border-radius: 0;
@@ -4349,6 +4353,12 @@ body {
   }
 
   .studio-shell {
+    --export-background-offset-y: 12px;
+    --export-background-scale: 0.97;
+    --mobile-safe-top: env(safe-area-inset-top, 0px);
+    --mobile-safe-right: env(safe-area-inset-right, 0px);
+    --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+    --mobile-safe-left: env(safe-area-inset-left, 0px);
     --controls-width: calc(100vw - 20px);
     --controls-reserve: 100vw;
     --mobile-stage-height: 36dvh;
@@ -4356,13 +4366,22 @@ body {
     --mobile-panel-default-offset: calc(
       var(--mobile-stage-height) - var(--mobile-stage-min-height)
     );
-    --mobile-folder-reserve: calc(112px + env(safe-area-inset-bottom));
+    --mobile-folder-reserve: calc(112px + var(--mobile-safe-bottom));
     --mobile-panel-peek-height: calc(
-      116px + env(safe-area-inset-bottom)
+      116px + var(--mobile-safe-bottom)
     );
     padding: 0;
     border-radius: 0;
     transform-origin: top center;
+  }
+
+  .studio-shell[data-pwa-standalone="true"] {
+    --export-background-offset-y: clamp(
+      52px,
+      calc(var(--mobile-safe-top) + 12px),
+      60px
+    );
+    --export-background-scale: 0.94;
   }
 
   .studio-shell[data-export-active="true"] {
@@ -4371,7 +4390,9 @@ body {
 
   .studio-shell[data-export-open="true"] {
     border-radius: 30px;
-    transform: translateY(12px) scale(0.97);
+    transform:
+      translateY(var(--export-background-offset-y))
+      scale(var(--export-background-scale));
     animation: export-background-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
@@ -4534,13 +4555,13 @@ body {
   .controls-header,
   .controls-scroll,
   .controls-footer {
-    padding-left: 16px;
-    padding-right: 16px;
+    padding-left: calc(16px + var(--mobile-safe-left));
+    padding-right: calc(16px + var(--mobile-safe-right));
   }
 
   .controls-header {
     padding-top: 8px;
-    padding-right: 16px;
+    padding-right: calc(16px + var(--mobile-safe-right));
   }
 
   .controls-footer {
@@ -4564,15 +4585,23 @@ body {
 
   .gallery-folder-dock {
     z-index: 120;
-    left: 3px;
-    right: 3px;
-    bottom: 0;
+    left: calc(3px + var(--mobile-safe-left));
+    right: calc(3px + var(--mobile-safe-right));
+    bottom: max(8px, var(--mobile-safe-bottom));
     max-width: none;
+  }
+
+  .gallery-folder-dock::before {
+    right: calc(-13px - var(--mobile-safe-right));
+    bottom: calc(
+      -8px - max(8px, var(--mobile-safe-bottom))
+    );
+    left: calc(-13px - var(--mobile-safe-left));
   }
 
   .studio-shell[data-panel-open="true"][data-gallery-open="false"]
     .gallery-folder-dock {
-    right: 3px;
+    right: calc(3px + var(--mobile-safe-right));
   }
 
   .gallery-folder-menu {
@@ -4629,18 +4658,20 @@ body {
   }
 
   .gallery-view-controls {
-    right: 14px;
-    bottom: 14px;
+    right: calc(14px + var(--mobile-safe-right));
+    bottom: calc(14px + var(--mobile-safe-bottom));
   }
 
   .gallery-header {
-    top: 14px;
-    left: 14px;
+    top: calc(14px + var(--mobile-safe-top));
+    left: calc(14px + var(--mobile-safe-left));
   }
 
   .gallery-title,
   .gallery-title-input {
-    max-width: calc(100vw - 88px);
+    max-width: calc(
+      100vw - 88px - var(--mobile-safe-left) - var(--mobile-safe-right)
+    );
     font-size: 16px;
   }
 
@@ -4652,6 +4683,13 @@ body {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     animation: none;
+  }
+
+  .export-backdrop[data-pwa-standalone="true"] {
+    padding-top: max(
+      36px,
+      calc(env(safe-area-inset-top, 0px) + 12px)
+    );
   }
 
   .export-dialog {
@@ -4688,7 +4726,11 @@ body {
 
   .export-dialog-header {
     min-height: 58px;
-    padding: 12px 14px 8px 16px;
+    padding:
+      12px
+      calc(14px + env(safe-area-inset-right, 0px))
+      8px
+      calc(16px + env(safe-area-inset-left, 0px));
     align-items: center;
   }
 
@@ -4699,7 +4741,11 @@ body {
   }
 
   .export-toolbar {
-    margin: 0 14px 10px;
+    margin:
+      0
+      calc(14px + env(safe-area-inset-right, 0px))
+      10px
+      calc(14px + env(safe-area-inset-left, 0px));
     flex-wrap: wrap;
     gap: 7px;
   }
@@ -4724,7 +4770,11 @@ body {
   }
 
   .export-dialog-body {
-    padding: 0 14px 10px;
+    padding:
+      0
+      calc(14px + env(safe-area-inset-right, 0px))
+      10px
+      calc(14px + env(safe-area-inset-left, 0px));
   }
 
   .export-canvas-slot {
@@ -4842,7 +4892,11 @@ body {
 
   .export-dialog-footer {
     min-height: 62px;
-    padding: 9px 14px max(11px, env(safe-area-inset-bottom));
+    padding:
+      9px
+      calc(14px + env(safe-area-inset-right, 0px))
+      max(11px, env(safe-area-inset-bottom, 0px))
+      calc(14px + env(safe-area-inset-left, 0px));
     flex-direction: column;
     align-items: stretch;
     gap: 8px;

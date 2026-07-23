@@ -81,6 +81,7 @@ type ExportDialogProps = {
   options: StickerOptions;
   embedCode: string;
   locale: "zh" | "en";
+  standalonePwa?: boolean;
   onClosing?: () => void;
   onClose: () => void;
 };
@@ -821,6 +822,7 @@ export function ExportDialog({
   options,
   embedCode,
   locale,
+  standalonePwa = false,
   onClosing,
   onClose,
 }: ExportDialogProps) {
@@ -2196,7 +2198,11 @@ export function ExportDialog({
   );
 
   return (
-    <div className="export-backdrop" data-closing={isClosing || undefined}>
+    <div
+      className="export-backdrop"
+      data-closing={isClosing || undefined}
+      data-pwa-standalone={standalonePwa || undefined}
+    >
       <div className="export-dialog-shell">
         <div
           ref={dialogRef}

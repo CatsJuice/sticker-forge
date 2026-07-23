@@ -35,6 +35,7 @@ type GalleryFolderProps = {
   receivingItemId?: string;
   flight?: ReactNode;
   onReceiveClosed?: () => void;
+  onPreviewEdit?: (item: GalleryItem, origin: GalleryEntryOrigin) => void;
   onOpen: (origins: Record<string, GalleryEntryOrigin>) => void;
 };
 
@@ -212,6 +213,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   receivingItemId,
   flight,
   onReceiveClosed,
+  onPreviewEdit,
   onOpen,
 }, forwardedRef) {
   const t = COPY[locale];
@@ -320,6 +322,11 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
           ),
     }));
   }, [previews]);
+  const previewHitHeight = previewLayouts.reduce(
+    (height, layout) =>
+      Math.max(height, layout.expandedBottom + layout.expanded.height),
+    FOLDER_HEIGHT,
+  );
   const shouldOpen =
     isExit || receiving || dropOpen || (!loading && !interactionDisabled && hovered);
   const { value: openProgress, settled: openSettled } = useSpringValue(shouldOpen ? 1 : 0, {
@@ -367,6 +374,20 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   useEffect(() => {
     if (receiving) receivedRef.current = true;
   }, [receiving]);
+
+  useEffect(() => {
+    if (!hovered) return;
+    const handlePointerMove = (event: PointerEvent) => {
+      const art = artRef.current;
+      const target = event.target;
+      if (art && target instanceof Node && art.contains(target)) return;
+      setHovered(false);
+    };
+    window.addEventListener("pointermove", handlePointerMove, true);
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove, true);
+    };
+  }, [hovered]);
 
   useEffect(() => {
     if (
@@ -454,7 +475,27 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
           />
         </svg>
 
-        <span className="gallery-folder-previews">
+        <span
+          className="gallery-folder-previews"
+          style={{
+            height: previewHitHeight,
+            pointerEvents: shouldExpandPreviews ? "auto" : "none",
+          }}
+          onPointerEnter={() => {
+            if (!loading && !interactionDisabled) setHovered(true);
+          }}
+          onPointerLeave={(event) => {
+            const nextTarget = event.relatedTarget;
+            const folder = event.currentTarget.closest(".gallery-folder");
+            if (
+              nextTarget &&
+              folder?.contains(nextTarget as Node)
+            ) {
+              return;
+            }
+            setHovered(false);
+          }}
+        >
           {previews.map((item, index) => {
             const layout = previewLayouts[index];
             const width =
@@ -493,9 +534,32 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
                 className="gallery-folder-preview"
                 data-folder-depth={layout.deep ? "deep" : "top"}
                 data-folder-orientation={layout.isWide ? "strip" : "portrait"}
+                data-quick-edit={onPreviewEdit ? true : undefined}
                 alt=""
                 draggable={false}
-                style={style}
+                style={{
+                  ...style,
+                  pointerEvents:
+                    onPreviewEdit && shouldExpandPreviews ? "auto" : "none",
+                }}
+                onPointerDown={(event) => {
+                  if (onPreviewEdit && shouldExpandPreviews) {
+                    event.stopPropagation();
+                  }
+                }}
+                onClick={(event) => {
+                  if (!onPreviewEdit || !shouldExpandPreviews) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setHovered(false);
+                  onPreviewEdit(item, {
+                    left: rect.left,
+                    top: rect.top,
+                    width: rect.width,
+                    height: rect.height,
+                  });
+                }}
               />
             );
           })}

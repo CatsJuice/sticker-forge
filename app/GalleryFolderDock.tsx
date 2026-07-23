@@ -63,6 +63,7 @@ type GalleryFolderDockProps = {
     folderId: string,
     origins: Record<string, GalleryEntryOrigin>,
   ) => void;
+  onPreviewEdit: (item: GalleryItem, origin: GalleryEntryOrigin) => void;
   onFolderDeleted: (folderId: string) => void;
 };
 
@@ -463,6 +464,7 @@ export function GalleryFolderDock({
   onFoldersChange,
   onItemsChange,
   onFolderOpen,
+  onPreviewEdit,
   onFolderDeleted,
 }: GalleryFolderDockProps) {
   const t = COPY[locale];
@@ -784,6 +786,7 @@ export function GalleryFolderDock({
                   receivingItemId={isDefault ? receivingItemId : undefined}
                   flight={isDefault ? flight : undefined}
                   onReceiveClosed={isDefault ? onReceiveClosed : undefined}
+                  onPreviewEdit={mode === null ? onPreviewEdit : undefined}
                   onOpen={(origins) => onFolderOpen(folder.id, origins)}
                 />
 

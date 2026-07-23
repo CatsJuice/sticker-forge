@@ -3455,7 +3455,9 @@ body {
 .gallery-folder-previews {
   position: absolute;
   z-index: 10;
-  inset: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: block;
   /* Keep the stack free above and beside the folder, but never let a
      returning preview leak past the artwork's 94.8% bottom edge. */
@@ -3506,6 +3508,33 @@ body {
   filter: drop-shadow(0 2.5px 3.5px rgba(19, 26, 43, 0.2));
   transform-origin: 50% 50%;
   will-change: transform, opacity;
+  user-select: none;
+}
+
+.gallery-folder-preview[data-quick-edit="true"] {
+  cursor: pointer;
+  transition:
+    scale 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    translate 160ms cubic-bezier(0.22, 1, 0.36, 1),
+    filter 160ms ease;
+}
+
+.gallery-folder-preview[data-quick-edit="true"]:hover {
+  scale: 1.055;
+  translate: 0 -4px;
+  filter:
+    drop-shadow(0 4px 7px rgba(19, 26, 43, 0.24))
+    drop-shadow(0 0 0.35rem rgba(255, 255, 255, 0.72));
+}
+
+.gallery-quick-edit-flight {
+  position: fixed;
+  z-index: 121;
+  object-fit: contain;
+  filter: drop-shadow(0 10px 18px rgba(26, 25, 34, 0.16));
+  transform-origin: 50% 50%;
+  will-change: left, top, width, height, transform, opacity;
+  pointer-events: none;
   user-select: none;
 }
 

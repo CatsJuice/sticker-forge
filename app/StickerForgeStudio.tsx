@@ -52,6 +52,7 @@ import {
 import {
   createGalleryItem,
   deleteGalleryItem,
+  getGalleryAsset,
   listGalleryFolders,
   listGalleryItems,
   updateGalleryLayout,
@@ -73,6 +74,7 @@ import {
   type GalleryFolderDropPreview,
 } from "./GalleryCanvas";
 import { GalleryFolderDock } from "./GalleryFolderDock";
+import { GalleryQuickEditFlight } from "./GalleryQuickEditFlight";
 import {
   GalleryAddFlight,
   type GalleryAddFlightRect,
@@ -897,6 +899,13 @@ export function StickerForgeStudio() {
   const [collapseGalleryPreviewsImmediately, setCollapseGalleryPreviewsImmediately] =
     useState(false);
   const [galleryEditorReady, setGalleryEditorReady] = useState(false);
+  const [galleryQuickEdit, setGalleryQuickEdit] = useState<{
+    item: GalleryItem;
+    asset: GalleryAsset;
+    start: GalleryEntryOrigin;
+    target: GalleryEntryOrigin;
+    targetRotation: number;
+  } | null>(null);
   const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
     Record<string, GalleryEntryOrigin>
   >({});
@@ -2756,7 +2765,57 @@ export function StickerForgeStudio() {
           setCollapseGalleryPreviewsImmediately(false);
           setGalleryOpen(true);
         }}
+        onPreviewEdit={(item, origin) => {
+          if (
+            galleryLoading ||
+            galleryAdding ||
+            galleryEditing ||
+            galleryClosing ||
+            galleryOpen
+          ) {
+            return;
+          }
+          const host = stageRef.current;
+          if (!host) return;
+          setGalleryEditorReady(false);
+          setGalleryEditing(true);
+          void getGalleryAsset(item.id)
+            .then((asset) => {
+              const target = editorStickerRect(
+                host,
+                item.previewWidth / Math.max(1, item.previewHeight),
+              );
+              setGalleryQuickEdit({
+                item,
+                asset,
+                start: origin,
+                target,
+                targetRotation: -(asset.options.tilt ?? 0),
+              });
+            })
+            .catch(() => {
+              setGalleryEditing(false);
+              setSourceMessage(t.assetFailed);
+            });
+        }}
       />
+      {galleryQuickEdit ? (
+        <GalleryQuickEditFlight
+          itemId={galleryQuickEdit.item.id}
+          start={galleryQuickEdit.start}
+          target={galleryQuickEdit.target}
+          targetRotation={galleryQuickEdit.targetRotation}
+          editorReady={galleryEditorReady}
+          onArrived={() => {
+            void applyGalleryAssetToEditor(galleryQuickEdit.asset);
+          }}
+          onComplete={() => {
+            setGalleryQuickEdit(null);
+            setGalleryEditing(false);
+            setGalleryEditorReady(false);
+          }}
+        />
+      ) : null}
       <span className="sr-only" aria-live="polite">
         {sourceMessage || t.localOnly}
       </span>

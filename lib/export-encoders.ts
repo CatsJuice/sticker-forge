@@ -14,6 +14,11 @@ export type ExportFrame = {
   durationMs: number;
 };
 
+export type ExportFrameProcessingOptions = {
+  onProgress?: (progress: number) => void;
+  transformFrame?: (frame: ExportFrame, index: number) => ExportFrame;
+};
+
 export type PcmAudioTrack = {
   /** Interleaved signed 16-bit little-endian PCM samples. */
   pcm: Uint8Array;
@@ -214,12 +219,14 @@ export function prepareGifAlpha(
 
 export async function encodeTransparentGif(
   frames: ExportFrame[],
-  options: { includeShadow?: boolean } = {},
+  options: ExportFrameProcessingOptions & { includeShadow?: boolean } = {},
 ) {
   if (!frames.length) throw new Error("No frames were provided for GIF export.");
   const gif = GIFEncoder({ initialCapacity: 1024 * 1024 });
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
-    const frame = frames[frameIndex];
+    const frame =
+      options.transformFrame?.(frames[frameIndex], frameIndex) ??
+      frames[frameIndex];
     const gifRgba = prepareGifAlpha(
       frame.rgba,
       frame.width,
@@ -255,6 +262,7 @@ export async function encodeTransparentGif(
       repeat: 0,
       dispose: 2,
     });
+    options.onProgress?.((frameIndex + 1) / frames.length);
     if (frameIndex % 4 === 3) {
       await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
     }
@@ -335,27 +343,14 @@ async function compressPngData(data: Uint8Array) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-function validateAnimationFrames(frames: ExportFrame[], format: string) {
-  if (!frames.length) {
-    throw new Error(`No frames were provided for ${format} export.`);
-  }
-  const { width, height } = frames[0];
-  for (const frame of frames) {
-    if (frame.width !== width || frame.height !== height) {
-      throw new Error(
-        `All ${format} export frames must use the same dimensions.`,
-      );
-    }
-    if (frame.rgba.byteLength !== width * height * 4) {
-      throw new Error(`A ${format} export frame contains invalid RGBA data.`);
-    }
-  }
-  return { width, height };
-}
-
 /** Encodes full 8-bit alpha into a standards-compliant animated PNG. */
-export async function encodeTransparentApng(frames: ExportFrame[]) {
-  const { width, height } = validateAnimationFrames(frames, "APNG");
+export async function encodeTransparentApng(
+  frames: ExportFrame[],
+  options: ExportFrameProcessingOptions = {},
+) {
+  if (!frames.length) throw new Error("No frames were provided for APNG export.");
+  const firstFrame = options.transformFrame?.(frames[0], 0) ?? frames[0];
+  const { width, height } = firstFrame;
   const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const header = new Uint8Array(13);
   const headerView = new DataView(header.buffer);
@@ -377,7 +372,18 @@ export async function encodeTransparentApng(frames: ExportFrame[]) {
   ];
   let sequence = 0;
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
-    const frame = frames[frameIndex];
+    const frame =
+      frameIndex === 0
+        ? firstFrame
+        : (options.transformFrame?.(frames[frameIndex], frameIndex) ??
+          frames[frameIndex]);
+    if (
+      frame.width !== width ||
+      frame.height !== height ||
+      frame.rgba.byteLength !== width * height * 4
+    ) {
+      throw new Error("All APNG export frames must use the same dimensions.");
+    }
     const frameControl = new Uint8Array(26);
     const frameControlView = new DataView(frameControl.buffer);
     frameControlView.setUint32(0, sequence);
@@ -416,6 +422,7 @@ export async function encodeTransparentApng(frames: ExportFrame[]) {
     if (frameIndex % 2 === 1) {
       await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
     }
+    options.onProgress?.((frameIndex + 1) / frames.length);
   }
   parts.push(pngChunk("IEND"));
   const output = concatBytes(parts);
@@ -657,22 +664,26 @@ export async function encodeTransparentMov(
   frames: ExportFrame[],
   framesPerSecond: number,
   audio?: PcmAudioTrack,
+  options: ExportFrameProcessingOptions = {},
 ) {
   if (!frames.length) throw new Error("No frames were provided for MOV export.");
-  const width = frames[0].width;
-  const height = frames[0].height;
+  const firstFrame = options.transformFrame?.(frames[0], 0) ?? frames[0];
+  const width = firstFrame.width;
+  const height = firstFrame.height;
   if (width % 2 !== 0 || height % 2 !== 0) {
     throw new Error("MOV export dimensions must be even numbers.");
   }
   if (!Number.isFinite(framesPerSecond) || framesPerSecond <= 0) {
     throw new Error("MOV export frame rate must be greater than zero.");
   }
-  for (const frame of frames) {
-    if (frame.width !== width || frame.height !== height) {
-      throw new Error("All MOV export frames must use the same dimensions.");
-    }
-    if (frame.rgba.byteLength !== width * height * 4) {
-      throw new Error("A MOV export frame contains invalid RGBA data.");
+  if (!options.transformFrame) {
+    for (const frame of frames) {
+      if (frame.width !== width || frame.height !== height) {
+        throw new Error("All MOV export frames must use the same dimensions.");
+      }
+      if (frame.rgba.byteLength !== width * height * 4) {
+        throw new Error("A MOV export frame contains invalid RGBA data.");
+      }
     }
   }
 
@@ -689,13 +700,25 @@ export async function encodeTransparentMov(
       range: "limited",
     });
     for (let index = 0; index < frames.length; index += 1) {
+      const frame =
+        index === 0
+          ? firstFrame
+          : (options.transformFrame?.(frames[index], index) ?? frames[index]);
+      if (
+        frame.width !== width ||
+        frame.height !== height ||
+        frame.rgba.byteLength !== width * height * 4
+      ) {
+        throw new Error("All MOV export frames must use the same dimensions.");
+      }
       encoder.addFrameRgba(
         repairTransparentEdgeColors(
-          frames[index].rgba,
-          frames[index].width,
-          frames[index].height,
+          frame.rgba,
+          frame.width,
+          frame.height,
         ),
       );
+      options.onProgress?.((index + 1) / frames.length);
       if (index % 3 === 2) {
         await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
       }

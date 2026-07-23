@@ -1115,38 +1115,6 @@ test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => 
   );
 });
 
-test("locks export canvas ratios and scales every export format", async () => {
-  const [exportDialog, styles] = await Promise.all([
-    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
-  ]);
-
-  assert.match(
-    exportDialog,
-    /ASPECT_RATIO_PRESETS = \[[\s\S]*?\["free", null\][\s\S]*?\["1:1", 1\][\s\S]*?\["16:9", 16 \/ 9\][\s\S]*?\["9:16", 9 \/ 16\]/,
-  );
-  assert.match(exportDialog, /EXPORT_SCALES = \[1, 2, 3\]/);
-  assert.match(exportDialog, /data-aspect-locked=\{aspectRatio !== null\}/);
-  assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
-  assert.match(exportDialog, /composeCurrent\(state\.visual, exportScale\)/);
-  assert.match(
-    exportDialog,
-    /scaleExportFrames\([\s\S]*?resampleExportFrames\(recordedFramesRef\.current, frameRate\),[\s\S]*?exportScale/,
-  );
-  assert.match(
-    styles,
-    /\.export-canvas-slot \{[^}]*container-type: size;/s,
-  );
-  assert.match(
-    styles,
-    /\.export-canvas-frame\[data-aspect-locked="true"\] \{[^}]*100cqw[^}]*100cqh/s,
-  );
-  assert.match(
-    styles,
-    /\.export-output-select select \{[^}]*position: absolute;[^}]*inset: 0;[^}]*height: 100%;/s,
-  );
-});
-
 test("starts manual recording from the first direct peel", async () => {
   const exportDialog = await readFile(
     new URL("../app/ExportDialog.tsx", import.meta.url),

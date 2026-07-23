@@ -37,16 +37,15 @@ import {
   type StickerSource,
 } from "@/lib/sticker-forge";
 import {
-  appendPlaybackInterval,
   downloadBlob,
-  encodeTransparentApng,
-  encodeTransparentGif,
-  encodeTransparentMov,
-  repairTransparentEdgeColors,
-  resampleExportFrames,
   type ExportFrame,
 } from "@/lib/export-encoders";
 import { renderStickerExportAudio } from "@/lib/export-audio";
+import {
+  startStickerExportWorker,
+  type StickerExportWorkerTask,
+} from "@/lib/export-worker-client";
+import type { StickerExportFormat } from "@/lib/export-worker-types";
 
 type ExportMode = "static" | "animated" | "embed";
 type AnimationMethod = "manual" | "automatic";
@@ -58,6 +57,15 @@ type TransformState = { x: number; y: number; zoom: number };
 type MotionAnchor = keyof StickerPlaybackMotion;
 type AspectRatioPreset = "free" | "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
 type ExportScale = 0.25 | 0.5 | 0.75 | 1 | 1.25 | 1.5 | 2 | 3 | 4;
+type ExportProgressStage =
+  | "capturing"
+  | "preparing"
+  | "encoding"
+  | "canceling";
+type ExportProgressState = {
+  progress: number;
+  stage: ExportProgressStage;
+};
 type VisualMotion = {
   x: number;
   y: number;
@@ -176,6 +184,11 @@ const COPY = {
     videoSoundHint: "在 MOV 中加入撕开与重新入场音效",
     frameRate: "帧率",
     exporting: "正在合成透明帧…",
+    capturingFrames: "正在采集动画帧…",
+    preparingExport: "正在准备导出…",
+    cancelExport: "取消",
+    cancelingExport: "正在取消…",
+    exportCanceled: "已取消导出",
     encodingGif: "正在编码 GIF…",
     encodingApng: "正在编码 APNG…",
     encodingMov: "正在编码 MOV…",
@@ -231,6 +244,11 @@ const COPY = {
     videoSoundHint: "Include peel and re-entry sounds in MOV exports",
     frameRate: "Frame rate",
     exporting: "Compositing transparent frames…",
+    capturingFrames: "Capturing animation frames…",
+    preparingExport: "Preparing export…",
+    cancelExport: "Cancel",
+    cancelingExport: "Canceling…",
+    exportCanceled: "Export canceled",
     encodingGif: "Encoding GIF…",
     encodingApng: "Encoding APNG…",
     encodingMov: "Encoding MOV…",
@@ -288,6 +306,16 @@ function stickerDisplaySize(
 
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function throwIfAborted(signal: AbortSignal) {
+  if (signal.aborted) {
+    throw new DOMException("Export canceled.", "AbortError");
+  }
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function cubicBezierAt(progress: number, points: [number, number, number, number]) {
@@ -382,15 +410,6 @@ function automaticPhaseAt(elapsed: number, speed: number) {
   };
 }
 
-function canvasBlob(canvas: HTMLCanvasElement, type: string) {
-  return new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob) resolve(blob);
-      else reject(new Error("Canvas encoding failed."));
-    }, type);
-  });
-}
-
 function scaledExportSize(
   width: number,
   height: number,
@@ -440,51 +459,6 @@ function drawCompositedFrame(
   );
   context.restore();
   return context;
-}
-
-function scaleExportFrames(frames: ExportFrame[], outputScale: ExportScale) {
-  if (outputScale === 1) return frames;
-  const source = document.createElement("canvas");
-  const destination = document.createElement("canvas");
-  const sourceContext = source.getContext("2d");
-  const destinationContext = destination.getContext("2d", {
-    willReadFrequently: true,
-  });
-  if (!sourceContext || !destinationContext) {
-    throw new Error("Canvas 2D is unavailable.");
-  }
-  return frames.map((frame) => {
-    source.width = frame.width;
-    source.height = frame.height;
-    sourceContext.putImageData(
-      new ImageData(
-        new Uint8ClampedArray(frame.rgba),
-        frame.width,
-        frame.height,
-      ),
-      0,
-      0,
-    );
-    const { width, height } = scaledExportSize(
-      frame.width,
-      frame.height,
-      outputScale,
-    );
-    destination.width = width;
-    destination.height = height;
-    destinationContext.imageSmoothingEnabled = true;
-    destinationContext.imageSmoothingQuality = "high";
-    destinationContext.clearRect(0, 0, width, height);
-    destinationContext.drawImage(source, 0, 0, width, height);
-    return {
-      rgba: new Uint8ClampedArray(
-        destinationContext.getImageData(0, 0, width, height).data,
-      ),
-      width,
-      height,
-      durationMs: frame.durationMs,
-    };
-  });
 }
 
 function BezierCurveEditor({
@@ -838,6 +812,7 @@ export function ExportDialog({
   const closeRef = useRef<HTMLButtonElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const stickerHostRef = useRef<HTMLDivElement>(null);
+  const exportStickerHostRef = useRef<HTMLDivElement>(null);
   const layerRef = useRef<HTMLDivElement>(null);
   const playbackRef = useRef<HTMLCanvasElement>(null);
   const bezierControlRef = useRef<HTMLDivElement>(null);
@@ -845,6 +820,8 @@ export function ExportDialog({
   const intervalControlRef = useRef<HTMLDivElement>(null);
   const exportActionsRef = useRef<HTMLDivElement>(null);
   const controllerRef = useRef<StickerInstance | null>(null);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const exportWorkerTaskRef = useRef<StickerExportWorkerTask | null>(null);
   const composeCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const recordingCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const recordingFrameRef = useRef(0);
@@ -929,6 +906,10 @@ export function ExportDialog({
   >(null);
   const [status, setStatus] = useState("");
   const [copied, setCopied] = useState(false);
+  const [exportProgress, setExportProgress] = useState<ExportProgressState>({
+    progress: 0,
+    stage: "preparing",
+  });
 
   const easing = useMemo<[number, number, number, number]>(() => {
     if (easingPreset === "linear") return [0, 0, 1, 1];
@@ -951,6 +932,91 @@ export function ExportDialog({
   );
   const outputExceeds4k =
     outputSize.width * outputSize.height > FOUR_K_PIXEL_COUNT;
+
+  const updateExportProgress = useCallback(
+    (progress: number, stage: ExportProgressStage) => {
+      const normalized = clamp(progress, 0, 1);
+      setExportProgress((current) => ({
+        progress: Math.max(current.progress, normalized),
+        stage,
+      }));
+    },
+    [],
+  );
+
+  const beginExport = (format: NonNullable<typeof busy>) => {
+    const abortController = new AbortController();
+    exportAbortRef.current = abortController;
+    panRef.current = null;
+    setSnapping({ x: false, y: false });
+    setBezierOpen(false);
+    setSpeedOpen(false);
+    setIntervalOpen(false);
+    setExportMenuOpen(null);
+    setBusy(format);
+    setExportProgress({
+      progress: 0.01,
+      stage: format === "png" ? "preparing" : "capturing",
+    });
+    return abortController.signal;
+  };
+
+  const runExportWorker = useCallback(
+    async ({
+      audio,
+      format,
+      frameRate,
+      frames,
+      signal,
+    }: {
+      audio?: Awaited<ReturnType<typeof renderStickerExportAudio>>;
+      format: StickerExportFormat;
+      frameRate: number;
+      frames: ExportFrame[];
+      signal: AbortSignal;
+    }) => {
+      throwIfAborted(signal);
+      const task = startStickerExportWorker(
+        {
+          audio,
+          format,
+          frameRate,
+          frames,
+          gifShadow,
+          id: crypto.randomUUID(),
+          outputScale: exportScale,
+          playbackInterval,
+        },
+        (message) => {
+          const stage: ExportProgressStage =
+            message.stage === "encoding" ? "encoding" : "preparing";
+          updateExportProgress(0.36 + message.progress * 0.63, stage);
+        },
+      );
+      exportWorkerTaskRef.current = task;
+      const onAbort = () => task.cancel();
+      signal.addEventListener("abort", onAbort, { once: true });
+      try {
+        return await task.promise;
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+        if (exportWorkerTaskRef.current === task) {
+          exportWorkerTaskRef.current = null;
+        }
+      }
+    },
+    [exportScale, gifShadow, playbackInterval, updateExportProgress],
+  );
+
+  const cancelExport = useCallback(() => {
+    if (!exportAbortRef.current) return;
+    setExportProgress((current) => ({
+      ...current,
+      stage: "canceling",
+    }));
+    exportAbortRef.current.abort();
+    exportWorkerTaskRef.current?.cancel();
+  }, []);
 
   const setTransformSynced = useCallback((next: TransformState) => {
     transformRef.current = next;
@@ -983,6 +1049,14 @@ export function ExportDialog({
   useEffect(() => {
     playbackIntervalRef.current = playbackInterval;
   }, [playbackInterval]);
+
+  useEffect(
+    () => () => {
+      exportAbortRef.current?.abort();
+      exportWorkerTaskRef.current?.cancel();
+    },
+    [],
+  );
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement as HTMLElement | null;
@@ -1166,7 +1240,7 @@ export function ExportDialog({
   }, [transform.zoom]);
 
   useEffect(() => {
-    if (mode !== "animated" || animationMethod !== "automatic" || busy) {
+    if (mode !== "animated" || animationMethod !== "automatic") {
       return;
     }
     let frame = 0;
@@ -1238,7 +1312,7 @@ export function ExportDialog({
     };
     frame = requestAnimationFrame(render);
     return () => cancelAnimationFrame(frame);
-  }, [animationMethod, busy, mode, size]);
+  }, [animationMethod, mode, size]);
 
   const getSourceCanvas = useCallback(() => {
     const canvas = stickerHostRef.current?.querySelector("canvas");
@@ -1435,9 +1509,10 @@ export function ExportDialog({
   };
 
   const previewLocked =
-    mode === "animated" &&
-    animationMethod === "manual" &&
-    manualState === "recorded";
+    Boolean(busy) ||
+    (mode === "animated" &&
+      animationMethod === "manual" &&
+      manualState === "recorded");
 
   const canPanDirectly =
     mode === "animated" &&
@@ -1716,150 +1791,165 @@ export function ExportDialog({
   );
 
   const exportPng = async () => {
-    setBusy("png");
+    if (exportAbortRef.current) return;
+    const signal = beginExport("png");
     setStatus(t.exporting);
     try {
-      controllerRef.current?.setRenderScale(
-        Math.max(1, transformRef.current.zoom * exportScale),
-      );
       await nextFrame();
-      const { canvas, context } = composeCurrent(EMPTY_MOTION, exportScale);
-      const { width: outputWidth, height: outputHeight } = scaledExportSize(
-        size.width,
-        size.height,
-        exportScale,
-      );
-      const imageData = context.getImageData(0, 0, outputWidth, outputHeight);
-      imageData.data.set(
-        repairTransparentEdgeColors(
-          imageData.data,
-          outputWidth,
-          outputHeight,
+      throwIfAborted(signal);
+      const { context } = composeCurrent(EMPTY_MOTION);
+      const frame: ExportFrame = {
+        durationMs: 0,
+        height: size.height,
+        rgba: new Uint8ClampedArray(
+          context.getImageData(0, 0, size.width, size.height).data,
         ),
-      );
-      context.putImageData(imageData, 0, 0);
-      downloadBlob(await canvasBlob(canvas, "image/png"), "sticker-forge.png");
+        width: size.width,
+      };
+      updateExportProgress(0.34, "preparing");
+      const blob = await runExportWorker({
+        format: "png",
+        frameRate: 1,
+        frames: [frame],
+        signal,
+      });
+      throwIfAborted(signal);
+      downloadBlob(blob, "sticker-forge.png");
+      updateExportProgress(1, "encoding");
       setStatus(t.exportDone);
-    } catch {
-      setStatus(t.exportFailed);
+    } catch (error) {
+      if (isAbortError(error)) setStatus(t.exportCanceled);
+      else {
+        console.error("Sticker export failed.", error);
+        setStatus(t.exportFailed);
+      }
     } finally {
-      controllerRef.current?.setRenderScale(
-        Math.max(1, transformRef.current.zoom),
-      );
+      exportAbortRef.current = null;
+      exportWorkerTaskRef.current = null;
       setBusy(null);
     }
   };
 
-  const prepareAutomaticFrames = async (frameRate: number) => {
+  const prepareAutomaticFrames = async (
+    frameRate: number,
+    signal: AbortSignal,
+  ) => {
+    const host = exportStickerHostRef.current;
+    if (!host) throw new Error("The export renderer is unavailable.");
     const frames: ExportFrame[] = [];
     const duration = automaticDuration(speed);
     const frameDuration = 1000 / frameRate;
     const frameCount = Math.max(2, Math.ceil((duration / 1000) * frameRate));
-    for (let index = 0; index < frameCount; index += 1) {
-      const timeline = automaticPhaseAt(index * frameDuration, speed);
-      const state = autoFrameAt(
-        timeline.phase,
-        timeline.progress,
-        easing,
-        motion,
-        size,
-      );
-      if (state.entranceProgress === null) {
-        controllerRef.current?.setPeelProgress(state.peel, motion);
-      } else {
-        controllerRef.current?.setEntranceProgress(state.entranceProgress);
+    const captureCanvas = document.createElement("canvas");
+    host.style.width = `${size.width}px`;
+    host.style.height = `${size.height}px`;
+    let exportController: StickerInstance | null = null;
+    try {
+      exportController = await createSticker(host, {
+        ...options,
+        source,
+        peel: { ...options.peel, release: "stay" },
+        sound: { ...options.sound, enabled: false },
+      });
+      throwIfAborted(signal);
+      exportController.setRenderScale(Math.max(1, transformRef.current.zoom));
+      const sourceCanvas = host.querySelector("canvas");
+      if (!sourceCanvas) throw new Error("The export renderer is not ready.");
+      for (let index = 0; index < frameCount; index += 1) {
+        throwIfAborted(signal);
+        const timeline = automaticPhaseAt(index * frameDuration, speed);
+        const state = autoFrameAt(
+          timeline.phase,
+          timeline.progress,
+          easing,
+          motion,
+          size,
+        );
+        if (state.entranceProgress === null) {
+          exportController.setPeelProgress(state.peel, motion);
+        } else {
+          exportController.setEntranceProgress(state.entranceProgress);
+        }
+        const context = drawCompositedFrame(
+          captureCanvas,
+          sourceCanvas,
+          size.width,
+          size.height,
+          transformRef.current,
+          state.visual,
+        );
+        frames.push({
+          durationMs: frameDuration,
+          height: size.height,
+          rgba: new Uint8ClampedArray(
+            context.getImageData(0, 0, size.width, size.height).data,
+          ),
+          width: size.width,
+        });
+        updateExportProgress(
+          0.03 + ((index + 1) / frameCount) * 0.3,
+          "capturing",
+        );
+        await nextFrame();
       }
-      const { context } = composeCurrent(state.visual, exportScale);
-      const { width: outputWidth, height: outputHeight } = scaledExportSize(
-        size.width,
-        size.height,
-        exportScale,
-      );
-      frames.push({
-        rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, outputWidth, outputHeight).data,
-        ),
-        width: outputWidth,
-        height: outputHeight,
-        durationMs: frameDuration,
-      });
-      if (index % 4 === 3) await nextFrame();
+      return frames;
+    } finally {
+      exportController?.destroy();
+      host.replaceChildren();
+      host.style.removeProperty("width");
+      host.style.removeProperty("height");
     }
-    controllerRef.current?.setPeelProgress(0, motion);
-    if (playbackInterval > 0) {
-      const { context } = composeCurrent(EMPTY_MOTION, exportScale);
-      const { width: outputWidth, height: outputHeight } = scaledExportSize(
-        size.width,
-        size.height,
-        exportScale,
-      );
-      frames.push({
-        rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, outputWidth, outputHeight).data,
-        ),
-        width: outputWidth,
-        height: outputHeight,
-        durationMs: frameDuration,
-      });
-    }
-    return frames;
   };
 
-  const prepareRecordedFrames = async (frameRate: number) => {
-    return scaleExportFrames(
-      resampleExportFrames(recordedFramesRef.current, frameRate),
-      exportScale,
-    );
+  const prepareRecordedFrames = async (
+    _frameRate: number,
+    signal: AbortSignal,
+  ) => {
+    const sourceFrames = recordedFramesRef.current;
+    const frames: ExportFrame[] = [];
+    for (let index = 0; index < sourceFrames.length; index += 1) {
+      throwIfAborted(signal);
+      const frame = sourceFrames[index];
+      frames.push({
+        ...frame,
+        rgba: new Uint8ClampedArray(frame.rgba),
+      });
+      updateExportProgress(
+        0.03 + ((index + 1) / sourceFrames.length) * 0.3,
+        "capturing",
+      );
+      if (index % 4 === 3) await nextFrame();
+    }
+    return frames;
   };
 
   const exportAnimation = async (
     format: "gif" | "apng" | "mov",
     frameRate: number,
   ) => {
+    if (exportAbortRef.current) return;
     if (format === "gif") setGifFrameRate(frameRate);
     else if (format === "apng") setApngFrameRate(frameRate);
     else setMovFrameRate(frameRate);
     setExportMenuOpen(null);
-    setBusy(format);
+    const signal = beginExport(format);
     setStatus(t.exporting);
     try {
-      if (animationMethod === "automatic") {
-        controllerRef.current?.setRenderScale(
-          Math.max(1, transformRef.current.zoom * exportScale),
-        );
-        await nextFrame();
-      }
       const animationFrames =
         animationMethod === "automatic"
-          ? await prepareAutomaticFrames(frameRate)
-          : await prepareRecordedFrames(frameRate);
+          ? await prepareAutomaticFrames(frameRate, signal)
+          : await prepareRecordedFrames(frameRate, signal);
+      throwIfAborted(signal);
       if (!animationFrames.length) throw new Error("Record an animation first.");
       const animationDurationMs = animationFrames.reduce(
         (duration, frame) => duration + frame.durationMs,
         0,
       );
-      const frames = appendPlaybackInterval(
-        animationFrames,
-        frameRate,
-        playbackInterval,
-        format === "mov",
-      );
-      if (format === "gif") {
-        setStatus(t.encodingGif);
-        const blob = await encodeTransparentGif(frames, {
-          includeShadow: gifShadow,
-        });
-        downloadBlob(blob, "sticker-forge.gif");
-      } else if (format === "apng") {
-        setStatus(t.encodingApng);
-        const blob = await encodeTransparentApng(frames);
-        downloadBlob(blob, "sticker-forge.png");
-      } else {
-        setStatus(t.encodingMov);
-        const durationMs = frames.reduce(
-          (duration, frame) => duration + frame.durationMs,
-          0,
-        );
+      updateExportProgress(0.34, "preparing");
+      let audio:
+        | Awaited<ReturnType<typeof renderStickerExportAudio>>
+        | undefined;
+      if (format === "mov" && videoSound) {
         const reappearAtMs =
           animationMethod === "automatic"
             ? AUTO_PEEL_DURATION_MS / speed + AUTO_EXIT_DURATION_MS
@@ -1871,26 +1961,42 @@ export function ExportDialog({
           animationMethod === "automatic"
             ? AUTO_PEEL_DURATION_MS / speed
             : Math.max(100, reappearAtMs - AUTO_EXIT_DURATION_MS);
-        const audio = videoSound
-          ? await renderStickerExportAudio({
-              durationMs,
-              peelDurationMs,
-              reappearAtMs,
-              peelSoundSrc: options.sound?.src,
-              volume: options.sound?.volume ?? 0.7,
-            })
-          : undefined;
-        const blob = await encodeTransparentMov(frames, frameRate, audio);
-        downloadBlob(blob, "sticker-forge-alpha.mov");
+        audio = await renderStickerExportAudio({
+          durationMs: animationDurationMs + playbackInterval * 1000,
+          peelDurationMs,
+          reappearAtMs,
+          peelSoundSrc: options.sound?.src,
+          volume: options.sound?.volume ?? 0.7,
+        });
+        throwIfAborted(signal);
       }
+      const blob = await runExportWorker({
+        audio,
+        format,
+        frameRate,
+        frames: animationFrames,
+        signal,
+      });
+      throwIfAborted(signal);
+      downloadBlob(
+        blob,
+        format === "gif"
+          ? "sticker-forge.gif"
+          : format === "apng"
+            ? "sticker-forge.png"
+            : "sticker-forge-alpha.mov",
+      );
+      updateExportProgress(1, "encoding");
       setStatus(t.exportDone);
     } catch (error) {
-      console.error("Sticker export failed.", error);
-      setStatus(t.exportFailed);
+      if (isAbortError(error)) setStatus(t.exportCanceled);
+      else {
+        console.error("Sticker export failed.", error);
+        setStatus(t.exportFailed);
+      }
     } finally {
-      controllerRef.current?.setRenderScale(
-        Math.max(1, transformRef.current.zoom),
-      );
+      exportAbortRef.current = null;
+      exportWorkerTaskRef.current = null;
       setBusy(null);
     }
   };
@@ -1906,6 +2012,7 @@ export function ExportDialog({
   };
 
   const switchMode = (nextMode: ExportMode) => {
+    if (busy) return;
     cancelAnimationFrame(recordingFrameRef.current);
     setBezierOpen(false);
     setSpeedOpen(false);
@@ -1922,6 +2029,20 @@ export function ExportDialog({
   const animationReady =
     animationMethod === "automatic" ||
     (manualState === "recorded" && recordedFrames.length > 1);
+  const exportProgressLabel =
+    exportProgress.stage === "canceling"
+      ? t.cancelingExport
+      : exportProgress.stage === "capturing"
+        ? t.capturingFrames
+        : exportProgress.stage === "preparing"
+          ? t.preparingExport
+          : busy === "gif"
+            ? t.encodingGif
+            : busy === "apng"
+              ? t.encodingApng
+              : busy === "mov"
+                ? t.encodingMov
+                : t.exporting;
   const recordingTip =
     recordingPhase === "waiting"
       ? t.waitingToPeel
@@ -1932,6 +2053,7 @@ export function ExportDialog({
           : "";
 
   const onDialogResizeStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (busy) return;
     const dialog = dialogRef.current;
     if (!dialog) return;
     event.preventDefault();
@@ -2038,6 +2160,7 @@ export function ExportDialog({
                 role="tab"
                 aria-selected={mode === value}
                 data-active={mode === value}
+                disabled={Boolean(busy)}
                 onClick={() => switchMode(value)}
               >
                 <FontAwesomeIcon icon={icon} />
@@ -2134,6 +2257,11 @@ export function ExportDialog({
                 >
                   <div ref={stickerHostRef} className="export-sticker-host" />
                 </div>
+                <div
+                  ref={exportStickerHostRef}
+                  className="export-sticker-export-host"
+                  aria-hidden="true"
+                />
                 <canvas
                   ref={playbackRef}
                   className="export-recorded-playback"
@@ -2224,6 +2352,7 @@ export function ExportDialog({
                     <button
                       type="button"
                       data-active={animationMethod === "manual"}
+                      disabled={Boolean(busy)}
                       onClick={() => {
                         setAnimationMethod("manual");
                         setBezierOpen(false);
@@ -2241,6 +2370,7 @@ export function ExportDialog({
                     <button
                       type="button"
                       data-active={animationMethod === "automatic"}
+                      disabled={Boolean(busy)}
                       onClick={() => {
                         setAnimationMethod("automatic");
                         setIntervalOpen(false);
@@ -2290,6 +2420,7 @@ export function ExportDialog({
                         <span>{t.easing}</span>
                         <select
                           value={easingPreset}
+                          disabled={Boolean(busy)}
                           onChange={(event) => {
                             const nextPreset = event.target.value;
                             setEasingPreset(nextPreset);
@@ -2440,10 +2571,58 @@ export function ExportDialog({
               </label>
             </div>
           ) : null}
-          <div className="export-status" role="status" aria-live="polite">
-            {mode !== "animated" || animationMethod === "automatic" ? status : ""}
-          </div>
-          {mode === "static" ? (
+          {!busy ? (
+            <div className="export-status" role="status" aria-live="polite">
+              {mode !== "animated" || animationMethod === "automatic"
+                ? status
+                : ""}
+            </div>
+          ) : null}
+          {busy ? (
+            <div
+              className="export-progress-panel"
+              role="status"
+              aria-live="polite"
+            >
+              <svg
+                className="export-progress-ring"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(exportProgress.progress * 100)}
+                viewBox="0 0 20 20"
+              >
+                <circle
+                  className="export-progress-ring-track"
+                  cx="10"
+                  cy="10"
+                  r="8"
+                />
+                <circle
+                  className="export-progress-ring-value"
+                  cx="10"
+                  cy="10"
+                  r="8"
+                  pathLength="100"
+                  style={{
+                    strokeDashoffset: 100 - exportProgress.progress * 100,
+                  }}
+                />
+              </svg>
+              <div className="export-progress-copy">
+                <strong>{exportProgressLabel}</strong>
+              </div>
+              <button
+                className="export-cancel-button"
+                type="button"
+                disabled={exportProgress.stage === "canceling"}
+                onClick={cancelExport}
+              >
+                <FontAwesomeIcon icon={faXmark} />
+                {t.cancelExport}
+              </button>
+            </div>
+          ) : mode === "static" ? (
             <button className="export-action-primary" type="button" disabled={Boolean(busy)} onClick={() => void exportPng()}>
               <FontAwesomeIcon icon={faDownload} />
               {t.downloadPng}
@@ -2628,6 +2807,7 @@ export function ExportDialog({
           type="button"
           aria-label={t.resize}
           title={t.resize}
+          disabled={Boolean(busy)}
           onPointerDown={onDialogResizeStart}
           onPointerMove={onDialogResizeMove}
           onPointerUp={onDialogResizeEnd}

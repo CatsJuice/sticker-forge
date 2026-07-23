@@ -1009,9 +1009,11 @@ test("drives processed peel foley from motion instead of absolute progress", asy
 });
 
 test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => {
-  const [exportDialog, encoders, styles] = await Promise.all([
+  const [exportDialog, encoders, exportWorker, workerClient, styles] = await Promise.all([
     readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/export-encoders.ts", import.meta.url), "utf8"),
+    readFile(new URL("../workers/export.worker.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/export-worker-client.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -1023,10 +1025,14 @@ test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => 
   assert.match(exportDialog, /exportAnimation\("gif", frameRate\)/);
   assert.match(exportDialog, /exportAnimation\("apng", frameRate\)/);
   assert.match(exportDialog, /exportAnimation\("mov", frameRate\)/);
-  assert.match(exportDialog, /prepareAutomaticFrames\(frameRate\)/);
-  assert.match(exportDialog, /prepareRecordedFrames\(frameRate\)/);
-  assert.match(exportDialog, /encodeTransparentMov\(frames, frameRate, audio\)/);
-  assert.match(exportDialog, /includeShadow: gifShadow/);
+  assert.match(exportDialog, /prepareAutomaticFrames\(frameRate, signal\)/);
+  assert.match(exportDialog, /prepareRecordedFrames\(frameRate, signal\)/);
+  assert.match(exportDialog, /startStickerExportWorker/);
+  assert.match(exportWorker, /encodeTransparentMov\(/);
+  assert.match(exportWorker, /includeShadow: request\.gifShadow/);
+  assert.match(workerClient, /new Worker\(/);
+  assert.match(workerClient, /worker\.terminate\(\)/);
+  assert.match(workerClient, /DOMException\("Export canceled\.", "AbortError"\)/);
   assert.match(exportDialog, /const \[gifShadow, setGifShadow\] = useState\(true\)/);
   assert.match(exportDialog, /const \[videoSound, setVideoSound\] = useState\(true\)/);
   assert.match(exportDialog, /renderStickerExportAudio/);
@@ -1116,8 +1122,9 @@ test("exports GIF, APNG, and MOV through frame-rate split buttons", async () => 
 });
 
 test("locks export canvas ratios and scales every export format", async () => {
-  const [exportDialog, styles] = await Promise.all([
+  const [exportDialog, exportWorker, styles] = await Promise.all([
     readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../workers/export.worker.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
   ]);
 
@@ -1131,12 +1138,10 @@ test("locks export canvas ratios and scales every export format", async () => {
   );
   assert.match(exportDialog, /function scaledExportSize\(/);
   assert.match(exportDialog, /data-aspect-locked=\{aspectRatio !== null\}/);
-  assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
-  assert.match(exportDialog, /composeCurrent\(state\.visual, exportScale\)/);
-  assert.match(
-    exportDialog,
-    /scaleExportFrames\([\s\S]*?resampleExportFrames\(recordedFramesRef\.current, frameRate\),[\s\S]*?exportScale/,
-  );
+  assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION\)/);
+  assert.match(exportDialog, /outputScale: exportScale/);
+  assert.match(exportWorker, /createFrameScaler\(request\.outputScale\)/);
+  assert.match(exportWorker, /transformFrame: scaleFrame/);
   assert.match(
     exportDialog,
     /const outputSize = useMemo\([\s\S]*?scaledExportSize\(size\.width, size\.height, exportScale\)/,
@@ -1214,7 +1219,7 @@ test("starts manual recording from the first direct peel", async () => {
     /mode === "animated" && animationMethod === "manual"/,
   );
   assert.match(exportDialog, /enabled: previewSoundEnabled/);
-  assert.doesNotMatch(exportDialog, /sound: \{ \.\.\.options\.sound, enabled: false \}/);
+  assert.match(exportDialog, /sound: \{ \.\.\.options\.sound, enabled: false \}/);
   assert.match(
     exportDialog,
     /const onPeelStart = \(\) => \{[\s\S]*?recordedFramesRef\.current\.push\(captureRecordingFrame\(\)\)[\s\S]*?setManualStateSynced\("capturing"\)/,
@@ -1227,4 +1232,33 @@ test("starts manual recording from the first direct peel", async () => {
     exportDialog,
     /animationMethod === "automatic" \|\| manualState === "idle"/,
   );
+});
+
+test("keeps export work cancellable while the preview continues", async () => {
+  const [exportDialog, styles] = await Promise.all([
+    readFile(new URL("../app/ExportDialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(exportDialog, /exportAbortRef\.current\.abort\(\)/);
+  assert.match(exportDialog, /exportWorkerTaskRef\.current\?\.cancel\(\)/);
+  assert.match(exportDialog, /className="export-progress-ring"/);
+  assert.doesNotMatch(exportDialog, /formatRemainingTime|remainingMs|estimating/);
+  assert.match(exportDialog, /className="export-cancel-button"/);
+  assert.match(exportDialog, /className="export-sticker-export-host"/);
+  assert.doesNotMatch(
+    exportDialog,
+    /mode !== "animated" \|\| animationMethod !== "automatic" \|\| busy/,
+  );
+  assert.match(exportDialog, /className="export-progress-ring-value"/);
+  assert.match(
+    styles,
+    /\.export-progress-ring-value \{[^}]*stroke-linecap: round;/s,
+  );
+  assert.match(
+    styles,
+    /\.export-progress-ring \{[^}]*width: 18px;[^}]*height: 18px;/s,
+  );
+  assert.match(styles, /\.export-footer-options \{[^}]*margin-right: auto;/s);
+  assert.match(styles, /\.export-sticker-export-host \{[^}]*left: -100000px;/s);
 });

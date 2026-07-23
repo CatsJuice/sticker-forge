@@ -1748,6 +1748,16 @@ body {
   touch-action: none;
 }
 
+.export-sticker-export-host {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  contain: strict;
+}
+
 .export-recorded-playback {
   z-index: 3;
   width: 100%;
@@ -2550,6 +2560,66 @@ body {
   white-space: nowrap;
 }
 
+.export-progress-panel {
+  min-width: 240px;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.export-progress-ring {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  overflow: visible;
+  fill: none;
+  transform: rotate(-90deg);
+  filter: drop-shadow(0 2px 4px rgba(36, 126, 245, 0.12));
+}
+
+.export-progress-ring-track,
+.export-progress-ring-value {
+  fill: none;
+  stroke-width: 3;
+}
+
+.export-progress-ring-track {
+  stroke: rgba(36, 126, 245, 0.14);
+}
+
+.export-progress-ring-value {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  transition: stroke-dashoffset 160ms linear;
+}
+
+.export-progress-copy {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+.export-progress-copy strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #3f3e45;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.export-dialog-footer .export-cancel-button {
+  min-height: 36px;
+  padding-inline: 13px;
+  color: #d64e56;
+  border-color: rgba(214, 78, 86, 0.18);
+  background: rgba(255, 247, 247, 0.95);
+  box-shadow: none;
+}
+
 .export-dialog-footer button,
 .export-animation-actions button {
   min-height: 40px;
@@ -2603,6 +2673,7 @@ body {
 }
 
 .export-footer-options {
+  margin-right: auto;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2783,6 +2854,11 @@ body {
   border-radius: 0 0 15px 0;
   filter: drop-shadow(0 1px 2px rgba(16, 18, 24, 0.18));
   pointer-events: none;
+}
+
+.export-dialog-resize-handle:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 @keyframes export-backdrop-in {
@@ -4114,6 +4190,11 @@ body {
 
   .export-status {
     display: none;
+  }
+
+  .export-progress-panel {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .export-dialog-resize-handle {

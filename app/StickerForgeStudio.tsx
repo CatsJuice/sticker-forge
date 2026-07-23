@@ -19,6 +19,8 @@ import {
   faAlignCenter,
   faAlignLeft,
   faAlignRight,
+  faArrowLeft,
+  faArrowRight,
   faArrowUpFromBracket,
   faBold,
   faCheck,
@@ -94,6 +96,7 @@ type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
 type Locale = "zh" | "en";
 const PANEL_AUTO_COLLAPSE_QUERY = "(max-width: 960px)";
+const EXPORT_SHEET_MOBILE_BREAKPOINT = 620;
 type BackgroundRemovalPhase =
   | "idle"
   | "loading"
@@ -908,6 +911,7 @@ export function StickerForgeStudio() {
   const applyingEditorStyleRef = useRef(false);
   const controllerRef = useRef<StickerController | null>(null);
   const textTimerRef = useRef<number | null>(null);
+  const exportThemeRestoreTimerRef = useRef<number | null>(null);
   const sourceRevisionRef = useRef(0);
   const imageImportRevisionRef = useRef(0);
   const backgroundRemovalRevisionRef = useRef(0);
@@ -953,6 +957,7 @@ export function StickerForgeStudio() {
     playing: boolean;
   } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportClosing, setExportClosing] = useState(false);
   const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
   const [exportOptions, setExportOptions] =
     useState<StickerOptions>(DEFAULT_SETTINGS);
@@ -1021,6 +1026,49 @@ export function StickerForgeStudio() {
       query.removeEventListener("change", collapseForNarrowViewport);
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      !exportOpen ||
+      window.innerWidth > EXPORT_SHEET_MOBILE_BREAKPOINT
+    ) {
+      return;
+    }
+    if (exportThemeRestoreTimerRef.current !== null) {
+      window.clearTimeout(exportThemeRestoreTimerRef.current);
+      exportThemeRestoreTimerRef.current = null;
+    }
+    const root = document.documentElement;
+    const body = document.body;
+    let themeMeta = document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"]',
+    );
+    const createdThemeMeta = !themeMeta;
+    if (!themeMeta) {
+      themeMeta = document.createElement("meta");
+      themeMeta.name = "theme-color";
+      document.head.appendChild(themeMeta);
+    }
+    const previousThemeColor = themeMeta.getAttribute("content");
+    root.classList.add("export-sheet-open");
+    body.classList.add("export-sheet-open");
+    themeMeta.setAttribute("content", "#000000");
+
+    return () => {
+      exportThemeRestoreTimerRef.current = window.setTimeout(() => {
+        root.classList.remove("export-sheet-open");
+        body.classList.remove("export-sheet-open");
+        if (createdThemeMeta) {
+          themeMeta?.remove();
+        } else if (previousThemeColor === null) {
+          themeMeta?.removeAttribute("content");
+        } else {
+          themeMeta?.setAttribute("content", previousThemeColor);
+        }
+        exportThemeRestoreTimerRef.current = null;
+      }, 0);
+    };
+  }, [exportOpen]);
 
   const t = UI[locale];
   const backgroundRemovalBusy = !["idle", "error"].includes(
@@ -2320,6 +2368,9 @@ export function StickerForgeStudio() {
       data-panel-open={isPanelOpen}
       data-gallery-open={galleryOpen}
       data-gallery-editing={galleryEditing}
+      data-export-active={exportOpen}
+      data-export-open={exportOpen && !exportClosing}
+      data-export-closing={exportClosing}
     >
       <header className="studio-header">
         <span className="brand-mark" role="img" aria-label="Sticker Forge" />
@@ -2365,6 +2416,20 @@ export function StickerForgeStudio() {
           ) : null}
         </div>
       </section>
+
+      <button
+        className="panel-toggle"
+        data-open={isPanelOpen}
+        type="button"
+        aria-label={isPanelOpen ? t.closePanel : t.openPanel}
+        aria-expanded={isPanelOpen}
+        aria-controls="sticker-controls"
+        onClick={() => setIsPanelOpen((open) => !open)}
+      >
+        <span className="panel-toggle-arrow" aria-hidden="true">
+          <FontAwesomeIcon icon={isPanelOpen ? faArrowRight : faArrowLeft} />
+        </span>
+      </button>
 
         <aside
           ref={controlsCardRef}
@@ -3041,6 +3106,7 @@ export function StickerForgeStudio() {
               onClick={() => {
                 setExportSource(sourceRef.current);
                 setExportOptions(settingsRef.current);
+                setExportClosing(false);
                 setExportOpen(true);
               }}
             >
@@ -3094,15 +3160,22 @@ export function StickerForgeStudio() {
             document.body,
           )
         : null}
-      {exportOpen ? (
-        <ExportDialog
-          source={exportSource}
-          options={exportOptions}
-          embedCode={buildEmbedSnippet(exportSource, exportOptions)}
-          locale={locale}
-          onClose={() => setExportOpen(false)}
-        />
-      ) : null}
+      {exportOpen && typeof document !== "undefined"
+        ? createPortal(
+            <ExportDialog
+              source={exportSource}
+              options={exportOptions}
+              embedCode={buildEmbedSnippet(exportSource, exportOptions)}
+              locale={locale}
+              onClosing={() => setExportClosing(true)}
+              onClose={() => {
+                setExportOpen(false);
+                setExportClosing(false);
+              }}
+            />,
+            document.body,
+          )
+        : null}
       {galleryOpen ? (
         <GalleryCanvas
           key={activeGalleryFolderId}
@@ -3153,6 +3226,7 @@ export function StickerForgeStudio() {
           onExport={(asset) => {
             setExportSource(asset.source);
             setExportOptions(asset.options);
+            setExportClosing(false);
             setExportOpen(true);
           }}
           resolveEditTarget={(item) => {

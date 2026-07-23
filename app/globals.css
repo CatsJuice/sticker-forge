@@ -1206,6 +1206,50 @@ body {
   inset: 0;
 }
 
+.panel-toggle {
+  position: fixed;
+  z-index: 40;
+  top: 36px;
+  right: 36px;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(24, 23, 29, 0.1);
+  border-radius: 10px;
+  color: #4f4e56;
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 14px 42px rgba(27, 26, 33, 0.14);
+  backdrop-filter: blur(20px) saturate(1.15);
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    background 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.panel-toggle:hover {
+  background: rgba(255, 255, 255, 0.96);
+  transform: translateX(-2px);
+}
+
+.panel-toggle[data-open="true"] {
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 8px 24px rgba(27, 26, 33, 0.1);
+}
+
+.panel-toggle-arrow {
+  display: grid;
+  place-items: center;
+  transform: translateY(-1px);
+}
+
+.panel-toggle-arrow svg {
+  width: 14px;
+  height: 14px;
+}
+
 .controls-card {
   position: fixed;
   z-index: 30;
@@ -2866,6 +2910,10 @@ body {
   gap: 12px;
 }
 
+.export-footer-options-mobile {
+  display: none;
+}
+
 .export-option-toggle {
   position: relative;
   display: inline-flex;
@@ -3056,6 +3104,48 @@ body {
 @keyframes export-dialog-in {
   from { opacity: 0; transform: translateY(12px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes export-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes export-sheet-out {
+  from { transform: translateY(0); }
+  to { transform: translateY(calc(100% + 64px)); }
+}
+
+@keyframes export-background-in {
+  from {
+    border-radius: 0;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    border-radius: 30px;
+    transform: translateY(12px) scale(0.97);
+  }
+}
+
+@keyframes export-background-out {
+  from {
+    border-radius: 30px;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    border-radius: 0;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes export-overlay-in {
+  from { background-color: rgba(0, 0, 0, 0); }
+  to { background-color: rgba(0, 0, 0, 0.42); }
+}
+
+@keyframes export-overlay-out {
+  from { background-color: rgba(0, 0, 0, 0.42); }
+  to { background-color: rgba(0, 0, 0, 0); }
 }
 
 @keyframes export-fps-menu-in {
@@ -4253,6 +4343,11 @@ body {
 }
 
 @media (max-width: 620px) {
+  html.export-sheet-open,
+  body.export-sheet-open {
+    background: #000;
+  }
+
   .studio-shell {
     --controls-width: calc(100vw - 20px);
     --controls-reserve: 100vw;
@@ -4266,6 +4361,22 @@ body {
       116px + env(safe-area-inset-bottom)
     );
     padding: 0;
+    border-radius: 0;
+    transform-origin: top center;
+  }
+
+  .studio-shell[data-export-active="true"] {
+    overflow: hidden;
+  }
+
+  .studio-shell[data-export-open="true"] {
+    border-radius: 30px;
+    transform: translateY(12px) scale(0.97);
+    animation: export-background-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .studio-shell[data-export-closing="true"] {
+    animation: export-background-out 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .studio-header {
@@ -4274,10 +4385,15 @@ body {
   }
 
   .studio-header .brand-mark {
+    display: none;
     width: 36px;
     height: 21px;
     border-radius: 0;
     background-size: 45px 45px;
+  }
+
+  .panel-toggle {
+    display: none;
   }
 
   .stage-card {
@@ -4333,8 +4449,11 @@ body {
     clip-path: none;
     transform: none;
     transform-origin: bottom center;
+    background: rgba(255, 255, 255, 0.94);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     box-shadow:
-      0 -18px 52px rgba(24, 23, 29, 0.14),
+      0 -8px 24px rgba(24, 23, 29, 0.08),
       inset 0 1px 0 rgba(255, 255, 255, 0.86);
     transition: top 360ms cubic-bezier(0.22, 1, 0.36, 1);
     overscroll-behavior: contain;
@@ -4526,28 +4645,57 @@ body {
   }
 
   .export-backdrop {
-    padding: 8px;
+    padding: max(24px, env(safe-area-inset-top)) 0 0;
+    align-items: end;
+    justify-items: stretch;
+    background: transparent;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    animation: none;
   }
 
   .export-dialog {
-    width: calc(100vw - 16px);
-    height: calc(100dvh - 16px);
+    width: 100%;
+    height: 100%;
     min-width: 0;
     min-height: 0;
     max-width: none;
     max-height: none;
     resize: none;
-    border-radius: 19px;
+    border-right: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 32px 32px 0 0;
+    box-shadow:
+      0 -10px 32px rgba(10, 12, 19, 0.14),
+      inset 0 1px 0 rgba(255, 255, 255, 0.9);
+    animation: export-sheet-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .export-backdrop[data-closing="true"] {
+    pointer-events: none;
+    animation: none;
+  }
+
+  .export-dialog[data-closing="true"] {
+    animation: export-sheet-out 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
   .export-dialog-shell {
-    width: auto;
-    height: auto;
+    width: 100%;
+    height: 100%;
   }
 
   .export-dialog-header {
-    min-height: 64px;
-    padding: 14px 14px 9px 16px;
+    min-height: 58px;
+    padding: 12px 14px 8px 16px;
+    align-items: center;
+  }
+
+  .export-close-button {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
   }
 
   .export-toolbar {
@@ -4589,18 +4737,93 @@ body {
   }
 
   .export-motion-panel {
-    max-height: 220px;
-    grid-template-columns: 1fr;
+    max-height: none;
     gap: 8px;
+    overflow: visible;
+  }
+
+  .export-motion-panel[data-method="manual"] {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "method record"
+      "interval options";
+  }
+
+  .export-motion-panel[data-method="manual"] .export-method-switch {
+    grid-area: method;
+    width: 100%;
+  }
+
+  .export-motion-panel[data-method="manual"] .export-record-control {
+    display: contents;
+  }
+
+  .export-motion-panel[data-method="manual"] .export-record-button {
+    grid-area: record;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .export-motion-panel[data-method="manual"] .export-interval-control {
+    grid-area: interval;
+    width: 100%;
+  }
+
+  .export-motion-panel[data-method="manual"] .export-interval-trigger {
+    width: 100%;
+  }
+
+  .export-motion-panel[data-method="manual"] .export-footer-options-mobile {
+    grid-area: options;
+  }
+
+  .export-motion-panel[data-method="automatic"] {
+    grid-template-columns: 1fr;
+  }
+
+  .export-motion-panel[data-method="automatic"] .export-method-switch {
+    width: 100%;
   }
 
   .export-auto-controls {
     width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto 76px;
+    grid-template-areas:
+      "easing bezier speed"
+      "interval interval options";
+    align-items: center;
+    gap: 8px;
+  }
+
+  .export-auto-controls
+    .export-select-control[data-control="easing"] {
+    grid-area: easing;
+  }
+
+  .export-auto-controls .export-bezier-control {
+    grid-area: bezier;
+  }
+
+  .export-auto-controls .export-speed-control {
+    grid-area: speed;
+  }
+
+  .export-auto-controls .export-interval-control {
+    grid-area: interval;
+    width: 100%;
+  }
+
+  .export-auto-controls .export-interval-trigger {
+    width: 100%;
+  }
+
+  .export-auto-controls .export-footer-options-mobile {
+    grid-area: options;
   }
 
   .export-select-control[data-control="easing"] {
-    width: auto;
-    flex: 1 1 130px;
+    width: 100%;
   }
 
   .export-bezier-popover {
@@ -4612,21 +4835,57 @@ body {
     width: min(238px, calc(100vw - 48px));
   }
 
+  .export-interval-popover {
+    right: auto;
+    left: 0;
+  }
+
   .export-dialog-footer {
     min-height: 62px;
-    padding: 9px 14px 11px;
+    padding: 9px 14px max(11px, env(safe-area-inset-bottom));
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
 
   .export-animation-actions {
-    gap: 4px;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 8px;
   }
 
-  .export-option-toggle-label {
+  .export-animation-actions .export-split-action {
+    width: 100%;
+  }
+
+  .export-animation-actions .export-split-main {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .export-dialog-footer > .export-action-primary {
+    width: 100%;
+  }
+
+  .export-footer-options-desktop {
     display: none;
   }
 
+  .export-footer-options-mobile {
+    width: 100%;
+    margin: 0;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+  }
+
+  .export-footer-options-mobile .export-option-toggle-label {
+    display: inline;
+  }
+
   .export-dialog-footer .export-split-main {
-    padding-inline: 8px;
+    padding-inline: 12px;
   }
 
   .export-dialog-footer .export-split-main > svg {
@@ -4634,8 +4893,8 @@ body {
   }
 
   .export-dialog-footer .export-split-toggle {
-    width: 28px;
-    min-width: 28px;
+    width: 40px;
+    min-width: 40px;
   }
 
   .export-status {
@@ -4644,6 +4903,7 @@ body {
 
   .export-progress-panel {
     min-width: 0;
+    width: 100%;
     flex: 1 1 auto;
   }
 
@@ -4651,6 +4911,60 @@ body {
     display: none;
   }
 
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+  }
+
+  .rich-text-shell:focus-within {
+    border-color: rgba(24, 23, 29, 0.11);
+    box-shadow: none;
+  }
+
+  .toolbar-number-control:focus-within {
+    border-color: transparent;
+    color: #5f5e65;
+    background: transparent;
+  }
+
+  .upload-zone:focus-within {
+    border-color: rgba(38, 37, 45, 0.22);
+    background: rgba(255, 255, 255, 0.44);
+    transform: none;
+  }
+
+  .gallery-add-control:has(> button:focus-visible) {
+    outline: none;
+  }
+
+  .export-output-select:focus-within {
+    border-color: rgba(23, 23, 27, 0.09);
+    box-shadow: none;
+  }
+
+  .export-speed-popover input[type="range"]:focus-visible {
+    box-shadow: none;
+  }
+
+  .export-option-toggle input:focus-visible + .export-toggle-track {
+    outline: none;
+  }
+
+  .gallery-folder:focus-visible .gallery-folder-art {
+    filter: drop-shadow(0 5px 9px rgba(23, 70, 103, 0.2));
+  }
+
+}
+
+/* Safari/WebKit renders this transparent logo shadow with dark artifacts. */
+@supports (background: -webkit-named-image(i)) {
+  .brand-mark {
+    filter: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

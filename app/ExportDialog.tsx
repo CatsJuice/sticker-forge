@@ -81,6 +81,7 @@ type ExportDialogProps = {
   options: StickerOptions;
   embedCode: string;
   locale: "zh" | "en";
+  onClosing?: () => void;
   onClose: () => void;
 };
 
@@ -156,7 +157,6 @@ function storedExportMode(): ExportMode {
 const COPY = {
   zh: {
     title: "导出贴纸",
-    subtitle: "透明背景 · 所见即所得",
     close: "关闭导出窗口",
     static: "静态",
     animated: "动态",
@@ -215,7 +215,6 @@ const COPY = {
   },
   en: {
     title: "Export sticker",
-    subtitle: "Transparent background · what you see is what you export",
     close: "Close export dialog",
     static: "Still",
     animated: "Motion",
@@ -822,6 +821,7 @@ export function ExportDialog({
   options,
   embedCode,
   locale,
+  onClosing,
   onClose,
 }: ExportDialogProps) {
   const t = COPY[locale];
@@ -850,6 +850,7 @@ export function ExportDialog({
   const easingRef = useRef<[number, number, number, number]>([
     0.25, 0.1, 0.25, 1,
   ]);
+  const [isClosing, setIsClosing] = useState(false);
   const speedRef = useRef(1);
   const playbackIntervalRef = useRef(0);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -1126,6 +1127,22 @@ export function ExportDialog({
   }, []);
 
   useEffect(() => {
+    if (!isClosing) return;
+    const timer = window.setTimeout(onClose, 440);
+    return () => window.clearTimeout(timer);
+  }, [isClosing, onClose]);
+
+  const requestClose = useCallback(() => {
+    if (busy || isClosing) return;
+    if (window.innerWidth <= EXPORT_DIALOG_MOBILE_BREAKPOINT) {
+      setIsClosing(true);
+      onClosing?.();
+      return;
+    }
+    onClose();
+  }, [busy, isClosing, onClose, onClosing]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (bezierOpen || speedOpen || intervalOpen || exportMenuOpen) {
@@ -1135,7 +1152,7 @@ export function ExportDialog({
         setExportMenuOpen(null);
         return;
       }
-      if (!busy) onClose();
+      if (!busy) requestClose();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -1144,7 +1161,7 @@ export function ExportDialog({
     busy,
     exportMenuOpen,
     intervalOpen,
-    onClose,
+    requestClose,
     speedOpen,
   ]);
 
@@ -2149,12 +2166,42 @@ export function ExportDialog({
     }
   };
 
+  const renderExportOptions = (className: string) => (
+    <div className={className}>
+      <label className="export-option-toggle" title={t.gifShadowHint}>
+        <input
+          type="checkbox"
+          checked={gifShadow}
+          disabled={Boolean(busy)}
+          onChange={(event) => setGifShadow(event.target.checked)}
+        />
+        <span className="export-toggle-track" aria-hidden="true">
+          <span />
+        </span>
+        <span className="export-option-toggle-label">{t.gifShadow}</span>
+      </label>
+      <label className="export-option-toggle" title={t.videoSoundHint}>
+        <input
+          type="checkbox"
+          checked={videoSound}
+          disabled={Boolean(busy)}
+          onChange={(event) => setVideoSound(event.target.checked)}
+        />
+        <span className="export-toggle-track" aria-hidden="true">
+          <span />
+        </span>
+        <span className="export-option-toggle-label">{t.videoSound}</span>
+      </label>
+    </div>
+  );
+
   return (
-    <div className="export-backdrop">
+    <div className="export-backdrop" data-closing={isClosing || undefined}>
       <div className="export-dialog-shell">
         <div
           ref={dialogRef}
           className="export-dialog"
+          data-closing={isClosing || undefined}
           role="dialog"
           aria-modal="true"
           aria-labelledby="export-dialog-title"
@@ -2162,7 +2209,6 @@ export function ExportDialog({
         <header className="export-dialog-header">
           <div>
             <h2 id="export-dialog-title">{t.title}</h2>
-            <p>{t.subtitle}</p>
           </div>
           <button
             ref={closeRef}
@@ -2170,7 +2216,7 @@ export function ExportDialog({
             type="button"
             aria-label={t.close}
             disabled={Boolean(busy)}
-            onClick={onClose}
+            onClick={requestClose}
           >
             <FontAwesomeIcon icon={faXmark} />
           </button>
@@ -2451,6 +2497,9 @@ export function ExportDialog({
                         <FontAwesomeIcon icon={manualState === "recorded" ? faRotateRight : faRecordVinyl} />
                         {manualState === "recorded" ? t.rerecord : t.record}
                       </button>
+                      {renderExportOptions(
+                        "export-footer-options export-footer-options-mobile",
+                      )}
                     </div>
                   ) : (
                     <div className="export-auto-controls">
@@ -2571,6 +2620,9 @@ export function ExportDialog({
                         }}
                         onChange={setPlaybackInterval}
                       />
+                      {renderExportOptions(
+                        "export-footer-options export-footer-options-mobile",
+                      )}
                     </div>
                   )}
                 </div>
@@ -2580,38 +2632,11 @@ export function ExportDialog({
         </div>
 
         <footer className="export-dialog-footer">
-          {mode === "animated" ? (
-            <div className="export-footer-options">
-              <label className="export-option-toggle" title={t.gifShadowHint}>
-                <input
-                  type="checkbox"
-                  checked={gifShadow}
-                  disabled={Boolean(busy)}
-                  onChange={(event) => setGifShadow(event.target.checked)}
-                />
-                <span className="export-toggle-track" aria-hidden="true">
-                  <span />
-                </span>
-                <span className="export-option-toggle-label">
-                  {t.gifShadow}
-                </span>
-              </label>
-              <label className="export-option-toggle" title={t.videoSoundHint}>
-                <input
-                  type="checkbox"
-                  checked={videoSound}
-                  disabled={Boolean(busy)}
-                  onChange={(event) => setVideoSound(event.target.checked)}
-                />
-                <span className="export-toggle-track" aria-hidden="true">
-                  <span />
-                </span>
-                <span className="export-option-toggle-label">
-                  {t.videoSound}
-                </span>
-              </label>
-            </div>
-          ) : null}
+          {mode === "animated"
+            ? renderExportOptions(
+                "export-footer-options export-footer-options-desktop",
+              )
+            : null}
           {!busy ? (
             <div className="export-status" role="status" aria-live="polite">
               {mode !== "animated" || animationMethod === "automatic"

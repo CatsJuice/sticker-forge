@@ -77,10 +77,7 @@ type GalleryCanvasProps = {
   onEditStart: () => void;
   onExport: (asset: GalleryAsset) => void;
   interactionBlocked?: boolean;
-  resolveEditTarget: (
-    item: GalleryItem,
-    asset: GalleryAsset,
-  ) => GalleryEditTarget | null;
+  resolveEditTarget: (item: GalleryItem) => GalleryEntryOrigin | null;
   onEditComplete: (asset: GalleryAsset) => Promise<void>;
   onEditHandoffComplete: () => void;
   onClose: () => void;
@@ -493,7 +490,7 @@ function GalleryItemView({
   onKeep: () => void;
   onConfirmDelete: () => void;
   editing: boolean;
-  onEdit: () => void;
+  onEdit: (layout: GalleryLayout) => void;
   onExport: () => void;
   exportLabel: string;
   onMovePointer: (
@@ -745,7 +742,7 @@ function GalleryItemView({
               onPointerDown={(event) => event.stopPropagation()}
               onClick={(event) => {
                 event.stopPropagation();
-                onEdit();
+                onEdit(latestLayoutRef.current);
               }}
             >
               <FontAwesomeIcon icon={faPenToSquare} />
@@ -1500,14 +1497,30 @@ export function GalleryCanvas({
       if (closing || editTransition) return;
       const asset = assets[item.id];
       if (!asset) return;
-      const target = resolveEditTarget(item, asset);
-      if (!target) return;
+      const visualRotation = previewRotation(item);
+      const editableAsset: GalleryAsset = {
+        ...asset,
+        options: {
+          ...asset.options,
+          // Gallery screen rotation is clockwise-positive because its Three.js
+          // world is projected through an inverted Y axis. The editor tilt is
+          // counter-clockwise-positive, so preserve the visual angle by
+          // crossing the coordinate-system boundary with the opposite sign.
+          tilt: -visualRotation,
+        },
+      };
+      const targetRect = resolveEditTarget(item);
+      if (!targetRect) return;
+      const target: GalleryEditTarget = {
+        ...targetRect,
+        rotation: visualRotation,
+      };
       editCompleteRef.current = false;
       editHandoffCompleteRef.current = false;
       setEditHandoffReady(false);
       setDeleteCandidate(null);
       setSelectedId(item.id);
-      setEditTransition({ item, asset, target });
+      setEditTransition({ item, asset: editableAsset, target });
       onEditStart();
     },
     [assets, closing, editTransition, onEditStart, resolveEditTarget],
@@ -1872,7 +1885,7 @@ export function GalleryCanvas({
               onKeep={() => setDeleteCandidate(null)}
               onConfirmDelete={() => void handleDelete()}
               editing={Boolean(editTransition)}
-              onEdit={() => handleEdit(item)}
+              onEdit={(layout) => handleEdit({ ...item, layout })}
               onExport={() => handleExport(item)}
               exportLabel={t.exportSticker}
               onMovePointer={handleMovePointer}

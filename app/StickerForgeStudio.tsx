@@ -69,7 +69,6 @@ import {
 } from "@/lib/gallery-types";
 import {
   GalleryCanvas,
-  type GalleryEditTarget,
   type GalleryEntryOrigin,
   type GalleryFolderDropPreview,
 } from "./GalleryCanvas";
@@ -2634,17 +2633,13 @@ export function StickerForgeStudio() {
             setExportOptions(asset.options);
             setExportOpen(true);
           }}
-          resolveEditTarget={(item, asset) => {
+          resolveEditTarget={(item) => {
             const host = stageRef.current;
             if (!host) return null;
-            const target = editorStickerRect(
+            return editorStickerRect(
               host,
               item.previewWidth / Math.max(1, item.previewHeight),
             );
-            return {
-              ...target,
-              rotation: asset.options.tilt ?? 0,
-            } satisfies GalleryEditTarget;
           }}
           onEditComplete={applyGalleryAssetToEditor}
           onEditHandoffComplete={() => {

@@ -187,6 +187,13 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   assert.match(gallery, /function GalleryEditMotion\(/);
   assert.match(gallery, /useSpringVector\(/);
   assert.match(gallery, /width: currentItem\.layout\.width \* scale/);
+  assert.match(gallery, /onEdit\(latestLayoutRef\.current\)/);
+  assert.match(gallery, /handleEdit\(\{ \.\.\.item, layout \}\)/);
+  assert.match(gallery, /const visualRotation = previewRotation\(item\)/);
+  assert.match(gallery, /tilt: -visualRotation/);
+  assert.match(gallery, /const targetRect = resolveEditTarget\(item\)/);
+  assert.match(gallery, /rotation: visualRotation/);
+  assert.match(gallery, /setEditTransition\(\{ item, asset: editableAsset, target \}\)/);
   assert.match(gallery, /onEditComplete\(editTransition\.asset\)/);
   assert.match(gallery, /useSpringValue\(editHandoffReady \? 0 : 1/);
   assert.match(gallery, /editHandoffOpacity > 0\.002/);

@@ -403,7 +403,13 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   }, [onReceiveClosed, openProgress, openSettled, receiving]);
 
   const handleBlur = (event: FocusEvent<HTMLButtonElement>) => {
-    if (!event.currentTarget.contains(event.relatedTarget)) setHovered(false);
+    const nextTarget = event.relatedTarget;
+    if (
+      !(nextTarget instanceof Node) ||
+      !event.currentTarget.contains(nextTarget)
+    ) {
+      setHovered(false);
+    }
   };
 
   const handleOpen = () => {
@@ -488,8 +494,8 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
             const nextTarget = event.relatedTarget;
             const folder = event.currentTarget.closest(".gallery-folder");
             if (
-              nextTarget &&
-              folder?.contains(nextTarget as Node)
+              nextTarget instanceof Node &&
+              folder?.contains(nextTarget)
             ) {
               return;
             }

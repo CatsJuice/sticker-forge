@@ -9,6 +9,7 @@ import {
   useState,
   type CSSProperties,
   type DragEvent,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -95,6 +96,7 @@ type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
 type Locale = "zh" | "en";
 const PANEL_AUTO_COLLAPSE_QUERY = "(max-width: 960px)";
+const EXPORT_SHEET_MOBILE_BREAKPOINT = 620;
 type BackgroundRemovalPhase =
   | "idle"
   | "loading"
@@ -134,8 +136,37 @@ const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
 const ADD_TO_GALLERY_FOLDER_STORAGE_KEY =
   "sticker-forge:add-to-gallery-folder";
+const PANEL_DRAG_CLICK_SLOP = 6;
+const PANEL_MIN_OPEN_VIEWPORT_RATIO = 0.45;
 const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
 const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
+
+function resolvePanelLength(panel: HTMLElement, cssValue: string) {
+  const probe = document.createElement("span");
+  probe.style.cssText =
+    `position:absolute;visibility:hidden;width:0;height:${cssValue};pointer-events:none`;
+  panel.appendChild(probe);
+  const height = probe.getBoundingClientRect().height;
+  probe.remove();
+  return height;
+}
+
+function panelContentOpacity(
+  offset: number,
+  fadeStartOffset: number,
+  collapseOffset: number,
+) {
+  const fadeProgress = Math.min(
+    1,
+    Math.max(
+      0,
+      (offset - fadeStartOffset) /
+        Math.max(1, collapseOffset - fadeStartOffset),
+    ),
+  );
+  return 1 - fadeProgress * 0.8;
+}
+
 const DEFAULT_RICH_TEXT = {
   blocks: [
     {
@@ -855,6 +886,18 @@ export function StickerForgeStudio() {
     [],
   );
   const stageRef = useRef<HTMLDivElement>(null);
+  const studioShellRef = useRef<HTMLElement>(null);
+  const controlsCardRef = useRef<HTMLElement>(null);
+  const panelDragRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startOffset: number;
+    collapseOffset: number;
+    fadeStartOffset: number;
+    maxPanelHeight: number;
+    startedOpen: boolean;
+  } | null>(null);
+  const panelDragClickSuppressedUntilRef = useRef(0);
   const backgroundRemovalButtonRef = useRef<HTMLButtonElement>(null);
   const galleryFolderRef = useRef<HTMLButtonElement>(null);
   const galleryAddControlRef = useRef<HTMLDivElement>(null);
@@ -868,6 +911,7 @@ export function StickerForgeStudio() {
   const applyingEditorStyleRef = useRef(false);
   const controllerRef = useRef<StickerController | null>(null);
   const textTimerRef = useRef<number | null>(null);
+  const exportThemeRestoreTimerRef = useRef<number | null>(null);
   const sourceRevisionRef = useRef(0);
   const imageImportRevisionRef = useRef(0);
   const backgroundRemovalRevisionRef = useRef(0);
@@ -913,9 +957,11 @@ export function StickerForgeStudio() {
     playing: boolean;
   } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportClosing, setExportClosing] = useState(false);
   const [exportSource, setExportSource] = useState<StickerSource>(initialSource);
   const [exportOptions, setExportOptions] =
     useState<StickerOptions>(DEFAULT_SETTINGS);
+  const [isStandalonePwa, setIsStandalonePwa] = useState(false);
   const [isPanelOpen, setIsPanelOpen] = useState(true);
   const [galleryItems, setGalleryItems] = useState<GalleryItem[]>([]);
   const [galleryFolders, setGalleryFolders] = useState<GalleryFolderRecord[]>([]);
@@ -982,6 +1028,64 @@ export function StickerForgeStudio() {
     };
   }, []);
 
+  useEffect(() => {
+    const query = window.matchMedia("(display-mode: standalone)");
+    const updateStandaloneState = () => {
+      const iosNavigator = window.navigator as Navigator & {
+        standalone?: boolean;
+      };
+      setIsStandalonePwa(query.matches || iosNavigator.standalone === true);
+    };
+    updateStandaloneState();
+    query.addEventListener("change", updateStandaloneState);
+    return () => {
+      query.removeEventListener("change", updateStandaloneState);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !exportOpen ||
+      window.innerWidth > EXPORT_SHEET_MOBILE_BREAKPOINT
+    ) {
+      return;
+    }
+    if (exportThemeRestoreTimerRef.current !== null) {
+      window.clearTimeout(exportThemeRestoreTimerRef.current);
+      exportThemeRestoreTimerRef.current = null;
+    }
+    const root = document.documentElement;
+    const body = document.body;
+    let themeMeta = document.querySelector<HTMLMetaElement>(
+      'meta[name="theme-color"]',
+    );
+    const createdThemeMeta = !themeMeta;
+    if (!themeMeta) {
+      themeMeta = document.createElement("meta");
+      themeMeta.name = "theme-color";
+      document.head.appendChild(themeMeta);
+    }
+    const previousThemeColor = themeMeta.getAttribute("content");
+    root.classList.add("export-sheet-open");
+    body.classList.add("export-sheet-open");
+    themeMeta.setAttribute("content", "#000000");
+
+    return () => {
+      exportThemeRestoreTimerRef.current = window.setTimeout(() => {
+        root.classList.remove("export-sheet-open");
+        body.classList.remove("export-sheet-open");
+        if (createdThemeMeta) {
+          themeMeta?.remove();
+        } else if (previousThemeColor === null) {
+          themeMeta?.removeAttribute("content");
+        } else {
+          themeMeta?.setAttribute("content", previousThemeColor);
+        }
+        exportThemeRestoreTimerRef.current = null;
+      }, 0);
+    };
+  }, [exportOpen]);
+
   const t = UI[locale];
   const backgroundRemovalBusy = !["idle", "error"].includes(
     backgroundRemoval.phase,
@@ -1021,6 +1125,14 @@ export function StickerForgeStudio() {
           listGalleryItems(),
           listGalleryFolders(),
         ]);
+        if (!cancelled) {
+          setGalleryFolders(nextFolders);
+          setAddToGalleryFolderId((current) =>
+            nextFolders.some((folder) => folder.id === current)
+              ? current
+              : DEFAULT_GALLERY_FOLDER_ID,
+          );
+        }
         let nextItems = loadedItems;
         const lockToken = String(Date.now());
         let shouldSeedDefaults = nextItems.length === 0;
@@ -1190,9 +1302,14 @@ export function StickerForgeStudio() {
         if (!cancelled) {
           setGalleryItems(nextItems);
           setGalleryFolders(nextFolders);
-          const storedFolderId = window.localStorage.getItem(
-            ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
-          );
+          let storedFolderId: string | null = null;
+          try {
+            storedFolderId = window.localStorage.getItem(
+              ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
+            );
+          } catch {
+            // Keep the default folder when preference storage is unavailable.
+          }
           setAddToGalleryFolderId(
             nextFolders.some((folder) => folder.id === storedFolderId)
               ? storedFolderId!
@@ -2123,12 +2240,154 @@ export function StickerForgeStudio() {
     }
   };
 
+  const resetPanelSettledPosition = () => {
+    const shell = studioShellRef.current;
+    shell?.style.removeProperty("--panel-settled-y");
+    shell?.style.removeProperty("--panel-settled-content-opacity");
+  };
+
+  const startPanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    const panel = controlsCardRef.current;
+    const shell = studioShellRef.current;
+    if (!panel || !shell) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const minimumStageHeight = resolvePanelLength(
+      panel,
+      "var(--mobile-stage-min-height)",
+    );
+    const startOffset = Math.max(
+      0,
+      panel.getBoundingClientRect().top - minimumStageHeight,
+    );
+    const peekHeight = resolvePanelLength(
+      panel,
+      "var(--mobile-panel-peek-height)",
+    );
+    const maxPanelHeight = window.innerHeight - minimumStageHeight;
+    const fadeStartOffset = Math.max(
+      0,
+      maxPanelHeight -
+        window.innerHeight * PANEL_MIN_OPEN_VIEWPORT_RATIO,
+    );
+    const collapseOffset = Math.max(1, maxPanelHeight - peekHeight);
+    shell.style.setProperty("--panel-drag-y", `${startOffset}px`);
+    shell.style.setProperty(
+      "--panel-content-opacity",
+      `${panelContentOpacity(startOffset, fadeStartOffset, collapseOffset)}`,
+    );
+    panelDragRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startOffset,
+      collapseOffset,
+      fadeStartOffset,
+      maxPanelHeight,
+      startedOpen: isPanelOpen,
+    };
+    shell.setAttribute("data-panel-dragging", "true");
+    panel.setAttribute("data-dragging", "true");
+  };
+
+  const movePanelDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = panelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const offset = Math.max(
+      0,
+      Math.min(
+        drag.collapseOffset,
+        drag.startOffset + event.clientY - drag.startY,
+      ),
+    );
+    studioShellRef.current?.style.setProperty(
+      "--panel-drag-y",
+      `${offset}px`,
+    );
+    studioShellRef.current?.style.setProperty(
+      "--panel-content-opacity",
+      `${panelContentOpacity(
+        offset,
+        drag.fadeStartOffset,
+        drag.collapseOffset,
+      )}`,
+    );
+  };
+
+  const finishPanelDrag = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+    cancelled = false,
+  ) => {
+    const drag = panelDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    panelDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    const panel = controlsCardRef.current;
+    const shell = studioShellRef.current;
+    const travel = event.clientY - drag.startY;
+    if (!cancelled && Math.abs(travel) > PANEL_DRAG_CLICK_SLOP) {
+      panelDragClickSuppressedUntilRef.current = performance.now() + 350;
+    }
+    const finalOffset = Math.max(
+      0,
+      Math.min(drag.collapseOffset, drag.startOffset + travel),
+    );
+    const visiblePanelHeight = drag.maxPanelHeight - finalOffset;
+    const reachedUsableHeight =
+      visiblePanelHeight >=
+      window.innerHeight * PANEL_MIN_OPEN_VIEWPORT_RATIO;
+    const hasReopenIntent =
+      !drag.startedOpen && travel < -PANEL_DRAG_CLICK_SLOP;
+    const targetOpen = cancelled
+      ? drag.startedOpen
+      : drag.startedOpen
+        ? reachedUsableHeight
+        : hasReopenIntent;
+
+    panel?.removeAttribute("data-dragging");
+    shell?.removeAttribute("data-panel-dragging");
+    if (panel) {
+      // Commit the dragged position before restoring transitions so a
+      // canceled gesture springs back instead of snapping.
+      panel.getBoundingClientRect();
+    }
+    if (!cancelled && targetOpen && reachedUsableHeight && shell) {
+      shell.style.setProperty(
+        "--panel-settled-y",
+        `${(finalOffset / window.innerHeight) * 100}dvh`,
+      );
+      shell.style.setProperty(
+        "--panel-settled-content-opacity",
+        `${panelContentOpacity(
+          finalOffset,
+          drag.fadeStartOffset,
+          drag.collapseOffset,
+        )}`,
+      );
+    } else if (!cancelled && targetOpen && !reachedUsableHeight) {
+      resetPanelSettledPosition();
+    }
+    setIsPanelOpen(targetOpen);
+    window.requestAnimationFrame(() => {
+      shell?.style.removeProperty("--panel-drag-y");
+      shell?.style.removeProperty("--panel-content-opacity");
+    });
+  };
+
   return (
     <main
+      ref={studioShellRef}
       className="studio-shell"
       data-panel-open={isPanelOpen}
       data-gallery-open={galleryOpen}
       data-gallery-editing={galleryEditing}
+      data-export-active={exportOpen}
+      data-export-open={exportOpen && !exportClosing}
+      data-export-closing={exportClosing}
+      data-pwa-standalone={isStandalonePwa}
     >
       <header className="studio-header">
         <span className="brand-mark" role="img" aria-label="Sticker Forge" />
@@ -2190,12 +2449,32 @@ export function StickerForgeStudio() {
       </button>
 
         <aside
+          ref={controlsCardRef}
           id="sticker-controls"
           className="controls-card"
           data-open={isPanelOpen}
           aria-label={t.controls}
-          aria-hidden={!isPanelOpen}
         >
+          <button
+            className="controls-drag-region"
+            type="button"
+            aria-label={isPanelOpen ? t.closePanel : t.openPanel}
+            aria-expanded={isPanelOpen}
+            aria-controls="sticker-controls"
+            onPointerDown={startPanelDrag}
+            onPointerMove={movePanelDrag}
+            onPointerUp={finishPanelDrag}
+            onPointerCancel={(event) => finishPanelDrag(event, true)}
+            onClick={() => {
+              if (performance.now() < panelDragClickSuppressedUntilRef.current) {
+                return;
+              }
+              resetPanelSettledPosition();
+              setIsPanelOpen((open) => !open);
+            }}
+          >
+            <span className="controls-drag-handle" aria-hidden="true" />
+          </button>
           <div className="controls-header">
             <div className="controls-heading-row">
               <h2 className="controls-title">{t.title}</h2>
@@ -2265,7 +2544,11 @@ export function StickerForgeStudio() {
           </div>
 
           <div className="controls-scroll">
-            <div className="source-tabs" aria-label={t.sourceType}>
+            <div
+              className="source-tabs"
+              data-mode={sourceMode}
+              aria-label={t.sourceType}
+            >
               <button
                 className="source-tab"
                 type="button"
@@ -2751,7 +3034,11 @@ export function StickerForgeStudio() {
               onPointerLeave={() => setGalleryAddHovered(false)}
               onFocusCapture={() => setGalleryAddHovered(true)}
               onBlurCapture={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget)) {
+                const nextTarget = event.relatedTarget;
+                if (
+                  !(nextTarget instanceof Node) ||
+                  !event.currentTarget.contains(nextTarget)
+                ) {
                   setGalleryAddHovered(false);
                 }
               }}
@@ -2836,6 +3123,7 @@ export function StickerForgeStudio() {
               onClick={() => {
                 setExportSource(sourceRef.current);
                 setExportOptions(settingsRef.current);
+                setExportClosing(false);
                 setExportOpen(true);
               }}
             >
@@ -2889,15 +3177,23 @@ export function StickerForgeStudio() {
             document.body,
           )
         : null}
-      {exportOpen ? (
-        <ExportDialog
-          source={exportSource}
-          options={exportOptions}
-          embedCode={buildEmbedSnippet(exportSource, exportOptions)}
-          locale={locale}
-          onClose={() => setExportOpen(false)}
-        />
-      ) : null}
+      {exportOpen && typeof document !== "undefined"
+        ? createPortal(
+            <ExportDialog
+              source={exportSource}
+              options={exportOptions}
+              embedCode={buildEmbedSnippet(exportSource, exportOptions)}
+              locale={locale}
+              standalonePwa={isStandalonePwa}
+              onClosing={() => setExportClosing(true)}
+              onClose={() => {
+                setExportOpen(false);
+                setExportClosing(false);
+              }}
+            />,
+            document.body,
+          )
+        : null}
       {galleryOpen ? (
         <GalleryCanvas
           key={activeGalleryFolderId}
@@ -2948,6 +3244,7 @@ export function StickerForgeStudio() {
           onExport={(asset) => {
             setExportSource(asset.source);
             setExportOptions(asset.options);
+            setExportClosing(false);
             setExportOpen(true);
           }}
           resolveEditTarget={(item) => {

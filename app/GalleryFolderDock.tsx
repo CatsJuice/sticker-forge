@@ -54,7 +54,8 @@ type GalleryFolderDockProps = {
   receiving: boolean;
   receivingItemId?: string;
   dropPreview: GalleryFolderDropPreview | null;
-  defaultFolderRef: RefObject<HTMLButtonElement | null>;
+  receivingFolderRef: RefObject<HTMLButtonElement | null>;
+  receivingFolderId: string;
   flight?: ReactNode;
   onReceiveClosed: () => void;
   onFoldersChange: (folders: GalleryFolderRecord[]) => void;
@@ -458,7 +459,8 @@ export function GalleryFolderDock({
   receiving,
   receivingItemId,
   dropPreview,
-  defaultFolderRef,
+  receivingFolderRef,
+  receivingFolderId,
   flight,
   onReceiveClosed,
   onFoldersChange,
@@ -768,7 +770,7 @@ export function GalleryFolderDock({
                 data-sorting={isSorting}
                 >
                 <GalleryFolder
-                  ref={isDefault ? defaultFolderRef : undefined}
+                  ref={folder.id === receivingFolderId ? receivingFolderRef : undefined}
                   items={folderItems}
                   locale={locale}
                   loading={loading}
@@ -782,10 +784,14 @@ export function GalleryFolderDock({
                   collapsePreviewsImmediately={
                     collapseActivePreviewsImmediately && isCurrent
                   }
-                  receiving={isDefault && receiving}
-                  receivingItemId={isDefault ? receivingItemId : undefined}
-                  flight={isDefault ? flight : undefined}
-                  onReceiveClosed={isDefault ? onReceiveClosed : undefined}
+                  receiving={folder.id === receivingFolderId && receiving}
+                  receivingItemId={
+                    folder.id === receivingFolderId ? receivingItemId : undefined
+                  }
+                  flight={folder.id === receivingFolderId ? flight : undefined}
+                  onReceiveClosed={
+                    folder.id === receivingFolderId ? onReceiveClosed : undefined
+                  }
                   onPreviewEdit={mode === null ? onPreviewEdit : undefined}
                   onOpen={(origins) => onFolderOpen(folder.id, origins)}
                 />

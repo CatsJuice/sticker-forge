@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -14,9 +15,6 @@ import { createPortal } from "react-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faGithub } from "@fortawesome/free-brands-svg-icons";
 import {
-  faSquarePlus,
-} from "@fortawesome/free-regular-svg-icons";
-import {
   faAlignCenter,
   faAlignLeft,
   faAlignRight,
@@ -24,6 +22,7 @@ import {
   faArrowRight,
   faArrowUpFromBracket,
   faBold,
+  faCheck,
   faChevronDown,
   faFont,
   faWandMagicSparkles,
@@ -133,6 +132,8 @@ const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
 const DEFAULT_IMAGE_SRC = "/default-image.svg";
 const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
+const ADD_TO_GALLERY_FOLDER_STORAGE_KEY =
+  "sticker-forge:add-to-gallery-folder";
 const FONT_SIZE_PRESETS = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96, 120, 160, 200, 240];
 const LINE_HEIGHT_PRESETS = [0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.8, 2, 2.5, 3];
 const DEFAULT_RICH_TEXT = {
@@ -641,9 +642,11 @@ async function createStoredGalleryItemWithPreview(
   source: StickerSource,
   options: StudioSettings,
   layoutIndex: number,
+  folderId: string,
 ): Promise<{ item: GalleryItem; preview: GalleryPreviewResult }> {
   const preview = await createGalleryPreview(source, options.outline);
   const item = await createGalleryItem({
+    folderId,
     source,
     options,
     previewDataUrl: preview.dataUrl,
@@ -756,6 +759,44 @@ function DropdownChevron() {
   return <FontAwesomeIcon className="number-preset-chevron" icon={faChevronDown} />;
 }
 
+function shadeFolderColor(hex: string, amount: number) {
+  const value = hex.replace("#", "");
+  const normalized = value.length === 3
+    ? value.split("").map((character) => character + character).join("")
+    : value.padEnd(6, "0").slice(0, 6);
+  return `#${[0, 2, 4].map((offset) => {
+    const channel = Number.parseInt(normalized.slice(offset, offset + 2), 16);
+    const target = amount < 0 ? 0 : 255;
+    return Math.round(channel + (target - channel) * Math.abs(amount))
+      .toString(16)
+      .padStart(2, "0");
+  }).join("")}`;
+}
+
+function GalleryFolderIcon({ color }: { color: string }) {
+  return (
+    <svg
+      className="gallery-add-folder-icon"
+      viewBox="0 0 24 20"
+      aria-hidden="true"
+    >
+      <path
+        d="M2.25 5.25A2.25 2.25 0 0 1 4.5 3h4.1c.7 0 1.36.33 1.78.89l.84 1.11H19.5a2.25 2.25 0 0 1 2.25 2.25v8.5A2.25 2.25 0 0 1 19.5 18H4.5a2.25 2.25 0 0 1-2.25-2.25V5.25Z"
+        fill={shadeFolderColor(color, -0.18)}
+      />
+      <path
+        d="M2.25 8.1A2.1 2.1 0 0 1 4.35 6h4.73c.64 0 1.24.29 1.64.79l.58.71h8.35a2.1 2.1 0 0 1 2.1 2.1v6.3a2.1 2.1 0 0 1-2.1 2.1H4.35a2.1 2.1 0 0 1-2.1-2.1V8.1Z"
+        fill={color}
+      />
+      <path
+        d="M3.25 9.1A2.1 2.1 0 0 1 5.35 7h13.3a2.1 2.1 0 0 1 2.1 2.1v5.8a2.1 2.1 0 0 1-2.1 2.1H5.35a2.1 2.1 0 0 1-2.1-2.1V9.1Z"
+        fill={shadeFolderColor(color, 0.12)}
+        opacity=".72"
+      />
+    </svg>
+  );
+}
+
 function BackgroundRemovalTip({
   anchor,
   label,
@@ -816,6 +857,11 @@ export function StickerForgeStudio() {
   const stageRef = useRef<HTMLDivElement>(null);
   const backgroundRemovalButtonRef = useRef<HTMLButtonElement>(null);
   const galleryFolderRef = useRef<HTMLButtonElement>(null);
+  const galleryAddControlRef = useRef<HTMLDivElement>(null);
+  const galleryAddMainRef = useRef<HTMLButtonElement>(null);
+  const galleryAddMenuRef = useRef<HTMLDivElement>(null);
+  const galleryAddRestLabelRef = useRef<HTMLSpanElement>(null);
+  const galleryAddHoverLabelRef = useRef<HTMLSpanElement>(null);
   const richEditorRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
   const selectionOffsetsRef = useRef<{ start: number; end: number } | null>(null);
@@ -880,6 +926,19 @@ export function StickerForgeStudio() {
     useState<GalleryFolderDropPreview | null>(null);
   const [galleryLoading, setGalleryLoading] = useState(true);
   const [galleryAdding, setGalleryAdding] = useState(false);
+  const [galleryAddMenuOpen, setGalleryAddMenuOpen] = useState(false);
+  const [galleryAddHovered, setGalleryAddHovered] = useState(false);
+  const [galleryAddLabelWidth, setGalleryAddLabelWidth] = useState(0);
+  const [galleryAddLabelOverflowing, setGalleryAddLabelOverflowing] =
+    useState(false);
+  const [galleryAddMenuPosition, setGalleryAddMenuPosition] = useState<{
+    right: number;
+    bottom: number;
+    maxHeight: number;
+  } | null>(null);
+  const [addToGalleryFolderId, setAddToGalleryFolderId] = useState(
+    DEFAULT_GALLERY_FOLDER_ID,
+  );
   const [galleryFolderReceiving, setGalleryFolderReceiving] = useState(false);
   const [galleryAddFlight, setGalleryAddFlight] = useState<{
     itemId: string;
@@ -1131,6 +1190,14 @@ export function StickerForgeStudio() {
         if (!cancelled) {
           setGalleryItems(nextItems);
           setGalleryFolders(nextFolders);
+          const storedFolderId = window.localStorage.getItem(
+            ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
+          );
+          setAddToGalleryFolderId(
+            nextFolders.some((folder) => folder.id === storedFolderId)
+              ? storedFolderId!
+              : DEFAULT_GALLERY_FOLDER_ID,
+          );
         }
       } catch (error) {
         console.error("Could not initialize the local gallery.", error);
@@ -1148,6 +1215,97 @@ export function StickerForgeStudio() {
       cancelled = true;
     };
   }, [initialSource]);
+
+  const addToGalleryFolder =
+    galleryFolders.find((folder) => folder.id === addToGalleryFolderId)
+    ?? galleryFolders.find((folder) => folder.id === DEFAULT_GALLERY_FOLDER_ID)
+    ?? null;
+  const addToGalleryRestLabel = galleryAdding
+    ? t.addingToGallery
+    : t.addToGallery;
+  const addToGalleryHoverLabel = galleryAdding
+    ? t.addingToGallery
+    : locale === "zh"
+      ? `添加到 ${addToGalleryFolder?.title ?? "Gallery"}`
+      : `Add to ${addToGalleryFolder?.title ?? "Gallery"}`;
+
+  useLayoutEffect(() => {
+    const label = galleryAddHovered
+      ? galleryAddHoverLabelRef.current
+      : galleryAddRestLabelRef.current;
+    const button = galleryAddMainRef.current;
+    if (!label || !button) return;
+    const updateLabelMetrics = () => {
+      const measuredWidth =
+        Math.ceil(label.getBoundingClientRect().width) + 1;
+      const buttonStyle = window.getComputedStyle(button);
+      const availableWidth =
+        button.clientWidth
+        - Number.parseFloat(buttonStyle.paddingLeft)
+        - Number.parseFloat(buttonStyle.paddingRight)
+        - 27;
+      setGalleryAddLabelWidth(measuredWidth);
+      setGalleryAddLabelOverflowing(measuredWidth > availableWidth);
+    };
+    updateLabelMetrics();
+    const observer = new ResizeObserver(updateLabelMetrics);
+    observer.observe(button);
+    return () => observer.disconnect();
+  }, [
+    addToGalleryHoverLabel,
+    addToGalleryRestLabel,
+    galleryAddHovered,
+  ]);
+
+  useEffect(() => {
+    if (!galleryAddMenuOpen) return;
+    const closeMenu = (event: PointerEvent) => {
+      if (
+        event.target instanceof Node
+        && !galleryAddControlRef.current?.contains(event.target)
+        && !galleryAddMenuRef.current?.contains(event.target)
+      ) {
+        setGalleryAddMenuOpen(false);
+        setGalleryAddMenuPosition(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setGalleryAddMenuOpen(false);
+        setGalleryAddMenuPosition(null);
+      }
+    };
+    document.addEventListener("pointerdown", closeMenu);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeMenu);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [galleryAddMenuOpen]);
+
+  useLayoutEffect(() => {
+    if (!galleryAddMenuOpen) return;
+    const anchor = galleryAddControlRef.current;
+    if (!anchor) return;
+    const updatePosition = () => {
+      const rect = anchor.getBoundingClientRect();
+      setGalleryAddMenuPosition({
+        right: Math.max(8, window.innerWidth - rect.right),
+        bottom: Math.max(8, window.innerHeight - rect.top + 8),
+        maxHeight: Math.max(96, Math.min(286, rect.top - 16)),
+      });
+    };
+    updatePosition();
+    const observer = new ResizeObserver(updatePosition);
+    observer.observe(anchor);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [galleryAddMenuOpen]);
 
   useEffect(() => {
     const host = stageRef.current;
@@ -1912,9 +2070,16 @@ export function StickerForgeStudio() {
 </script>`;
   };
 
-  const addCurrentStickerToGallery = async () => {
+  const addCurrentStickerToGallery = async (
+    folderId = addToGalleryFolderId,
+  ) => {
     if (galleryAdding || galleryLoading) return;
+    const targetFolderId = galleryFolders.some((folder) => folder.id === folderId)
+      ? folderId
+      : DEFAULT_GALLERY_FOLDER_ID;
     setGalleryAdding(true);
+    setGalleryAddMenuOpen(false);
+    setGalleryAddMenuPosition(null);
     try {
       const source = sourceRef.current;
       const currentSettings = settingsRef.current;
@@ -1926,6 +2091,7 @@ export function StickerForgeStudio() {
         source,
         currentSettings,
         nextGalleryIndex,
+        targetFolderId,
       );
       setGalleryItems((items) => [item, ...items]);
       setSourceMessage(t.addedToGallery);
@@ -2577,15 +2743,93 @@ export function StickerForgeStudio() {
           </div>
 
           <div className="controls-footer">
-            <button
-              className="primary-button gallery-add-button"
-              type="button"
-              disabled={galleryAdding || galleryLoading}
-              onClick={() => void addCurrentStickerToGallery()}
+            <div
+              ref={galleryAddControlRef}
+              className="gallery-add-control"
+              data-menu-open={galleryAddMenuOpen}
+              onPointerEnter={() => setGalleryAddHovered(true)}
+              onPointerLeave={() => setGalleryAddHovered(false)}
+              onFocusCapture={() => setGalleryAddHovered(true)}
+              onBlurCapture={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setGalleryAddHovered(false);
+                }
+              }}
             >
-              <FontAwesomeIcon icon={faSquarePlus} />
-              <span>{galleryAdding ? t.addingToGallery : t.addToGallery}</span>
-            </button>
+              <button
+                ref={galleryAddMainRef}
+                className="primary-button gallery-add-button gallery-add-main"
+                type="button"
+                disabled={galleryAdding || galleryLoading}
+                aria-label={addToGalleryHoverLabel}
+                onClick={() => void addCurrentStickerToGallery()}
+              >
+                <span className="gallery-add-main-content">
+                  <GalleryFolderIcon
+                    color={addToGalleryFolder?.color ?? "#59b0d8"}
+                  />
+                  <span
+                    className="gallery-add-label-viewport"
+                    data-hovered={galleryAddHovered && !galleryAdding}
+                    data-overflowing={galleryAddLabelOverflowing}
+                    style={{
+                      "--gallery-add-label-width": `${galleryAddLabelWidth}px`,
+                    } as CSSProperties}
+                  >
+                    <span className="gallery-add-label-track">
+                      <span>{addToGalleryRestLabel}</span>
+                      <span>{addToGalleryHoverLabel}</span>
+                    </span>
+                  </span>
+                  <span
+                    className="gallery-add-label-measurer"
+                    aria-hidden="true"
+                  >
+                    <span ref={galleryAddRestLabelRef}>
+                      {addToGalleryRestLabel}
+                    </span>
+                    <span ref={galleryAddHoverLabelRef}>
+                      {addToGalleryHoverLabel}
+                    </span>
+                  </span>
+                </span>
+              </button>
+              <button
+                className="primary-button gallery-add-toggle"
+                type="button"
+                disabled={galleryAdding || galleryLoading}
+                aria-label={
+                  locale === "zh" ? "选择目标 Gallery" : "Choose target Gallery"
+                }
+                aria-expanded={galleryAddMenuOpen}
+                data-active={galleryAddMenuOpen}
+                onClick={() => {
+                  if (galleryAddMenuOpen) {
+                    setGalleryAddMenuOpen(false);
+                    setGalleryAddMenuPosition(null);
+                    return;
+                  }
+                  const rect =
+                    galleryAddControlRef.current?.getBoundingClientRect();
+                  if (rect) {
+                    setGalleryAddMenuPosition({
+                      right: Math.max(8, window.innerWidth - rect.right),
+                      bottom: Math.max(
+                        8,
+                        window.innerHeight - rect.top + 8,
+                      ),
+                      maxHeight: Math.max(
+                        96,
+                        Math.min(286, rect.top - 16),
+                      ),
+                    });
+                  }
+                  setGalleryAddMenuOpen(true);
+                }}
+              >
+                <FontAwesomeIcon icon={faChevronDown} />
+              </button>
+            </div>
             <button
               className="primary-button export-button"
               type="button"
@@ -2600,6 +2844,51 @@ export function StickerForgeStudio() {
             </button>
           </div>
         </aside>
+      {galleryAddMenuOpen && galleryAddMenuPosition
+        ? createPortal(
+            <div
+              ref={galleryAddMenuRef}
+              className="gallery-add-menu"
+              role="menu"
+              aria-label={
+                locale === "zh" ? "Gallery 列表" : "Gallery list"
+              }
+              style={{
+                right: galleryAddMenuPosition.right,
+                bottom: galleryAddMenuPosition.bottom,
+                maxHeight: galleryAddMenuPosition.maxHeight,
+              }}
+            >
+              {galleryFolders.map((folder) => (
+                <button
+                  key={folder.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={folder.id === addToGalleryFolderId}
+                  data-selected={folder.id === addToGalleryFolderId}
+                  onClick={() => {
+                    setAddToGalleryFolderId(folder.id);
+                    window.localStorage.setItem(
+                      ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
+                      folder.id,
+                    );
+                    void addCurrentStickerToGallery(folder.id);
+                  }}
+                >
+                  <GalleryFolderIcon color={folder.color} />
+                  <span>{folder.title}</span>
+                  {folder.id === addToGalleryFolderId ? (
+                    <FontAwesomeIcon
+                      className="gallery-add-menu-check"
+                      icon={faCheck}
+                    />
+                  ) : null}
+                </button>
+              ))}
+            </div>,
+            document.body,
+          )
+        : null}
       {exportOpen ? (
         <ExportDialog
           source={exportSource}
@@ -2701,7 +2990,10 @@ export function StickerForgeStudio() {
         />
       ) : null}
       <GalleryFolderDock
-        defaultFolderRef={galleryFolderRef}
+        receivingFolderRef={galleryFolderRef}
+        receivingFolderId={
+          addToGalleryFolder?.id ?? DEFAULT_GALLERY_FOLDER_ID
+        }
         key="gallery-folder-dock"
         folders={galleryFolders}
         items={galleryItems}
@@ -2743,6 +3035,13 @@ export function StickerForgeStudio() {
         onFoldersChange={setGalleryFolders}
         onItemsChange={setGalleryItems}
         onFolderDeleted={(folderId) => {
+          if (folderId === addToGalleryFolderId) {
+            setAddToGalleryFolderId(DEFAULT_GALLERY_FOLDER_ID);
+            window.localStorage.setItem(
+              ADD_TO_GALLERY_FOLDER_STORAGE_KEY,
+              DEFAULT_GALLERY_FOLDER_ID,
+            );
+          }
           if (folderId !== activeGalleryFolderId) return;
           setGallerySurfaceHeld(true);
           setActiveGalleryFolderId(DEFAULT_GALLERY_FOLDER_ID);

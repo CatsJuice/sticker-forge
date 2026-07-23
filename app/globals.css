@@ -1350,17 +1350,206 @@ body {
   fill: currentColor;
 }
 
-.gallery-add-button {
-  border-color: rgba(24, 23, 29, 0.1);
+.gallery-add-control {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  overflow: hidden;
+  border: 1px solid rgba(24, 23, 29, 0.1);
+  border-radius: 13px;
   color: #4b4a51;
   background: rgba(255, 255, 255, 0.9);
   box-shadow: 0 6px 17px rgba(27, 26, 33, 0.08), inset 0 1px 0 #fff;
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 
-.gallery-add-button:hover {
+.controls-footer .gallery-add-control .primary-button {
+  min-width: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.gallery-add-control:has(> button:hover:not(:disabled)),
+.gallery-add-control[data-menu-open="true"] {
   color: var(--ink);
   background: #fff;
   box-shadow: 0 9px 22px rgba(27, 26, 33, 0.12), inset 0 1px 0 #fff;
+  transform: translateY(-1px);
+}
+
+.controls-footer .gallery-add-control .primary-button:hover,
+.controls-footer .gallery-add-control .primary-button[data-active="true"] {
+  color: inherit;
+  background: transparent;
+  box-shadow: none;
+  transform: none;
+}
+
+.controls-footer .gallery-add-control .primary-button:focus-visible {
+  outline: none;
+}
+
+.gallery-add-control:has(> button:focus-visible) {
+  outline: 3px solid rgba(36, 126, 245, 0.2);
+  outline-offset: 2px;
+}
+
+.controls-footer .gallery-add-main {
+  flex: 1 1 auto;
+  padding: 0 9px;
+  border-radius: 0;
+}
+
+.controls-footer .gallery-add-control .gallery-add-toggle {
+  width: 31px;
+  flex: 0 0 31px;
+  padding: 0;
+  border-left: 1px solid rgba(24, 23, 29, 0.1);
+  border-radius: 0;
+}
+
+.gallery-add-toggle svg {
+  width: 8px !important;
+  height: 8px !important;
+  transition: transform 180ms ease;
+}
+
+.gallery-add-toggle[data-active="true"] svg {
+  transform: rotate(180deg);
+}
+
+.gallery-add-main-content {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+
+.gallery-add-folder-icon {
+  width: 20px !important;
+  height: 18px !important;
+  flex: 0 0 auto;
+  overflow: visible;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gallery-add-label-viewport {
+  width: min(var(--gallery-add-label-width, 92px), calc(100% - 27px));
+  max-width: calc(100% - 27px);
+  height: 1.2em;
+  min-width: 0;
+  overflow: hidden;
+  display: block;
+  transition: width 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gallery-add-label-track {
+  height: 200%;
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gallery-add-label-viewport[data-hovered="true"] .gallery-add-label-track {
+  transform: translateY(-50%);
+}
+
+.gallery-add-label-track > span {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  line-height: 1.2em;
+}
+
+.gallery-add-label-viewport[data-overflowing="true"]
+  .gallery-add-label-track
+  > span {
+  text-overflow: ellipsis;
+}
+
+.gallery-add-label-measurer {
+  position: absolute;
+  width: max-content;
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.gallery-add-label-measurer > span {
+  display: block;
+  width: max-content;
+}
+
+.gallery-add-menu {
+  position: fixed;
+  z-index: 220;
+  width: min(236px, calc(100vw - 32px));
+  padding: 5px;
+  overflow: auto;
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(24, 23, 29, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 14px 36px rgba(27, 26, 33, 0.18), inset 0 1px 0 #fff;
+  backdrop-filter: blur(16px);
+  animation: export-fps-menu-in 140ms ease-out;
+}
+
+.gallery-add-menu button {
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 9px;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 8px;
+  color: #4d4c53;
+  background: transparent;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gallery-add-menu button:hover,
+.gallery-add-menu button[data-selected="true"] {
+  color: var(--accent);
+  background: rgba(36, 126, 245, 0.09);
+}
+
+.gallery-add-menu button > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-add-menu .gallery-add-folder-icon {
+  width: 20px !important;
+  height: 17px !important;
+}
+
+.gallery-add-menu-check {
+  width: 10px !important;
+  height: 10px !important;
+  justify-self: end;
 }
 
 .export-button {

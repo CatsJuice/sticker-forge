@@ -176,11 +176,12 @@ test("tears a gallery sticker away before deleting its local record", async () =
 });
 
 test("moves an immutable gallery sticker into the editor through a Spring transition", async () => {
-  const [gallery, studio, styles, folder] = await Promise.all([
+  const [gallery, studio, styles, folder, folderDock] = await Promise.all([
     readFile(new URL("../app/GalleryCanvas.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/StickerForgeStudio.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/GalleryFolder.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/GalleryFolderDock.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(gallery, /aria-label="Edit sticker"/);
@@ -234,6 +235,39 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   assert.match(
     studio,
     /collapseActivePreviewsImmediately=\{\s*collapseGalleryPreviewsImmediately\s*\}/,
+  );
+  assert.match(
+    folderDock,
+    /data-direct-close=\{collapseActivePreviewsImmediately\}/,
+  );
+  assert.match(folderDock, /DOCK_MENU_EXPANDED_WIDTH = 104/);
+  assert.match(folderDock, /menu\.dataset\.expandDirection/);
+  assert.match(folderDock, /stage\?\.getBoundingClientRect\(\)\.right/);
+  assert.match(studio, /data-gallery-open=\{galleryOpen\}/);
+  assert.match(
+    studio,
+    /PANEL_AUTO_COLLAPSE_QUERY = "\(max-width: 960px\)"/,
+  );
+  assert.match(studio, /query\.matches\) setIsPanelOpen\(false\)/);
+  assert.match(
+    studio,
+    /query\.addEventListener\("change", collapseForNarrowViewport\)/,
+  );
+  assert.match(
+    styles,
+    /\.gallery-folder-dock\[data-direct-close="true"\] \.gallery-folder-scroll \{\s*overflow: visible;/,
+  );
+  assert.match(
+    styles,
+    /\.gallery-folder-dock \{[^}]*left: 13px;[^}]*max-width: calc\(100vw - 26px\);/s,
+  );
+  assert.match(
+    styles,
+    /\.gallery-folder-scroll \{[^}]*flex: 0 1 auto;[^}]*min-width: 0;[^}]*max-width: calc\(100vw - 68px\);/s,
+  );
+  assert.match(
+    styles,
+    /\.gallery-folder-menu\[data-expand-direction="left"\] \.gallery-folder-dock-action \{[^}]*right: 0;[^}]*left: auto;/s,
   );
   assert.match(
     studio,

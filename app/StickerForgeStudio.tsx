@@ -93,6 +93,7 @@ import { convertHeicToJpeg, isHeicFile } from "@/lib/heic";
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
 type Locale = "zh" | "en";
+const PANEL_AUTO_COLLAPSE_QUERY = "(max-width: 960px)";
 type BackgroundRemovalPhase =
   | "idle"
   | "loading"
@@ -899,6 +900,20 @@ export function StickerForgeStudio() {
   const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
     Record<string, GalleryEntryOrigin>
   >({});
+
+  useEffect(() => {
+    const query = window.matchMedia(PANEL_AUTO_COLLAPSE_QUERY);
+    const collapseForNarrowViewport = () => {
+      if (query.matches) setIsPanelOpen(false);
+    };
+    const frame = window.requestAnimationFrame(collapseForNarrowViewport);
+    query.addEventListener("change", collapseForNarrowViewport);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      query.removeEventListener("change", collapseForNarrowViewport);
+    };
+  }, []);
+
   const t = UI[locale];
   const backgroundRemovalBusy = !["idle", "error"].includes(
     backgroundRemoval.phase,
@@ -1937,6 +1952,7 @@ export function StickerForgeStudio() {
     <main
       className="studio-shell"
       data-panel-open={isPanelOpen}
+      data-gallery-open={galleryOpen}
       data-gallery-editing={galleryEditing}
     >
       <header className="studio-header">

@@ -2891,12 +2891,19 @@ body {
   display: flex;
   align-items: flex-end;
   gap: 10px;
-  max-width: calc(100vw - 25px);
+  max-width: calc(100vw - 26px);
   pointer-events: none;
 }
 
+.studio-shell[data-panel-open="true"][data-gallery-open="false"]
+  .gallery-folder-dock {
+  max-width: calc(100vw - var(--controls-reserve) - 26px);
+}
+
 .gallery-folder-scroll {
-  max-width: calc(100vw - 207px);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(100vw - 68px);
   margin-top: -900px;
   padding: 900px 12px 14px;
   overflow-x: auto;
@@ -2907,6 +2914,15 @@ body {
 
 .gallery-folder-scroll::-webkit-scrollbar {
   display: none;
+}
+
+.gallery-folder-dock[data-direct-close="true"] .gallery-folder-scroll {
+  overflow: visible;
+}
+
+.studio-shell[data-panel-open="true"][data-gallery-open="false"]
+  .gallery-folder-scroll {
+  max-width: calc(100vw - var(--controls-reserve) - 68px);
 }
 
 .gallery-folder-list {
@@ -3085,6 +3101,33 @@ body {
 
 .gallery-folder-menu-goo-origin {
   bottom: -39px;
+}
+
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-menu-actions,
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-share-actions {
+  right: 0;
+  left: auto;
+}
+
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-dock-action {
+  right: 0;
+  left: auto;
+  transform-origin: calc(100% - 16px) 50%;
+}
+
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-menu-goo-blob {
+  right: 0;
+  left: auto;
+}
+
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-dock-action-icon {
+  right: 0;
+  left: auto;
+}
+
+.gallery-folder-menu[data-expand-direction="left"] .gallery-folder-dock-action-label {
+  right: 32px;
+  left: auto;
 }
 
 .gallery-folder-dock-action-icon {
@@ -4026,7 +4069,12 @@ body {
   .gallery-folder-dock {
     left: 3px;
     bottom: 0;
-    max-width: calc(100vw - 15px);
+    max-width: calc(100vw - 6px);
+  }
+
+  .studio-shell[data-panel-open="true"][data-gallery-open="false"]
+    .gallery-folder-dock {
+    max-width: calc(100vw - 6px);
   }
 
   .gallery-folder-menu {
@@ -4034,7 +4082,7 @@ body {
   }
 
   .gallery-folder-scroll {
-    max-width: calc(100vw - 176px);
+    max-width: calc(100vw - 48px);
   }
 
   .gallery-folder-slot {

@@ -108,6 +108,8 @@ const DOCK_ACTION_STEP = 39;
 const FOLDER_SORT_STEP = 80;
 const FOLDER_DRAG_THRESHOLD = 5;
 const FOLDER_MENU_SHADOW_GUTTER = 28;
+const DOCK_MENU_EXPANDED_WIDTH = 104;
+const DOCK_MENU_VIEWPORT_GUTTER = 12;
 
 type FolderSortDrag = {
   id: string;
@@ -477,6 +479,7 @@ export function GalleryFolderDock({
     () => new Set(),
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dockMenuRef = useRef<HTMLDivElement>(null);
   const folderPointerRef = useRef<FolderPointerIntent | null>(null);
   const foldersRef = useRef(folders);
   const itemsRef = useRef(items);
@@ -487,6 +490,35 @@ export function GalleryFolderDock({
     stiffness: 270,
     damping: 22,
   });
+
+  useLayoutEffect(() => {
+    const menu = dockMenuRef.current;
+    if (!menu) return;
+    const shell = menu.closest<HTMLElement>(".studio-shell");
+    const stage = shell?.querySelector<HTMLElement>(".stage-card");
+    const updateDirection = () => {
+      const rect = menu.getBoundingClientRect();
+      const availableRight =
+        shell?.dataset.galleryOpen === "true"
+          ? window.innerWidth
+          : (stage?.getBoundingClientRect().right ?? window.innerWidth);
+      const rightSpace = availableRight - rect.right;
+      menu.dataset.expandDirection =
+        rightSpace >= DOCK_MENU_EXPANDED_WIDTH - rect.width +
+          DOCK_MENU_VIEWPORT_GUTTER
+          ? "right"
+          : "left";
+    };
+    updateDirection();
+    const observer = new ResizeObserver(updateDirection);
+    observer.observe(menu);
+    if (stage) observer.observe(stage);
+    window.addEventListener("resize", updateDirection);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateDirection);
+    };
+  }, []);
 
   useEffect(() => {
     foldersRef.current = folders;
@@ -665,7 +697,12 @@ export function GalleryFolderDock({
   };
 
   return (
-    <div className="gallery-folder-dock" data-mode={mode ?? "idle"} data-gallery-ui>
+    <div
+      className="gallery-folder-dock"
+      data-mode={mode ?? "idle"}
+      data-direct-close={collapseActivePreviewsImmediately}
+      data-gallery-ui
+    >
       <div
         className="gallery-folder-scroll"
         onWheel={(event) => {
@@ -807,7 +844,7 @@ export function GalleryFolderDock({
         </div>
       </div>
 
-      <div className="gallery-folder-menu">
+      <div ref={dockMenuRef} className="gallery-folder-menu">
         {menuOpen && mode === null ? (
           <div className="gallery-folder-menu-actions">
             <svg className="gallery-folder-menu-goo-defs" aria-hidden="true">

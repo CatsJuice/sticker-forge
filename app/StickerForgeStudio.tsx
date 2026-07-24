@@ -68,6 +68,7 @@ import {
   DEFAULT_GALLERY_FOLDER_ID,
   EVOLUTION_GALLERY_FOLDER_ID,
 } from "@/lib/gallery-types";
+import type { GalleryViewState } from "@/lib/gallery-view";
 import {
   GalleryCanvas,
   type GalleryEntryOrigin,
@@ -1015,6 +1016,15 @@ export function StickerForgeStudio() {
   const [galleryEntryOrigins, setGalleryEntryOrigins] = useState<
     Record<string, GalleryEntryOrigin>
   >({});
+  const galleryViewStatesRef = useRef(new Map<string, GalleryViewState>());
+  const [galleryInitialView, setGalleryInitialView] =
+    useState<GalleryViewState>();
+  const rememberGalleryView = useCallback(
+    (folderId: string, view: GalleryViewState) => {
+      galleryViewStatesRef.current.set(folderId, view);
+    },
+    [],
+  );
 
   useEffect(() => {
     const query = window.matchMedia(PANEL_AUTO_COLLAPSE_QUERY);
@@ -3229,6 +3239,8 @@ export function StickerForgeStudio() {
           currentFolder={galleryFolders.find(
             (folder) => folder.id === activeGalleryFolderId,
           )!}
+          initialView={galleryInitialView}
+          onViewChange={rememberGalleryView}
           onItemsChange={(folderItems) => {
             setGalleryItems((current) => [
               ...folderItems,
@@ -3363,6 +3375,9 @@ export function StickerForgeStudio() {
           }
           if (folderId !== activeGalleryFolderId) return;
           setGallerySurfaceHeld(true);
+          setGalleryInitialView(
+            galleryViewStatesRef.current.get(DEFAULT_GALLERY_FOLDER_ID),
+          );
           setActiveGalleryFolderId(DEFAULT_GALLERY_FOLDER_ID);
           setGalleryEntryOrigins({});
           setGalleryFlightStarted(false);
@@ -3375,6 +3390,7 @@ export function StickerForgeStudio() {
             return;
           }
           setGallerySurfaceHeld(galleryOpen);
+          setGalleryInitialView(galleryViewStatesRef.current.get(folderId));
           setActiveGalleryFolderId(folderId);
           setGalleryEntryOrigins(origins);
           setGalleryClosing(false);

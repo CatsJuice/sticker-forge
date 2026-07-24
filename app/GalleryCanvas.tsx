@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,12 @@ import {
   GalleryRenderer,
   type GalleryScreenTransform,
 } from "@/lib/gallery-renderer";
+import {
+  calculateGalleryBounds,
+  DEFAULT_GALLERY_VIEW,
+  fitGalleryBounds,
+  type GalleryViewState,
+} from "@/lib/gallery-view";
 import { GalleryPreviewImage } from "./GalleryPreviewImage";
 import { useSpringValue, useSpringVector } from "./gallery-spring";
 
@@ -68,6 +75,8 @@ type GalleryCanvasProps = {
   holdSurfaceVisible?: boolean;
   currentFolderId: string;
   currentFolder: GalleryFolderRecord;
+  initialView?: GalleryViewState;
+  onViewChange: (folderId: string, view: GalleryViewState) => void;
   onItemsChange: (items: GalleryItem[]) => void;
   onItemMoved: (item: GalleryItem) => void;
   onFolderDragHover: (preview: GalleryFolderDropPreview | null) => void;
@@ -85,11 +94,7 @@ type GalleryCanvasProps = {
   onClose: () => void;
 };
 
-type ViewState = {
-  x: number;
-  y: number;
-  zoom: number;
-};
+type ViewState = GalleryViewState;
 
 type Size = {
   width: number;
@@ -1047,6 +1052,8 @@ export function GalleryCanvas({
   holdSurfaceVisible = false,
   currentFolderId,
   currentFolder,
+  initialView,
+  onViewChange,
   onItemsChange,
   onItemMoved,
   onFolderDragHover,
@@ -1067,7 +1074,20 @@ export function GalleryCanvas({
   const { ref: viewportRef, size: viewport } = useElementSize<HTMLDivElement>();
   const [items, setItems] = useState(initialItems);
   const itemsRef = useRef(items);
-  const [view, setView] = useState<ViewState>({ x: 0, y: 0, zoom: 1 });
+  const [view, setView] = useState<ViewState>(
+    initialView ?? DEFAULT_GALLERY_VIEW,
+  );
+  const [viewInitialized, setViewInitialized] = useState(Boolean(initialView));
+  const initialBoundsRef = useRef<
+    ReturnType<typeof calculateGalleryBounds> | undefined
+  >(undefined);
+  if (initialBoundsRef.current === undefined) {
+    // A restored view never needs a bounds scan. A first-open view scans once
+    // and reuses the result when the viewport measurement becomes available.
+    initialBoundsRef.current = initialView
+      ? null
+      : calculateGalleryBounds(initialItems);
+  }
   const [liveIds, setLiveIds] = useState<Set<string>>(() => new Set());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = useState<string | null>(null);
@@ -1189,6 +1209,23 @@ export function GalleryCanvas({
     : combinedPresence;
   const editCompleteRef = useRef(false);
   const editHandoffCompleteRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (
+      viewInitialized ||
+      viewport.width <= 1 ||
+      viewport.height <= 1
+    ) {
+      return;
+    }
+    setView(fitGalleryBounds(initialBoundsRef.current ?? null, viewport));
+    setViewInitialized(true);
+  }, [viewInitialized, viewport]);
+
+  useEffect(() => {
+    if (!viewInitialized) return;
+    onViewChange(currentFolderId, view);
+  }, [currentFolderId, onViewChange, view, viewInitialized]);
 
   useEffect(() => {
     if (!titleEditing) return;
@@ -2093,7 +2130,7 @@ export function GalleryCanvas({
           <button
             className="gallery-zoom-value"
             type="button"
-            onClick={() => setView({ x: 0, y: 0, zoom: 1 })}
+            onClick={() => setView(DEFAULT_GALLERY_VIEW)}
             aria-label={t.resetView}
           >
             {Math.round(view.zoom * 100)}%

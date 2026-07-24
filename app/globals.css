@@ -4660,6 +4660,7 @@ body {
   .gallery-view-controls {
     right: calc(14px + var(--mobile-safe-right));
     bottom: calc(14px + var(--mobile-safe-bottom));
+    box-shadow: 0 5px 14px rgba(27, 29, 36, 0.08);
   }
 
   .gallery-header {

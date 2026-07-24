@@ -126,6 +126,19 @@ type ItemGesture =
       startLayout: GalleryLayout;
     };
 
+type TouchPoint = {
+  x: number;
+  y: number;
+};
+
+type PinchGesture = {
+  pointerIds: [number, number];
+  startDistance: number;
+  startZoom: number;
+  anchorWorldX: number;
+  anchorWorldY: number;
+};
+
 const MIN_ZOOM = 0.06;
 const MAX_ZOOM = 8;
 const MAX_VISIBLE_PREVIEWS = 320;
@@ -480,6 +493,7 @@ function GalleryItemView({
   onMoveDrop,
   hitTestItem,
   hitTestPeel,
+  gestureCancelVersion,
 }: {
   item: GalleryItem;
   rendererReady: boolean;
@@ -509,6 +523,7 @@ function GalleryItemView({
   onMoveDrop: (id: string, clientX: number, clientY: number) => boolean;
   hitTestItem: (id: string, clientX: number, clientY: number) => boolean;
   hitTestPeel: (id: string, clientX: number, clientY: number) => boolean;
+  gestureCancelVersion: number;
 }) {
   const [displayLayout, setDisplayLayout] = useState(item.layout);
   const gestureRef = useRef<ItemGesture | null>(null);
@@ -525,6 +540,21 @@ function GalleryItemView({
     latestLayoutRef.current = item.layout;
     setDisplayLayout(item.layout);
   }, [item.layout]);
+
+  useEffect(() => {
+    const gesture = gestureRef.current;
+    if (!gesture) return;
+    gestureRef.current = null;
+    onMovePointer(item.id, null, null);
+    latestLayoutRef.current = gesture.startLayout;
+    setDisplayLayout(gesture.startLayout);
+    onLayoutChange(item.id, gesture.startLayout, false);
+  }, [
+    gestureCancelVersion,
+    item.id,
+    onLayoutChange,
+    onMovePointer,
+  ]);
 
   const finishGesture = (
     event: ReactPointerEvent<HTMLElement>,
@@ -1161,6 +1191,11 @@ export function GalleryCanvas({
     startClientY: number;
     startView: ViewState;
   } | null>(null);
+  const touchPointsRef = useRef(new Map<number, TouchPoint>());
+  const pinchRef = useRef<PinchGesture | null>(null);
+  const pendingPinchViewRef = useRef<ViewState | null>(null);
+  const pinchFrameRef = useRef<number | null>(null);
+  const [gestureCancelVersion, setGestureCancelVersion] = useState(0);
   const peelPointerRef = useRef<{
     pointerId: number;
     itemId: string;
@@ -1226,6 +1261,15 @@ export function GalleryCanvas({
     if (!viewInitialized) return;
     onViewChange(currentFolderId, view);
   }, [currentFolderId, onViewChange, view, viewInitialized]);
+
+  useEffect(
+    () => () => {
+      if (pinchFrameRef.current !== null) {
+        cancelAnimationFrame(pinchFrameRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!titleEditing) return;
@@ -1773,6 +1817,130 @@ export function GalleryCanvas({
     };
   };
 
+  const startPinch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch" || deleting) return;
+    touchPointsRef.current.set(event.pointerId, {
+      x: event.clientX,
+      y: event.clientY,
+    });
+    if (pinchRef.current) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.currentTarget.setPointerCapture(event.pointerId);
+      return;
+    }
+    if (touchPointsRef.current.size !== 2) return;
+
+    const [[firstId, first], [secondId, second]] = [
+      ...touchPointsRef.current,
+    ];
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpointX = (first.x + second.x) / 2;
+    const midpointY = (first.y + second.y) / 2;
+    const offsetX = midpointX - rect.left - viewport.width / 2;
+    const offsetY = midpointY - rect.top - viewport.height / 2;
+
+    event.preventDefault();
+    event.stopPropagation();
+    panRef.current = null;
+    const peelPointer = peelPointerRef.current;
+    if (peelPointer) {
+      rendererRef.current?.cancelPeel();
+      peelPointerRef.current = null;
+    }
+    setGestureCancelVersion((current) => current + 1);
+    pinchRef.current = {
+      pointerIds: [firstId, secondId],
+      startDistance: Math.max(
+        1,
+        Math.hypot(second.x - first.x, second.y - first.y),
+      ),
+      startZoom: view.zoom,
+      anchorWorldX: view.x + offsetX / Math.max(view.zoom, 0.001),
+      anchorWorldY: view.y + offsetY / Math.max(view.zoom, 0.001),
+    };
+    event.currentTarget.setPointerCapture(firstId);
+    event.currentTarget.setPointerCapture(secondId);
+  };
+
+  const movePinch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch") return;
+    const point = touchPointsRef.current.get(event.pointerId);
+    if (point) {
+      point.x = event.clientX;
+      point.y = event.clientY;
+    }
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    if (!pinch.pointerIds.includes(event.pointerId)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    const first = touchPointsRef.current.get(pinch.pointerIds[0]);
+    const second = touchPointsRef.current.get(pinch.pointerIds[1]);
+    if (!first || !second) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    const rect = event.currentTarget.getBoundingClientRect();
+    const midpointX = (first.x + second.x) / 2;
+    const midpointY = (first.y + second.y) / 2;
+    const offsetX = midpointX - rect.left - viewport.width / 2;
+    const offsetY = midpointY - rect.top - viewport.height / 2;
+    const distance = Math.max(
+      1,
+      Math.hypot(second.x - first.x, second.y - first.y),
+    );
+    const nextZoom = clamp(
+      pinch.startZoom * (distance / pinch.startDistance),
+      MIN_ZOOM,
+      MAX_ZOOM,
+    );
+    pendingPinchViewRef.current = {
+      x: pinch.anchorWorldX - offsetX / nextZoom,
+      y: pinch.anchorWorldY - offsetY / nextZoom,
+      zoom: nextZoom,
+    };
+    if (pinchFrameRef.current === null) {
+      pinchFrameRef.current = requestAnimationFrame(() => {
+        pinchFrameRef.current = null;
+        const next = pendingPinchViewRef.current;
+        pendingPinchViewRef.current = null;
+        if (next) setView(next);
+      });
+    }
+  };
+
+  const finishPinch = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch") return;
+    touchPointsRef.current.delete(event.pointerId);
+    const pinch = pinchRef.current;
+    if (!pinch) return;
+    if (!pinch.pointerIds.includes(event.pointerId)) {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    pinchRef.current = null;
+    panRef.current = null;
+    if (pinchFrameRef.current !== null) {
+      cancelAnimationFrame(pinchFrameRef.current);
+      pinchFrameRef.current = null;
+    }
+    const pendingView = pendingPinchViewRef.current;
+    pendingPinchViewRef.current = null;
+    if (pendingView) setView(pendingView);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   const movePan = (event: ReactPointerEvent<HTMLDivElement>) => {
     const peelPointer = peelPointerRef.current;
     if (peelPointer?.pointerId === event.pointerId) {
@@ -1947,6 +2115,10 @@ export function GalleryCanvas({
             "--gallery-grid-y": `${viewport.height / 2 - view.y * view.zoom}px`,
           } as CSSProperties
         }
+        onPointerDownCapture={startPinch}
+        onPointerMoveCapture={movePinch}
+        onPointerUpCapture={finishPinch}
+        onPointerCancelCapture={finishPinch}
         onPointerDown={startPan}
         onPointerMove={movePan}
         onPointerUp={finishPan}
@@ -2062,6 +2234,7 @@ export function GalleryCanvas({
               onMoveDrop={handleMoveDrop}
               hitTestItem={hitTestItem}
               hitTestPeel={hitTestPeel}
+              gestureCancelVersion={gestureCancelVersion}
             />
           ))}
         </div>

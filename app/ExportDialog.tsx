@@ -869,6 +869,18 @@ export function ExportDialog({
     originX: number;
     originY: number;
   } | null>(null);
+  const previewTouchPointsRef = useRef(
+    new Map<number, { x: number; y: number }>(),
+  );
+  const previewPinchRef = useRef<{
+    pointerIds: [number, number];
+    startDistance: number;
+    startZoom: number;
+    anchorX: number;
+    anchorY: number;
+  } | null>(null);
+  const pendingPinchTransformRef = useRef<TransformState | null>(null);
+  const previewPinchFrameRef = useRef<number | null>(null);
   const anchorDragRef = useRef<{
     pointerId: number;
     anchor: MotionAnchor;
@@ -1044,6 +1056,15 @@ export function ExportDialog({
     transformRef.current = next;
     setTransform(next);
   }, []);
+
+  useEffect(
+    () => () => {
+      if (previewPinchFrameRef.current !== null) {
+        cancelAnimationFrame(previewPinchFrameRef.current);
+      }
+    },
+    [],
+  );
 
   const setMotionSynced = useCallback((next: StickerPlaybackMotion) => {
     motionRef.current = next;
@@ -1285,7 +1306,9 @@ export function ExportDialog({
   }, [animationMethod, mode, options, source, t.exportFailed]);
 
   useEffect(() => {
-    controllerRef.current?.setRenderScale(Math.max(1, transform.zoom));
+    if (!previewPinchRef.current) {
+      controllerRef.current?.setRenderScale(Math.max(1, transform.zoom));
+    }
   }, [transform.zoom]);
 
   useLayoutEffect(() => {
@@ -1573,6 +1596,48 @@ export function ExportDialog({
 
   const onPreviewPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (previewLocked) return;
+    if (event.pointerType === "touch") {
+      previewTouchPointsRef.current.set(event.pointerId, {
+        x: event.clientX,
+        y: event.clientY,
+      });
+      if (previewPinchRef.current) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        return;
+      }
+      if (previewTouchPointsRef.current.size === 2) {
+        const [[firstId, first], [secondId, second]] = [
+          ...previewTouchPointsRef.current,
+        ];
+        const rect = event.currentTarget.getBoundingClientRect();
+        const midpointX = (first.x + second.x) / 2;
+        const midpointY = (first.y + second.y) / 2;
+        const offsetX = midpointX - rect.left - rect.width / 2;
+        const offsetY = midpointY - rect.top - rect.height / 2;
+        const current = transformRef.current;
+
+        event.preventDefault();
+        event.stopPropagation();
+        panRef.current = null;
+        setSnapping({ x: false, y: false });
+        controllerRef.current?.reset();
+        previewPinchRef.current = {
+          pointerIds: [firstId, secondId],
+          startDistance: Math.max(
+            1,
+            Math.hypot(second.x - first.x, second.y - first.y),
+          ),
+          startZoom: current.zoom,
+          anchorX: (offsetX - current.x) / Math.max(current.zoom, 0.001),
+          anchorY: (offsetY - current.y) / Math.max(current.zoom, 0.001),
+        };
+        event.currentTarget.setPointerCapture(firstId);
+        event.currentTarget.setPointerCapture(secondId);
+        return;
+      }
+    }
     if ((event.target as Element).closest("button")) return;
     const shouldPan = canPanDirectly || event.shiftKey || event.button === 1;
     if (!shouldPan) return;
@@ -1589,6 +1654,54 @@ export function ExportDialog({
   };
 
   const onPreviewPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") {
+      const point = previewTouchPointsRef.current.get(event.pointerId);
+      if (point) {
+        point.x = event.clientX;
+        point.y = event.clientY;
+      }
+      const pinch = previewPinchRef.current;
+      if (pinch && !pinch.pointerIds.includes(event.pointerId)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (pinch) {
+        const first = previewTouchPointsRef.current.get(pinch.pointerIds[0]);
+        const second = previewTouchPointsRef.current.get(pinch.pointerIds[1]);
+        if (!first || !second) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = event.currentTarget.getBoundingClientRect();
+        const midpointX = (first.x + second.x) / 2;
+        const midpointY = (first.y + second.y) / 2;
+        const offsetX = midpointX - rect.left - rect.width / 2;
+        const offsetY = midpointY - rect.top - rect.height / 2;
+        const distance = Math.max(
+          1,
+          Math.hypot(second.x - first.x, second.y - first.y),
+        );
+        const zoom = clamp(
+          pinch.startZoom * (distance / pinch.startDistance),
+          0.35,
+          2.6,
+        );
+        pendingPinchTransformRef.current = {
+          x: offsetX - pinch.anchorX * zoom,
+          y: offsetY - pinch.anchorY * zoom,
+          zoom,
+        };
+        if (previewPinchFrameRef.current === null) {
+          previewPinchFrameRef.current = requestAnimationFrame(() => {
+            previewPinchFrameRef.current = null;
+            const next = pendingPinchTransformRef.current;
+            pendingPinchTransformRef.current = null;
+            if (next) setTransformSynced(next);
+          });
+        }
+        return;
+      }
+    }
     const pan = panRef.current;
     if (!pan || pan.pointerId !== event.pointerId) return;
     let x = pan.originX + event.clientX - pan.startX;
@@ -1602,6 +1715,39 @@ export function ExportDialog({
   };
 
   const onPreviewPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch") {
+      previewTouchPointsRef.current.delete(event.pointerId);
+      const pinch = previewPinchRef.current;
+      if (pinch && !pinch.pointerIds.includes(event.pointerId)) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        return;
+      }
+      if (pinch) {
+        event.preventDefault();
+        event.stopPropagation();
+        previewPinchRef.current = null;
+        panRef.current = null;
+        setSnapping({ x: false, y: false });
+        if (previewPinchFrameRef.current !== null) {
+          cancelAnimationFrame(previewPinchFrameRef.current);
+          previewPinchFrameRef.current = null;
+        }
+        const pendingTransform = pendingPinchTransformRef.current;
+        pendingPinchTransformRef.current = null;
+        if (pendingTransform) setTransformSynced(pendingTransform);
+        controllerRef.current?.setRenderScale(
+          Math.max(1, pendingTransform?.zoom ?? transformRef.current.zoom),
+        );
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }
+        return;
+      }
+    }
     if (panRef.current?.pointerId !== event.pointerId) return;
     panRef.current = null;
     setSnapping({ x: false, y: false });
@@ -2328,9 +2474,9 @@ export function ExportDialog({
                         } as CSSProperties)
                   }
                   onPointerDownCapture={onPreviewPointerDown}
-                  onPointerMove={onPreviewPointerMove}
-                  onPointerUp={onPreviewPointerUp}
-                  onPointerCancel={onPreviewPointerUp}
+                  onPointerMoveCapture={onPreviewPointerMove}
+                  onPointerUpCapture={onPreviewPointerUp}
+                  onPointerCancelCapture={onPreviewPointerUp}
                   onWheel={onPreviewWheel}
                 >
                 <div

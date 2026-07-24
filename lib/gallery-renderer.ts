@@ -634,6 +634,15 @@ class GalleryStickerMesh {
     this.updateUniforms();
   }
 
+  cancelPeel() {
+    if (!this.dragging && this.progress <= 0) return;
+    this.audio.end(0);
+    this.exitActive = false;
+    this.entranceActive = false;
+    this.reset();
+    this.showFlatSurface();
+  }
+
   private projectedGrabDistance(depth: number, radius: number) {
     if (depth <= 0) return 0;
     const maxAngle = this.uniforms.uMaxAngle.value as number;
@@ -1409,6 +1418,16 @@ export class GalleryRenderer {
     const record = this.records.get(this.activePeel.id);
     record?.sticker?.end(time);
     this.activePeel = null;
+    this.requestRender();
+    return true;
+  }
+
+  cancelPeel() {
+    if (!this.activePeel) return false;
+    const record = this.records.get(this.activePeel.id);
+    record?.sticker?.cancelPeel();
+    this.activePeel = null;
+    this.setElevatedPeel(null);
     this.requestRender();
     return true;
   }

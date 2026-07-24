@@ -8,8 +8,12 @@ the MIT License and installed from npm.
 ## Local Background Removal
 
 Browser-side inference uses `@huggingface/transformers`, licensed under the
-Apache License 2.0. The background-removal weights are loaded on demand from
-`BritishWerewolf/U-2-Netp`, licensed under the Apache License 2.0.
+Apache License 2.0. The background-removal weights are redistributed with this
+project and loaded on demand from the application's own origin. They come from
+`BritishWerewolf/U-2-Netp`, are based on the original U²-Net project, and are
+licensed under the Apache License 2.0. The bundled copy, its license, source
+revision, and checksums are recorded under
+`public/models/BritishWerewolf/U-2-Netp/`.
 
 ## Debug Tooling
 

@@ -1,0 +1,23 @@
+{
+  "_name_or_path": "u2netp",
+  "model_type": "u2net",
+  "architectures": [
+    "U2NetModel"
+  ],
+  "transformers.js_config": {
+    "dtype": "fp32"
+  },
+  "input_name": "input.1",
+  "input_shape": [1, 3, 320, 320],
+  "output_composite": "1959",
+  "output_names": [
+    "1959",
+    "1960",
+    "1961",
+    "1962",
+    "1963",
+    "1964",
+    "1965"
+  ],
+  "output_shape": [1, 320, 320]
+}

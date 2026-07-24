@@ -1,6 +1,6 @@
 /// <reference lib="webworker" />
 
-import { AutoModel, RawImage, Tensor } from "@huggingface/transformers";
+import { AutoModel, env, RawImage, Tensor } from "@huggingface/transformers";
 
 type RemoveRequest = {
   id: number;
@@ -18,6 +18,16 @@ type ProgressEvent = {
 };
 
 const MODEL_ID = "BritishWerewolf/U-2-Netp";
+const LOCAL_MODEL_PATH = "/models/";
+
+// Serve model files from the same origin so background removal works where the
+// Hugging Face Hub is unavailable. Keep remoteHost unchanged: Transformers.js
+// checks its old Hugging Face cache key before fetching LOCAL_MODEL_PATH, so
+// browsers that downloaded the model previously can continue using that cache.
+env.allowLocalModels = true;
+env.allowRemoteModels = false;
+env.localModelPath = LOCAL_MODEL_PATH;
+
 // U²-Net intentionally returns a soft matte, but its low-confidence tail often
 // contains the original floor/wall color. Leaving that tail intact makes those
 // pixels render above the sticker outline as a gray halo. Compress the tail

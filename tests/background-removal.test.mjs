@@ -1,9 +1,23 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("ships a local, permissively licensed background-removal path", async () => {
-  const [packageJson, worker, studio, effect, styles, shaders, renderer, notices] = await Promise.all([
+  const [
+    packageJson,
+    worker,
+    studio,
+    effect,
+    styles,
+    shaders,
+    renderer,
+    notices,
+    model,
+    modelConfig,
+    modelLicense,
+    modelSource,
+  ] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(
       new URL("../workers/background-removal.worker.ts", import.meta.url),
@@ -15,15 +29,46 @@ test("ships a local, permissively licensed background-removal path", async () =>
     readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
     readFile(new URL("../THIRD_PARTY_NOTICES.md", import.meta.url), "utf8"),
+    readFile(
+      new URL(
+        "../public/models/BritishWerewolf/U-2-Netp/onnx/model.onnx",
+        import.meta.url,
+      ),
+    ),
+    readFile(
+      new URL(
+        "../public/models/BritishWerewolf/U-2-Netp/config.json",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../public/models/BritishWerewolf/U-2-Netp/LICENSE",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
+    readFile(
+      new URL(
+        "../public/models/BritishWerewolf/U-2-Netp/SOURCE.md",
+        import.meta.url,
+      ),
+      "utf8",
+    ),
   ]);
 
   assert.match(packageJson, /"@huggingface\/transformers"/);
   assert.match(worker, /BritishWerewolf\/U-2-Netp/);
   assert.match(
     worker,
-    /import \{ AutoModel, RawImage, Tensor \} from "@huggingface\/transformers"/,
+    /import \{ AutoModel, env, RawImage, Tensor \} from "@huggingface\/transformers"/,
   );
   assert.doesNotMatch(worker, /await import\(\s*"@huggingface\/transformers"/);
+  assert.match(worker, /env\.allowLocalModels\s*=\s*true/);
+  assert.match(worker, /env\.allowRemoteModels\s*=\s*false/);
+  assert.match(worker, /env\.localModelPath\s*=\s*LOCAL_MODEL_PATH/);
+  assert.match(worker, /const LOCAL_MODEL_PATH\s*=\s*"\/models\/"/);
   assert.match(worker, /device:\s*"wasm"/);
   assert.match(worker, /type:\s*"progress"/);
   assert.match(worker, /MATTE_BLACK_POINT\s*=\s*0\.12/);
@@ -127,4 +172,15 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.doesNotMatch(styles, /background-removal-outline-flash/);
   assert.match(notices, /U-2-Netp/);
   assert.match(notices, /Apache License 2\.0/);
+  assert.equal(model.byteLength, 4_574_861);
+  assert.equal(
+    createHash("sha256").update(model).digest("hex"),
+    "309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8",
+  );
+  assert.equal(JSON.parse(modelConfig).model_type, "u2net");
+  assert.match(modelLicense, /Apache License/);
+  assert.match(
+    modelSource,
+    /7112208dbac3a3642496c8d54e2f0f9bb3dc1dc8/,
+  );
 });

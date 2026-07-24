@@ -21,6 +21,6 @@ test("loads the touch visualizer only for the mobile demo route parameter", asyn
   assert.match(visualizer, /"pointercancel"/);
   assert.match(visualizer, /z-index: 2147483647/);
   assert.match(visualizer, /pointer-events: none/);
-  assert.match(visualizer, /background: rgba\(255, 255, 255, 0\.24\)/);
+  assert.match(visualizer, /background: rgba\(12, 14, 18, 0\.2\)/);
   assert.match(visualizer, /border: 2px solid rgba\(255, 255, 255, 0\.98\)/);
 });

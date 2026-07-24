@@ -119,7 +119,7 @@ export function TouchVisualizer() {
           margin: -23px 0 0 -23px;
           border: 2px solid rgba(255, 255, 255, 0.98);
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.24);
+          background: rgba(12, 14, 18, 0.2);
           box-shadow:
             0 0 0 2px rgba(255, 255, 255, 0.2),
             0 0 18px rgba(255, 255, 255, 0.72),

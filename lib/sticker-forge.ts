@@ -22,6 +22,7 @@ import {
   type StickerOptions,
   type StickerPlaybackMotion,
   type StickerPoint,
+  type StickerRenderSnapshot,
   type PreparedStickerSource,
   type StickerSource,
   type StickerState,
@@ -43,6 +44,7 @@ export type {
   StickerOutlineOptions,
   StickerPeelOptions,
   StickerPoint,
+  StickerRenderSnapshot,
   StickerPlaybackMotion,
   StickerRichTextBlock,
   StickerRichTextDocument,
@@ -762,10 +764,69 @@ class StickerRenderer implements StickerInstance {
 
   setRenderScale(scale: number): void {
     if (this.destroyed) return;
-    const nextScale = clamp(scale, 1, 2.6);
+    const nextScale = clamp(scale, 1, 6);
     if (Math.abs(nextScale - this.renderScale) < 0.001) return;
     this.renderScale = nextScale;
     this.resize();
+  }
+
+  getRenderSnapshot(): StickerRenderSnapshot {
+    const origin = this.uniforms.uOrigin.value as THREE.Vector2;
+    const direction = this.uniforms.uPeelDir.value as THREE.Vector2;
+    return {
+      progress: this.uniforms.uPeel.value as number,
+      peelDepth: this.uniforms.uPeelDepth.value as number,
+      peelRadius: this.uniforms.uRadius.value as number,
+      detachedTension: this.uniforms.uDetachedTension.value as number,
+      origin: { x: origin.x, y: origin.y },
+      direction: { x: direction.x, y: direction.y },
+      position: {
+        x: this.stickerMesh.position.x,
+        y: this.stickerMesh.position.y,
+      },
+      scale: {
+        x: this.stickerMesh.scale.x,
+        y: this.stickerMesh.scale.y,
+      },
+      rotation: this.stickerMesh.rotation.z,
+      entranceSweep: this.uniforms.uEntranceSweep.value as number,
+      entranceScaleProgress:
+        this.uniforms.uEntranceScaleProgress.value as number,
+      time: this.uniforms.uTime.value as number,
+    };
+  }
+
+  setRenderSnapshot(snapshot: StickerRenderSnapshot): void {
+    if (this.destroyed || !this.artwork) return;
+    this.springActive = false;
+    this.detachedExitActive = false;
+    this.entranceActive = false;
+    this.interactionHintActive = false;
+    this.state.dragging = false;
+    this.state.progress = snapshot.progress;
+    this.creaseDepth = snapshot.peelDepth;
+    this.effectivePeelRadius = snapshot.peelRadius;
+    this.detachedTension = snapshot.detachedTension;
+    this.grabOrigin.set(snapshot.origin.x, snapshot.origin.y);
+    this.activeDirection.set(snapshot.direction.x, snapshot.direction.y);
+    this.stickerMesh.position.set(
+      snapshot.position.x,
+      snapshot.position.y,
+      0,
+    );
+    this.stickerMesh.scale.set(snapshot.scale.x, snapshot.scale.y, 1);
+    this.stickerMesh.rotation.z = snapshot.rotation;
+    this.uniforms.uPeel.value = snapshot.progress;
+    this.uniforms.uPeelDepth.value = snapshot.peelDepth;
+    this.uniforms.uRadius.value = snapshot.peelRadius;
+    this.uniforms.uDetachedTension.value = snapshot.detachedTension;
+    (this.uniforms.uOrigin.value as THREE.Vector2).copy(this.grabOrigin);
+    (this.uniforms.uPeelDir.value as THREE.Vector2).copy(this.activeDirection);
+    this.uniforms.uEntranceSweep.value = snapshot.entranceSweep;
+    this.uniforms.uEntranceScaleProgress.value =
+      snapshot.entranceScaleProgress;
+    this.uniforms.uTime.value = snapshot.time;
+    this.renderer.render(this.scene, this.camera);
   }
 
   resize = (): void => {
@@ -2150,6 +2211,29 @@ export class StickerForgeElement extends HTMLElementBase {
 
   setRenderScale(scale: number): void {
     this.instance?.setRenderScale(scale);
+  }
+
+  getRenderSnapshot(): StickerRenderSnapshot {
+    return (
+      this.instance?.getRenderSnapshot() ?? {
+        progress: 0,
+        peelDepth: 0,
+        peelRadius: 0,
+        detachedTension: 0,
+        origin: { x: 0, y: 0 },
+        direction: { x: 1, y: 0 },
+        position: { x: 0, y: 0 },
+        scale: { x: 1, y: 1 },
+        rotation: 0,
+        entranceSweep: -1,
+        entranceScaleProgress: -1,
+        time: 0,
+      }
+    );
+  }
+
+  setRenderSnapshot(snapshot: StickerRenderSnapshot): void {
+    this.instance?.setRenderSnapshot(snapshot);
   }
 
   resize(): void {

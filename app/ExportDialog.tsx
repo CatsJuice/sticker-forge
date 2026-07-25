@@ -35,6 +35,7 @@ import {
   type StickerInstance,
   type StickerOptions,
   type StickerPlaybackMotion,
+  type StickerRenderSnapshot,
   type StickerSource,
 } from "@/lib/sticker-forge";
 import {
@@ -74,6 +75,14 @@ type VisualMotion = {
   scale: number;
   rotation: number;
   opacity: number;
+};
+type ManualRenderSample = {
+  durationMs: number;
+  snapshot: StickerRenderSnapshot;
+};
+type PreparedAnimationFrames = {
+  frames: ExportFrame[];
+  encodedFrames: Blob[];
 };
 
 type ExportDialogProps = {
@@ -324,6 +333,46 @@ function stickerDisplaySize(
 
 function nextFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement) {
+  return new Promise<Blob>((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Could not compress an export frame."));
+    }, "image/png");
+  });
+}
+
+function resampleTimedItems<T extends { durationMs: number }>(
+  items: T[],
+  framesPerSecond: number,
+) {
+  if (!items.length) return [];
+  const frameDuration = 1000 / framesPerSecond;
+  const totalDuration = items.reduce(
+    (duration, item) => duration + item.durationMs,
+    0,
+  );
+  const frameCount = Math.max(
+    1,
+    Math.ceil(totalDuration / frameDuration - 1e-9),
+  );
+  const output: T[] = [];
+  let sourceIndex = 0;
+  let sourceEnd = items[0].durationMs;
+  for (let index = 0; index < frameCount; index += 1) {
+    const sampleTime = index * frameDuration;
+    while (
+      sourceIndex < items.length - 1 &&
+      sampleTime >= sourceEnd - 1e-7
+    ) {
+      sourceIndex += 1;
+      sourceEnd += items[sourceIndex].durationMs;
+    }
+    output.push({ ...items[sourceIndex], durationMs: frameDuration });
+  }
+  return output;
 }
 
 function throwIfAborted(signal: AbortSignal) {
@@ -848,6 +897,7 @@ export function ExportDialog({
   const recordingFrameRef = useRef(0);
   const manualStateRef = useRef<ManualState>("idle");
   const recordedFramesRef = useRef<ExportFrame[]>([]);
+  const recordedSnapshotsRef = useRef<ManualRenderSample[]>([]);
   const reachedDetachRef = useRef(false);
   const transformRef = useRef<TransformState>({ x: 0, y: 0, zoom: 1 });
   const motionRef = useRef<StickerPlaybackMotion>(DEFAULT_PLAYBACK_MOTION);
@@ -998,27 +1048,32 @@ export function ExportDialog({
   const runExportWorker = useCallback(
     async ({
       audio,
+      encodedFrames,
       format,
       frameRate,
       frames,
+      outputScale = exportScale,
       signal,
     }: {
       audio?: Awaited<ReturnType<typeof renderStickerExportAudio>>;
+      encodedFrames?: Blob[];
       format: StickerExportFormat;
       frameRate: number;
       frames: ExportFrame[];
+      outputScale?: ExportScale;
       signal: AbortSignal;
     }) => {
       throwIfAborted(signal);
       const task = startStickerExportWorker(
         {
           audio,
+          encodedFrames,
           format,
           frameRate,
           frames,
           gifShadow,
           id: createRandomId(),
-          outputScale: exportScale,
+          outputScale,
           playbackInterval,
         },
         (message) => {
@@ -1235,6 +1290,7 @@ export function ExportDialog({
       setSize(next);
       if (recordedFramesRef.current.length) {
         setRecordedFramesSynced([]);
+        recordedSnapshotsRef.current = [];
         setManualStateSynced("idle");
         setRecordingPhase("idle");
         setStatus("");
@@ -1416,6 +1472,17 @@ export function ExportDialog({
     } satisfies ExportFrame;
   }, [getSourceCanvas, size]);
 
+  const appendRecordingSample = useCallback(() => {
+    const controller = controllerRef.current;
+    if (!controller) throw new Error("The sticker preview is not ready.");
+    const snapshot = controller.getRenderSnapshot();
+    recordedFramesRef.current.push(captureRecordingFrame());
+    recordedSnapshotsRef.current.push({
+      durationMs: CAPTURE_FRAME_DURATION,
+      snapshot,
+    });
+  }, [captureRecordingFrame]);
+
   const stopRecording = useCallback(
     (complete: boolean) => {
       cancelAnimationFrame(recordingFrameRef.current);
@@ -1427,6 +1494,7 @@ export function ExportDialog({
         setStatus(t.recorded);
       } else {
         recordedFramesRef.current = [];
+        recordedSnapshotsRef.current = [];
         setRecordedFramesSynced([]);
         setManualStateSynced("idle");
         setStatus(t.incomplete);
@@ -1445,7 +1513,7 @@ export function ExportDialog({
       if (!lastCapture || time - lastCapture >= CAPTURE_FRAME_DURATION - 2) {
         lastCapture = time;
         try {
-          recordedFramesRef.current.push(captureRecordingFrame());
+          appendRecordingSample();
         } catch {
           stopRecording(false);
           return;
@@ -1465,9 +1533,10 @@ export function ExportDialog({
         return;
       }
       recordedFramesRef.current = [];
+      recordedSnapshotsRef.current = [];
       reachedDetachRef.current = false;
       try {
-        recordedFramesRef.current.push(captureRecordingFrame());
+        appendRecordingSample();
       } catch {
         stopRecording(false);
         return;
@@ -1498,7 +1567,7 @@ export function ExportDialog({
     const onCycleComplete = () => {
       if (manualStateRef.current === "capturing" && reachedDetachRef.current) {
         try {
-          recordedFramesRef.current.push(captureRecordingFrame());
+          appendRecordingSample();
         } catch {
           // The frames already captured remain usable.
         }
@@ -1518,7 +1587,7 @@ export function ExportDialog({
     };
   }, [
     animationMethod,
-    captureRecordingFrame,
+    appendRecordingSample,
     mode,
     setManualStateSynced,
     stopRecording,
@@ -1577,6 +1646,7 @@ export function ExportDialog({
   const beginRecording = () => {
     setRecordedFramesSynced([]);
     recordedFramesRef.current = [];
+    recordedSnapshotsRef.current = [];
     reachedDetachRef.current = false;
     controllerRef.current?.reset();
     setManualStateSynced("armed");
@@ -1992,24 +2062,34 @@ export function ExportDialog({
   const exportPng = async () => {
     if (exportAbortRef.current) return;
     const signal = beginExport("png");
+    const previewRenderScale = Math.max(1, transformRef.current.zoom);
     setStatus(t.exporting);
     try {
+      controllerRef.current?.setRenderScale(
+        Math.max(1, transformRef.current.zoom * exportScale),
+      );
       await nextFrame();
       throwIfAborted(signal);
-      const { context } = composeCurrent(EMPTY_MOTION);
+      const { context } = composeCurrent(EMPTY_MOTION, exportScale);
+      const exportSize = scaledExportSize(
+        size.width,
+        size.height,
+        exportScale,
+      );
       const frame: ExportFrame = {
         durationMs: 0,
-        height: size.height,
+        height: exportSize.height,
         rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, size.width, size.height).data,
+          context.getImageData(0, 0, exportSize.width, exportSize.height).data,
         ),
-        width: size.width,
+        width: exportSize.width,
       };
       updateExportProgress(0.34, "preparing");
       const blob = await runExportWorker({
         format: "png",
         frameRate: 1,
         frames: [frame],
+        outputScale: 1,
         signal,
       });
       throwIfAborted(signal);
@@ -2023,6 +2103,7 @@ export function ExportDialog({
         setStatus(t.exportFailed);
       }
     } finally {
+      controllerRef.current?.setRenderScale(previewRenderScale);
       exportAbortRef.current = null;
       exportWorkerTaskRef.current = null;
       setBusy(null);
@@ -2032,14 +2113,20 @@ export function ExportDialog({
   const prepareAutomaticFrames = async (
     frameRate: number,
     signal: AbortSignal,
-  ) => {
+  ): Promise<PreparedAnimationFrames> => {
     const host = exportStickerHostRef.current;
     if (!host) throw new Error("The export renderer is unavailable.");
     const frames: ExportFrame[] = [];
+    const encodedFrames: Blob[] = [];
     const duration = automaticDuration(speed);
     const frameDuration = 1000 / frameRate;
     const frameCount = Math.max(2, Math.ceil((duration / 1000) * frameRate));
     const captureCanvas = document.createElement("canvas");
+    const exportSize = scaledExportSize(
+      size.width,
+      size.height,
+      exportScale,
+    );
     host.style.width = `${size.width}px`;
     host.style.height = `${size.height}px`;
     let exportController: StickerInstance | null = null;
@@ -2051,7 +2138,9 @@ export function ExportDialog({
         sound: { ...options.sound, enabled: false },
       });
       throwIfAborted(signal);
-      exportController.setRenderScale(Math.max(1, transformRef.current.zoom));
+      exportController.setRenderScale(
+        Math.max(1, transformRef.current.zoom * exportScale),
+      );
       const sourceCanvas = host.querySelector("canvas");
       if (!sourceCanvas) throw new Error("The export renderer is not ready.");
       for (let index = 0; index < frameCount; index += 1) {
@@ -2069,21 +2158,21 @@ export function ExportDialog({
         } else {
           exportController.setEntranceProgress(state.entranceProgress);
         }
-        const context = drawCompositedFrame(
+        drawCompositedFrame(
           captureCanvas,
           sourceCanvas,
           size.width,
           size.height,
           transformRef.current,
           state.visual,
+          exportScale,
         );
+        encodedFrames.push(await canvasToPngBlob(captureCanvas));
         frames.push({
           durationMs: frameDuration,
-          height: size.height,
-          rgba: new Uint8ClampedArray(
-            context.getImageData(0, 0, size.width, size.height).data,
-          ),
-          width: size.width,
+          height: exportSize.height,
+          rgba: new Uint8ClampedArray(),
+          width: exportSize.width,
         });
         updateExportProgress(
           0.03 + ((index + 1) / frameCount) * 0.3,
@@ -2091,7 +2180,7 @@ export function ExportDialog({
         );
         await nextFrame();
       }
-      return frames;
+      return { encodedFrames, frames };
     } finally {
       exportController?.destroy();
       host.replaceChildren();
@@ -2101,25 +2190,75 @@ export function ExportDialog({
   };
 
   const prepareRecordedFrames = async (
-    _frameRate: number,
+    frameRate: number,
     signal: AbortSignal,
-  ) => {
-    const sourceFrames = recordedFramesRef.current;
-    const frames: ExportFrame[] = [];
-    for (let index = 0; index < sourceFrames.length; index += 1) {
-      throwIfAborted(signal);
-      const frame = sourceFrames[index];
-      frames.push({
-        ...frame,
-        rgba: new Uint8ClampedArray(frame.rgba),
-      });
-      updateExportProgress(
-        0.03 + ((index + 1) / sourceFrames.length) * 0.3,
-        "capturing",
-      );
-      if (index % 4 === 3) await nextFrame();
+  ): Promise<PreparedAnimationFrames> => {
+    const host = exportStickerHostRef.current;
+    if (!host) throw new Error("The export renderer is unavailable.");
+    const samples = resampleTimedItems(
+      recordedSnapshotsRef.current,
+      frameRate,
+    );
+    if (!samples.length) {
+      throw new Error("Record an animation first.");
     }
-    return frames;
+    const frames: ExportFrame[] = [];
+    const encodedFrames: Blob[] = [];
+    const captureCanvas = document.createElement("canvas");
+    const exportSize = scaledExportSize(
+      size.width,
+      size.height,
+      exportScale,
+    );
+    host.style.width = `${size.width}px`;
+    host.style.height = `${size.height}px`;
+    let exportController: StickerInstance | null = null;
+    try {
+      exportController = await createSticker(host, {
+        ...options,
+        source,
+        peel: { ...options.peel, release: "stay" },
+        sound: { ...options.sound, enabled: false },
+      });
+      throwIfAborted(signal);
+      exportController.setRenderScale(
+        Math.max(1, transformRef.current.zoom * exportScale),
+      );
+      const sourceCanvas = host.querySelector("canvas");
+      if (!sourceCanvas) throw new Error("The export renderer is not ready.");
+      for (let index = 0; index < samples.length; index += 1) {
+        throwIfAborted(signal);
+        const sample = samples[index];
+        exportController.setRenderSnapshot(sample.snapshot);
+        drawCompositedFrame(
+          captureCanvas,
+          sourceCanvas,
+          size.width,
+          size.height,
+          transformRef.current,
+          EMPTY_MOTION,
+          exportScale,
+        );
+        encodedFrames.push(await canvasToPngBlob(captureCanvas));
+        frames.push({
+          durationMs: sample.durationMs,
+          height: exportSize.height,
+          rgba: new Uint8ClampedArray(),
+          width: exportSize.width,
+        });
+        updateExportProgress(
+          0.03 + ((index + 1) / samples.length) * 0.3,
+          "capturing",
+        );
+        if (index % 2 === 1) await nextFrame();
+      }
+      return { encodedFrames, frames };
+    } finally {
+      exportController?.destroy();
+      host.replaceChildren();
+      host.style.removeProperty("width");
+      host.style.removeProperty("height");
+    }
   };
 
   const exportAnimation = async (
@@ -2134,11 +2273,12 @@ export function ExportDialog({
     const signal = beginExport(format);
     setStatus(t.exporting);
     try {
-      const animationFrames =
+      const preparedAnimation =
         animationMethod === "automatic"
           ? await prepareAutomaticFrames(frameRate, signal)
           : await prepareRecordedFrames(frameRate, signal);
       throwIfAborted(signal);
+      const animationFrames = preparedAnimation.frames;
       if (!animationFrames.length) throw new Error("Record an animation first.");
       const animationDurationMs = animationFrames.reduce(
         (duration, frame) => duration + frame.durationMs,
@@ -2171,9 +2311,11 @@ export function ExportDialog({
       }
       const blob = await runExportWorker({
         audio,
+        encodedFrames: preparedAnimation.encodedFrames,
         format,
         frameRate,
         frames: animationFrames,
+        outputScale: 1,
         signal,
       });
       throwIfAborted(signal);
@@ -2228,6 +2370,7 @@ export function ExportDialog({
     setRecordingPhase("idle");
     setManualStateSynced("idle");
     setRecordedFramesSynced([]);
+    recordedSnapshotsRef.current = [];
   };
 
   const animationReady =
@@ -2605,6 +2748,7 @@ export function ExportDialog({
                         setRecordingPhase("idle");
                         setManualStateSynced("idle");
                         setRecordedFramesSynced([]);
+                        recordedSnapshotsRef.current = [];
                         setStatus("");
                       }}
                     >
@@ -2620,6 +2764,7 @@ export function ExportDialog({
                         setRecordingPhase("idle");
                         setManualStateSynced("idle");
                         setRecordedFramesSynced([]);
+                        recordedSnapshotsRef.current = [];
                         setStatus("");
                       }}
                     >

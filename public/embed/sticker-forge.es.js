@@ -17799,8 +17799,40 @@ var mf = class {
   }
   setRenderScale(e) {
     if (this.destroyed) return;
-    const t = Ne(e, 1, 2.6);
+    const t = Ne(e, 1, 6);
     Math.abs(t - this.renderScale) < 1e-3 || (this.renderScale = t, this.resize());
+  }
+  getRenderSnapshot() {
+    const e = this.uniforms.uOrigin.value, t = this.uniforms.uPeelDir.value;
+    return {
+      progress: this.uniforms.uPeel.value,
+      peelDepth: this.uniforms.uPeelDepth.value,
+      peelRadius: this.uniforms.uRadius.value,
+      detachedTension: this.uniforms.uDetachedTension.value,
+      origin: {
+        x: e.x,
+        y: e.y
+      },
+      direction: {
+        x: t.x,
+        y: t.y
+      },
+      position: {
+        x: this.stickerMesh.position.x,
+        y: this.stickerMesh.position.y
+      },
+      scale: {
+        x: this.stickerMesh.scale.x,
+        y: this.stickerMesh.scale.y
+      },
+      rotation: this.stickerMesh.rotation.z,
+      entranceSweep: this.uniforms.uEntranceSweep.value,
+      entranceScaleProgress: this.uniforms.uEntranceScaleProgress.value,
+      time: this.uniforms.uTime.value
+    };
+  }
+  setRenderSnapshot(e) {
+    this.destroyed || !this.artwork || (this.springActive = !1, this.detachedExitActive = !1, this.entranceActive = !1, this.interactionHintActive = !1, this.state.dragging = !1, this.state.progress = e.progress, this.creaseDepth = e.peelDepth, this.effectivePeelRadius = e.peelRadius, this.detachedTension = e.detachedTension, this.grabOrigin.set(e.origin.x, e.origin.y), this.activeDirection.set(e.direction.x, e.direction.y), this.stickerMesh.position.set(e.position.x, e.position.y, 0), this.stickerMesh.scale.set(e.scale.x, e.scale.y, 1), this.stickerMesh.rotation.z = e.rotation, this.uniforms.uPeel.value = e.progress, this.uniforms.uPeelDepth.value = e.peelDepth, this.uniforms.uRadius.value = e.peelRadius, this.uniforms.uDetachedTension.value = e.detachedTension, this.uniforms.uOrigin.value.copy(this.grabOrigin), this.uniforms.uPeelDir.value.copy(this.activeDirection), this.uniforms.uEntranceSweep.value = e.entranceSweep, this.uniforms.uEntranceScaleProgress.value = e.entranceScaleProgress, this.uniforms.uTime.value = e.time, this.renderer.render(this.scene, this.camera));
   }
   getState() {
     return {
@@ -18128,6 +18160,37 @@ var vf = typeof HTMLElement > "u" ? class {
   }
   setRenderScale(e) {
     this.instance?.setRenderScale(e);
+  }
+  getRenderSnapshot() {
+    return this.instance?.getRenderSnapshot() ?? {
+      progress: 0,
+      peelDepth: 0,
+      peelRadius: 0,
+      detachedTension: 0,
+      origin: {
+        x: 0,
+        y: 0
+      },
+      direction: {
+        x: 1,
+        y: 0
+      },
+      position: {
+        x: 0,
+        y: 0
+      },
+      scale: {
+        x: 1,
+        y: 1
+      },
+      rotation: 0,
+      entranceSweep: -1,
+      entranceScaleProgress: -1,
+      time: 0
+    };
+  }
+  setRenderSnapshot(e) {
+    this.instance?.setRenderSnapshot(e);
   }
   resize() {
     this.instance?.resize();

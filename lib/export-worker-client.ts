@@ -51,9 +51,9 @@ export function startStickerExportWorker(
       cleanup();
       reject(new Error(event.message || "Export worker crashed."));
     };
-    const transfer: Transferable[] = request.frames.map(
-      (frame) => frame.rgba.buffer,
-    );
+    const transfer: Transferable[] = request.frames
+      .filter((frame) => frame.rgba.byteLength > 0)
+      .map((frame) => frame.rgba.buffer);
     if (request.audio) transfer.push(request.audio.pcm.buffer);
     worker.postMessage(request, transfer);
   });

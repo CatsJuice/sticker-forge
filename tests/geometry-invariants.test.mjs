@@ -1306,10 +1306,31 @@ test("locks export canvas ratios and scales every export format", async () => {
   );
   assert.match(exportDialog, /function scaledExportSize\(/);
   assert.match(exportDialog, /data-aspect-locked=\{aspectRatio !== null\}/);
-  assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION\)/);
-  assert.match(exportDialog, /outputScale: exportScale/);
+  assert.match(
+    exportDialog,
+    /setRenderScale\(\s*Math\.max\(1, transformRef\.current\.zoom \* exportScale\)/,
+  );
+  assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
+  assert.match(
+    exportDialog,
+    /getImageData\(0, 0, exportSize\.width, exportSize\.height\)/,
+  );
+  assert.match(exportDialog, /outputScale: 1,/);
+  assert.match(exportWorker, /if \(outputScale === 1\)/);
   assert.match(exportWorker, /createFrameScaler\(request\.outputScale\)/);
-  assert.match(exportWorker, /transformFrame: scaleFrame/);
+  assert.match(exportWorker, /createEncodedFrameDecoder\(request\.encodedFrames\)/);
+  assert.match(exportWorker, /transformFrame,/);
+  assert.match(
+    exportDialog,
+    /setRenderScale\(\s*Math\.max\(1, transformRef\.current\.zoom \* exportScale\)/g,
+  );
+  assert.match(
+    exportDialog,
+    /drawCompositedFrame\([\s\S]*?state\.visual,[\s\S]*?exportScale,/,
+  );
+  assert.match(exportDialog, /getRenderSnapshot\(\)/);
+  assert.match(exportDialog, /setRenderSnapshot\(sample\.snapshot\)/);
+  assert.match(exportDialog, /encodedFrames\.push\(await canvasToPngBlob/);
   assert.match(
     exportDialog,
     /const outputSize = useMemo\([\s\S]*?scaledExportSize\(size\.width, size\.height, exportScale\)/,

@@ -110,6 +110,21 @@ test("encodes transparent GIF, APNG, and ProRes 4444 MOV", async () => {
       sampleRate: 48_000,
       channels: 2,
     })).arrayBuffer());
+    let asyncTransformCalls = 0;
+    const asyncTransformFrame = async (frame) => {
+      await Promise.resolve();
+      asyncTransformCalls += 1;
+      return frame;
+    };
+    const asyncGif = await encodeTransparentGif(frames, {
+      transformFrame: asyncTransformFrame,
+    });
+    const asyncApng = await encodeTransparentApng(frames, {
+      transformFrame: asyncTransformFrame,
+    });
+    const asyncMov = await encodeTransparentMov(frames, 30, undefined, {
+      transformFrame: asyncTransformFrame,
+    });
     const apngChunks = [];
     for (let offset = 8; offset < apng.length;) {
       const length = new DataView(apng.buffer, apng.byteOffset + offset, 4).getUint32(0);
@@ -187,6 +202,10 @@ test("encodes transparent GIF, APNG, and ProRes 4444 MOV", async () => {
       gifSize: gif.length,
       apngSize: apng.length,
       movSize: mov.length,
+      asyncTransformCalls,
+      asyncGifSize: asyncGif.size,
+      asyncApngSize: asyncApng.size,
+      asyncMovSize: asyncMov.size,
       cleanOpaque,
       cleanTransparent,
       ditheredOpaque,
@@ -225,6 +244,10 @@ test("encodes transparent GIF, APNG, and ProRes 4444 MOV", async () => {
   assert.ok(result.gifSize > 100);
   assert.ok(result.apngSize > 200);
   assert.ok(result.movSize > 500);
+  assert.equal(result.asyncTransformCalls, 9);
+  assert.ok(result.asyncGifSize > 100);
+  assert.ok(result.asyncApngSize > 200);
+  assert.ok(result.asyncMovSize > 500);
   assert.equal(result.cleanOpaque, 0);
   assert.equal(result.cleanTransparent, 4096);
   assert.ok(result.ditheredOpaque > 250 && result.ditheredOpaque < 500);

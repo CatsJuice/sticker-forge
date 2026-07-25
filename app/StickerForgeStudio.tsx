@@ -276,8 +276,8 @@ const UI = {
     stiffness: "贴纸硬度",
     wind: "风动",
     volume: "撕开音量",
-    material: "材质与阴影",
-    lighting: "光照与材质",
+    material: "材质",
+    lighting: "光照",
     lightDirection: "来光方向",
     resetLightDirection: "恢复默认来光方向",
     presetSoft: "柔和",
@@ -287,6 +287,7 @@ const UI = {
     lightIntensity: "光照强度",
     ambientLight: "环境光",
     lightSoftness: "光源柔和度",
+    shadow: "阴影",
     shadowOpacity: "阴影强度",
     shadowBlur: "阴影柔度",
     backGloss: "背面光泽",
@@ -370,8 +371,8 @@ const UI = {
     stiffness: "Sticker stiffness",
     wind: "Wind",
     volume: "Peel volume",
-    material: "Material & shadow",
-    lighting: "Lighting & material",
+    material: "Material",
+    lighting: "Lighting",
     lightDirection: "Incoming light",
     resetLightDirection: "Reset incoming light direction",
     presetSoft: "Soft",
@@ -381,6 +382,7 @@ const UI = {
     lightIntensity: "Light intensity",
     ambientLight: "Ambient light",
     lightSoftness: "Light softness",
+    shadow: "Shadow",
     shadowOpacity: "Shadow opacity",
     shadowBlur: "Shadow softness",
     backGloss: "Back gloss",
@@ -3534,57 +3536,7 @@ export function StickerForgeStudio() {
                 </div>
             </ControlSection>
 
-            <ControlSection title={t.lighting} defaultOpen>
-                <div
-                  className="lighting-presets"
-                  role="group"
-                  aria-label={t.lighting}
-                >
-                  {([
-                    ["soft", t.presetSoft],
-                    ["studio", t.presetStudio],
-                    ["dramatic", t.presetDramatic],
-                  ] as const).map(([presetId, label]) => (
-                    <button
-                      key={presetId}
-                      type="button"
-                      data-active={
-                        lightingPresetFor(settings.lighting) === presetId
-                      }
-                      aria-pressed={
-                        lightingPresetFor(settings.lighting) === presetId
-                      }
-                      onClick={() =>
-                        updateSetting("lighting", {
-                          ...LIGHTING_PRESETS[presetId],
-                          direction: {
-                            ...LIGHTING_PRESETS[presetId].direction,
-                          },
-                        })
-                      }
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  <span
-                    data-active={
-                      lightingPresetFor(settings.lighting) === "custom"
-                    }
-                  >
-                    {t.presetCustom}
-                  </span>
-                </div>
-                <LightDirectionControl
-                  direction={settings.lighting.direction}
-                  label={t.lightDirection}
-                  resetLabel={t.resetLightDirection}
-                  onChange={(direction) =>
-                    updateSetting("lighting", {
-                      ...settings.lighting,
-                      direction,
-                    })
-                  }
-                />
+            <ControlSection title={t.material}>
                 <div className="material-controls">
                 <label className="material-select-row">
                   <span>{t.frontMaterial}</span>
@@ -3643,8 +3595,73 @@ export function StickerForgeStudio() {
                       })
                     }
                   />
+                  <RangeRow
+                    id="back-gloss"
+                    label={t.backGloss}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.back.gloss}
+                    display={`${Math.round(settings.back.gloss * 100)}%`}
+                    onChange={(gloss) =>
+                      updateSetting("back", { ...settings.back, gloss })
+                    }
+                  />
                 </div>
                 </div>
+            </ControlSection>
+
+            <ControlSection title={t.lighting} defaultOpen>
+                <div
+                  className="lighting-presets"
+                  role="group"
+                  aria-label={t.lighting}
+                >
+                  {([
+                    ["soft", t.presetSoft],
+                    ["studio", t.presetStudio],
+                    ["dramatic", t.presetDramatic],
+                  ] as const).map(([presetId, label]) => (
+                    <button
+                      key={presetId}
+                      type="button"
+                      data-active={
+                        lightingPresetFor(settings.lighting) === presetId
+                      }
+                      aria-pressed={
+                        lightingPresetFor(settings.lighting) === presetId
+                      }
+                      onClick={() =>
+                        updateSetting("lighting", {
+                          ...LIGHTING_PRESETS[presetId],
+                          direction: {
+                            ...LIGHTING_PRESETS[presetId].direction,
+                          },
+                        })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <span
+                    data-active={
+                      lightingPresetFor(settings.lighting) === "custom"
+                    }
+                  >
+                    {t.presetCustom}
+                  </span>
+                </div>
+                <LightDirectionControl
+                  direction={settings.lighting.direction}
+                  label={t.lightDirection}
+                  resetLabel={t.resetLightDirection}
+                  onChange={(direction) =>
+                    updateSetting("lighting", {
+                      ...settings.lighting,
+                      direction,
+                    })
+                  }
+                />
                 <div className="range-stack">
                   <RangeRow
                     id="light-intensity"
@@ -3691,16 +3708,33 @@ export function StickerForgeStudio() {
                       })
                     }
                   />
+                </div>
+            </ControlSection>
+
+            <ControlSection title={t.shadow}>
+                <div className="range-stack">
                   <RangeRow
-                    id="back-gloss"
-                    label={t.backGloss}
+                    id="shadow-opacity"
+                    label={t.shadowOpacity}
                     min={0}
-                    max={1}
+                    max={0.5}
                     step={0.01}
-                    value={settings.back.gloss}
-                    display={`${Math.round(settings.back.gloss * 100)}%`}
-                    onChange={(gloss) =>
-                      updateSetting("back", { ...settings.back, gloss })
+                    value={settings.shadow.opacity}
+                    display={settings.shadow.opacity.toFixed(2)}
+                    onChange={(opacity) =>
+                      updateSetting("shadow", { ...settings.shadow, opacity })
+                    }
+                  />
+                  <RangeRow
+                    id="shadow-blur"
+                    label={t.shadowBlur}
+                    min={4}
+                    max={42}
+                    step={1}
+                    value={settings.shadow.blur}
+                    display={`${settings.shadow.blur}px`}
+                    onChange={(blur) =>
+                      updateSetting("shadow", { ...settings.shadow, blur })
                     }
                   />
                 </div>

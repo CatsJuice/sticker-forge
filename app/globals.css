@@ -1424,6 +1424,27 @@ input[type="range"] {
   transform: translateY(-50%);
 }
 
+.holographic-color-controls {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  color: #37363d;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.holographic-color-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.holographic-color {
+  grid-template-columns: 28px 1fr;
+  padding: 3px 9px 3px 4px;
+  text-align: center;
+}
+
 .range-row {
   display: grid;
   gap: 8px;

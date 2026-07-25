@@ -242,6 +242,9 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uMaterialIntensity;
   uniform float uMaterialScale;
   uniform float uMaterialSeed;
+  uniform vec3 uHolographicColorA;
+  uniform vec3 uHolographicColorB;
+  uniform vec3 uHolographicColorC;
   uniform vec3 uShadowColor;
   uniform float uShadowOpacity;
   uniform float uEntranceSweep;
@@ -305,6 +308,29 @@ export const stickerFragmentShader = /* glsl */ `
     return 1.0 - (1.0 - base) * (1.0 - layer);
   }
 
+  vec3 holographicPalette(float phase) {
+    float position = fract(phase);
+    if (position < 0.333333) {
+      return mix(
+        uHolographicColorA,
+        uHolographicColorB,
+        position * 3.0
+      );
+    }
+    if (position < 0.666667) {
+      return mix(
+        uHolographicColorB,
+        uHolographicColorC,
+        (position - 0.333333) * 3.0
+      );
+    }
+    return mix(
+      uHolographicColorC,
+      uHolographicColorA,
+      (position - 0.666667) * 3.0
+    );
+  }
+
   vec3 applyFrontMaterial(
     vec3 base,
     vec3 normal,
@@ -336,7 +362,7 @@ export const stickerFragmentShader = /* glsl */ `
       float phase =
         dot(holographicUv, vec2(1.15, 0.72)) * 2.8
         + grain * 0.16;
-      vec3 rainbow = spectralPalette(phase);
+      vec3 rainbow = holographicPalette(phase);
       float band = 0.38 + 0.62 * pow(0.5 + 0.5 * sin(phase * 13.0), 3.0);
       band *= 0.78 + 0.22 * facing;
       return mix(base, screenBlend(base, rainbow * band), amount * 0.58)

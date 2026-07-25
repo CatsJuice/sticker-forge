@@ -322,6 +322,24 @@ class StickerRenderer implements StickerInstance {
       uMaterialIntensity: { value: this.options.material.intensity },
       uMaterialScale: { value: this.options.material.scale },
       uMaterialSeed: { value: this.options.material.seed },
+      uHolographicColorA: {
+        value: colorFrom(
+          this.options.material.holographicColors[0],
+          "#f2a7c5",
+        ),
+      },
+      uHolographicColorB: {
+        value: colorFrom(
+          this.options.material.holographicColors[1],
+          "#8edfd5",
+        ),
+      },
+      uHolographicColorC: {
+        value: colorFrom(
+          this.options.material.holographicColors[2],
+          "#9db4ea",
+        ),
+      },
       uShadowColor: {
         value: colorFrom(this.options.shadow.color, "#191823"),
       },
@@ -956,6 +974,18 @@ class StickerRenderer implements StickerInstance {
       4,
     );
     this.uniforms.uMaterialSeed.value = this.options.material.seed;
+    this.uniforms.uHolographicColorA.value = colorFrom(
+      this.options.material.holographicColors[0],
+      "#f2a7c5",
+    );
+    this.uniforms.uHolographicColorB.value = colorFrom(
+      this.options.material.holographicColors[1],
+      "#8edfd5",
+    );
+    this.uniforms.uHolographicColorC.value = colorFrom(
+      this.options.material.holographicColors[2],
+      "#9db4ea",
+    );
     this.uniforms.uWind.value = Math.max(0, this.options.wind);
     const lightDirection = this.uniforms.uLightDirection.value as THREE.Vector3;
     lightDirection.set(

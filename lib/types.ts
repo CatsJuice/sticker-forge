@@ -112,6 +112,8 @@ export interface StickerMaterialOptions {
   scale?: number;
   /** Stable procedural variation seed. */
   seed?: number;
+  /** Three colors blended cyclically across the holographic diffraction bands. */
+  holographicColors?: [string, string, string];
 }
 
 export interface StickerSoundOptions {
@@ -234,6 +236,11 @@ export const DEFAULT_STICKER_OPTIONS = {
     intensity: 0.86,
     scale: 1,
     seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"] as [
+      string,
+      string,
+      string,
+    ],
   },
   sound: { src: "", volume: 0.7, enabled: true },
   tilt: -3,

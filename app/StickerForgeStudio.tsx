@@ -294,6 +294,10 @@ const UI = {
     frontMaterial: "正面材质",
     materialIntensity: "材质强度",
     materialDetail: "纹理尺寸",
+    holographicPalette: "镭射配色",
+    holographicColor1: "镭射颜色 1",
+    holographicColor2: "镭射颜色 2",
+    holographicColor3: "镭射颜色 3",
     copy: "复制嵌入代码",
     export: "导出",
     addToGallery: "添加到 Gallery",
@@ -389,6 +393,10 @@ const UI = {
     frontMaterial: "Front material",
     materialIntensity: "Material intensity",
     materialDetail: "Detail scale",
+    holographicPalette: "Holographic palette",
+    holographicColor1: "Holographic color 1",
+    holographicColor2: "Holographic color 2",
+    holographicColor3: "Holographic color 3",
     copy: "Copy embed code",
     export: "Export",
     addToGallery: "Add to Gallery",
@@ -432,6 +440,7 @@ const DEFAULT_SETTINGS: StudioSettings = {
     intensity: 0.86,
     scale: 1,
     seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
   tilt: -3,
   wind: 0.25,
@@ -514,10 +523,34 @@ const MATERIAL_PRESETS: Record<
   StickerMaterialType,
   Required<StickerMaterialOptions>
 > = {
-  original: { type: "original", intensity: 0.86, scale: 1, seed: 0.37 },
-  holographic: { type: "holographic", intensity: 0.86, scale: 1, seed: 0.61 },
-  glitter: { type: "glitter", intensity: 0.9, scale: 1, seed: 0.77 },
-  reflective: { type: "reflective", intensity: 0.9, scale: 1, seed: 0.67 },
+  original: {
+    type: "original",
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  holographic: {
+    type: "holographic",
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.61,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  glitter: {
+    type: "glitter",
+    intensity: 0.9,
+    scale: 1,
+    seed: 0.77,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  reflective: {
+    type: "reflective",
+    intensity: 0.9,
+    scale: 1,
+    seed: 0.67,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
 };
 
 function makeTextSource(
@@ -3548,6 +3581,8 @@ export function StickerForgeStudio() {
                           event.currentTarget.value as StickerMaterialType;
                         updateSetting("material", {
                           ...MATERIAL_PRESETS[type],
+                          holographicColors:
+                            settings.material.holographicColors,
                         });
                       }}
                     >
@@ -3562,6 +3597,41 @@ export function StickerForgeStudio() {
                     <DropdownChevron />
                   </span>
                 </label>
+                {settings.material.type === "holographic" ? (
+                  <div className="holographic-color-controls">
+                    <span>{t.holographicPalette}</span>
+                    <div className="holographic-color-row">
+                      {[
+                        t.holographicColor1,
+                        t.holographicColor2,
+                        t.holographicColor3,
+                      ].map((label, index) => (
+                        <ColorPicker
+                          key={label}
+                          className="compact-color holographic-color"
+                          swatchClassName="compact-color-swatch"
+                          value={
+                            settings.material.holographicColors[index]
+                          }
+                          label={label}
+                          swatchPosition="start"
+                          onChange={(color) => {
+                            const holographicColors = [
+                              ...settings.material.holographicColors,
+                            ] as [string, string, string];
+                            holographicColors[index] = color;
+                            updateSetting("material", {
+                              ...settings.material,
+                              holographicColors,
+                            });
+                          }}
+                        >
+                          <span>{index + 1}</span>
+                        </ColorPicker>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 <div className="range-stack">
                   <RangeRow
                     id="material-intensity"

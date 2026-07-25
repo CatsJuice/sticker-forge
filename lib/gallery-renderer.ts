@@ -257,6 +257,24 @@ class GalleryStickerMesh {
         value: clamp(this.options.material.scale, 0.2, 4),
       },
       uMaterialSeed: { value: this.options.material.seed },
+      uHolographicColorA: {
+        value: colorFrom(
+          this.options.material.holographicColors[0],
+          "#f2a7c5",
+        ),
+      },
+      uHolographicColorB: {
+        value: colorFrom(
+          this.options.material.holographicColors[1],
+          "#8edfd5",
+        ),
+      },
+      uHolographicColorC: {
+        value: colorFrom(
+          this.options.material.holographicColors[2],
+          "#9db4ea",
+        ),
+      },
       uShadowColor: { value: colorFrom(this.options.shadow.color, "#191823") },
       uShadowOpacity: {
         value: clamp(this.options.shadow.opacity, 0, 0.9),

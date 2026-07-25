@@ -106,6 +106,8 @@ export interface StickerMaterialOptions {
   scale?: number;
   /** Stable procedural variation seed. */
   seed?: number;
+  /** Three colors blended cyclically across the holographic diffraction bands. */
+  holographicColors?: [string, string, string];
 }
 
 export interface StickerSoundOptions {

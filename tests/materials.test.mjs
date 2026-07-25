@@ -45,6 +45,14 @@ test("exposes every front material through the public options API", async () => 
   }
   assert.match(types, /material\?: StickerMaterialOptions/);
   assert.match(declarations, /material\?: StickerMaterialOptions/);
+  assert.match(
+    types,
+    /holographicColors\?: \[string, string, string\]/,
+  );
+  assert.match(
+    declarations,
+    /holographicColors\?: \[string, string, string\]/,
+  );
 });
 
 test("binds material uniforms in editor and gallery renderers", async () => {
@@ -59,6 +67,9 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     "uMaterialIntensity",
     "uMaterialScale",
     "uMaterialSeed",
+    "uHolographicColorA",
+    "uHolographicColorB",
+    "uHolographicColorC",
   ]) {
     assert.match(renderer, new RegExp(name));
     assert.match(gallery, new RegExp(name));
@@ -91,6 +102,9 @@ test("offers all materials in the studio and bakes gallery previews", async () =
     assert.ok(studio.includes(`"${material}"`), `missing ${material} preset`);
   }
   assert.match(studio, /MATERIAL_PRESETS/);
+  assert.match(studio, /holographic-color-controls/);
+  assert.match(studio, /holographicColors/);
   assert.match(preview, /applyMaterialPreview/);
   assert.match(preview, /options\.material/);
+  assert.match(preview, /resolved\.holographicColors/);
 });

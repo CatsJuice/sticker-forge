@@ -107,13 +107,13 @@ function applyMaterialPreview(
     context.fillRect(0, 0, width, height);
   } else if (resolved.type === "holographic") {
     const rainbow = context.createLinearGradient(0, height, width, 0);
-    rainbow.addColorStop(0, `rgba(255,80,132,${0.2 * amount})`);
-    rainbow.addColorStop(0.22, `rgba(255,220,90,${0.24 * amount})`);
-    rainbow.addColorStop(0.44, `rgba(92,255,190,${0.24 * amount})`);
-    rainbow.addColorStop(0.66, `rgba(80,174,255,${0.24 * amount})`);
-    rainbow.addColorStop(0.86, `rgba(193,104,255,${0.22 * amount})`);
-    rainbow.addColorStop(1, `rgba(255,80,132,${0.2 * amount})`);
+    const [colorA, colorB, colorC] = resolved.holographicColors;
+    rainbow.addColorStop(0, colorA);
+    rainbow.addColorStop(0.333333, colorB);
+    rainbow.addColorStop(0.666667, colorC);
+    rainbow.addColorStop(1, colorA);
     context.fillStyle = rainbow;
+    context.globalAlpha = 0.24 * amount;
     context.fillRect(0, 0, width, height);
   }
 

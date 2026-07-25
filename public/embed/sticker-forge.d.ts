@@ -92,6 +92,24 @@ export interface StickerBackOptions {
   roughness?: number;
 }
 
+export type StickerMaterialType =
+  | "original"
+  | "holographic"
+  | "glitter"
+  | "reflective";
+
+export interface StickerMaterialOptions {
+  type?: StickerMaterialType;
+  /** Overall strength of the material response, from 0 to 1. */
+  intensity?: number;
+  /** Relative size of procedural surface detail. */
+  scale?: number;
+  /** Stable procedural variation seed. */
+  seed?: number;
+  /** Three colors blended cyclically across the holographic diffraction bands. */
+  holographicColors?: [string, string, string];
+}
+
 export interface StickerSoundOptions {
   /** Custom peel-sound URL. Omit it to use the sound bundled with Sticker Forge. */
   src?: string;
@@ -121,6 +139,7 @@ export interface StickerOptions {
   lighting?: StickerLightingOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
+  material?: StickerMaterialOptions;
   sound?: StickerSoundOptions;
   /** Flat sticker rotation in degrees. */
   tilt?: number;

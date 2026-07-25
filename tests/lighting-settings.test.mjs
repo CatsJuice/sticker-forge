@@ -7,11 +7,12 @@ const files = await Promise.all(
     "../lib/types.ts",
     "../lib/shaders.ts",
     "../lib/sticker-forge.ts",
+    "../lib/gallery-renderer.ts",
     "../app/StickerForgeStudio.tsx",
   ].map((path) => readFile(new URL(path, import.meta.url), "utf8")),
 );
 
-const [types, shaders, renderer, studio] = files;
+const [types, shaders, renderer, galleryRenderer, studio] = files;
 
 test("exposes resolved global directional-light settings", () => {
   assert.match(types, /interface StickerLightingOptions/);
@@ -33,8 +34,13 @@ test("uses one light direction for material response and projected shadows", () 
   ]) {
     assert.match(shaders, new RegExp(`uniform .* ${uniform};`));
     assert.match(renderer, new RegExp(`${uniform}: \\{\\s*value:`));
+    assert.match(galleryRenderer, new RegExp(`${uniform}: \\{\\s*value:`));
   }
-  assert.match(shaders, /vec3 lightDirection = normalize\(uLightDirection\)/);
+  assert.match(
+    shaders,
+    /vec3 lightDirection = length\(uLightDirection\) > 0\.0001/,
+  );
+  assert.match(shaders, /normalize\(vec3\(-0\.38, 0\.52, 0\.76\)\)/);
   assert.match(
     renderer,
     /shadowDirection\.set\(-lightDirection\.x, -lightDirection\.y\)/,

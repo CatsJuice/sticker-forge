@@ -39,6 +39,8 @@ import type {
   PreparedStickerSource,
   StickerInstance,
   StickerLightDirection,
+  StickerMaterialOptions,
+  StickerMaterialType,
   StickerOptions,
   StickerRichTextBlock,
   StickerRichTextDocument,
@@ -136,6 +138,7 @@ type StudioSettings = {
   };
   sound: { enabled: boolean; volume: number };
   back: { color: string; gloss: number; roughness: number };
+  material: Required<StickerMaterialOptions>;
   tilt: number;
   wind: number;
   quality: "high";
@@ -273,8 +276,8 @@ const UI = {
     stiffness: "贴纸硬度",
     wind: "风动",
     volume: "撕开音量",
-    material: "材质与阴影",
-    lighting: "光照与材质",
+    material: "材质",
+    lighting: "光照",
     lightDirection: "来光方向",
     resetLightDirection: "恢复默认来光方向",
     presetSoft: "柔和",
@@ -284,9 +287,17 @@ const UI = {
     lightIntensity: "光照强度",
     ambientLight: "环境光",
     lightSoftness: "光源柔和度",
+    shadow: "阴影",
     shadowOpacity: "阴影强度",
     shadowBlur: "阴影柔度",
     backGloss: "背面光泽",
+    frontMaterial: "正面材质",
+    materialIntensity: "材质强度",
+    materialDetail: "纹理尺寸",
+    holographicPalette: "镭射配色",
+    holographicColor1: "镭射颜色 1",
+    holographicColor2: "镭射颜色 2",
+    holographicColor3: "镭射颜色 3",
     copy: "复制嵌入代码",
     export: "导出",
     addToGallery: "添加到 Gallery",
@@ -364,8 +375,8 @@ const UI = {
     stiffness: "Sticker stiffness",
     wind: "Wind",
     volume: "Peel volume",
-    material: "Material & shadow",
-    lighting: "Lighting & material",
+    material: "Material",
+    lighting: "Lighting",
     lightDirection: "Incoming light",
     resetLightDirection: "Reset incoming light direction",
     presetSoft: "Soft",
@@ -375,9 +386,17 @@ const UI = {
     lightIntensity: "Light intensity",
     ambientLight: "Ambient light",
     lightSoftness: "Light softness",
+    shadow: "Shadow",
     shadowOpacity: "Shadow opacity",
     shadowBlur: "Shadow softness",
     backGloss: "Back gloss",
+    frontMaterial: "Front material",
+    materialIntensity: "Material intensity",
+    materialDetail: "Detail scale",
+    holographicPalette: "Holographic palette",
+    holographicColor1: "Holographic color 1",
+    holographicColor2: "Holographic color 2",
+    holographicColor3: "Holographic color 3",
     copy: "Copy embed code",
     export: "Export",
     addToGallery: "Add to Gallery",
@@ -416,6 +435,13 @@ const DEFAULT_SETTINGS: StudioSettings = {
   },
   sound: { enabled: true, volume: 0.68 },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+  material: {
+    type: "original",
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
   tilt: -3,
   wind: 0.25,
   quality: "high",
@@ -477,6 +503,55 @@ function lightingPresetFor(
   }
   return "custom";
 }
+
+const MATERIAL_LABELS: Record<Locale, Record<StickerMaterialType, string>> = {
+  zh: {
+    original: "原始材质",
+    holographic: "镭射 / 全息",
+    glitter: "闪粉",
+    reflective: "反光膜",
+  },
+  en: {
+    original: "Original",
+    holographic: "Holographic",
+    glitter: "Glitter",
+    reflective: "Reflective",
+  },
+};
+
+const MATERIAL_PRESETS: Record<
+  StickerMaterialType,
+  Required<StickerMaterialOptions>
+> = {
+  original: {
+    type: "original",
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  holographic: {
+    type: "holographic",
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.61,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  glitter: {
+    type: "glitter",
+    intensity: 0.9,
+    scale: 1,
+    seed: 0.77,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+  reflective: {
+    type: "reflective",
+    intensity: 0.9,
+    scale: 1,
+    seed: 0.67,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
+  },
+};
 
 function makeTextSource(
   text: string,
@@ -683,6 +758,7 @@ function studioSettingsFrom(options: StickerOptions): StudioSettings {
     },
     sound: { ...DEFAULT_SETTINGS.sound, ...options.sound },
     back: { ...DEFAULT_SETTINGS.back, ...options.back },
+    material: { ...DEFAULT_SETTINGS.material, ...options.material },
     tilt: options.tilt ?? DEFAULT_SETTINGS.tilt,
     wind: options.wind ?? DEFAULT_SETTINGS.wind,
     quality: "high",
@@ -764,7 +840,9 @@ async function createStoredGalleryItem(
   options: StudioSettings,
   layoutIndex: number,
 ): Promise<GalleryItem> {
-  const preview = await createGalleryPreview(source, options.outline);
+  const preview = await createGalleryPreview(source, options.outline, {
+    material: options.material,
+  });
   const payload: CreateGalleryPayload = {
     source,
     options,
@@ -787,7 +865,9 @@ async function createStoredGalleryItemWithPreview(
   layoutIndex: number,
   folderId: string,
 ): Promise<{ item: GalleryItem; preview: GalleryPreviewResult }> {
-  const preview = await createGalleryPreview(source, options.outline);
+  const preview = await createGalleryPreview(source, options.outline, {
+    material: options.material,
+  });
   const item = await createGalleryItem({
     folderId,
     source,
@@ -1503,10 +1583,7 @@ export function StickerForgeStudio() {
   }, []);
 
   useEffect(() => {
-    if (!exportOpen) {
-      setExportEntered(false);
-      return;
-    }
+    if (!exportOpen) return;
     let secondFrame = 0;
     const firstFrame = window.requestAnimationFrame(() => {
       secondFrame = window.requestAnimationFrame(() => {
@@ -3492,6 +3569,117 @@ export function StickerForgeStudio() {
                 </div>
             </ControlSection>
 
+            <ControlSection title={t.material}>
+                <div className="material-controls">
+                <label className="material-select-row">
+                  <span>{t.frontMaterial}</span>
+                  <span className="material-select-shell">
+                    <select
+                      value={settings.material.type}
+                      onChange={(event) => {
+                        const type =
+                          event.currentTarget.value as StickerMaterialType;
+                        updateSetting("material", {
+                          ...MATERIAL_PRESETS[type],
+                          holographicColors:
+                            settings.material.holographicColors,
+                        });
+                      }}
+                    >
+                      {(
+                        Object.keys(MATERIAL_PRESETS) as StickerMaterialType[]
+                      ).map((type) => (
+                        <option key={type} value={type}>
+                          {MATERIAL_LABELS[locale][type]}
+                        </option>
+                      ))}
+                    </select>
+                    <DropdownChevron />
+                  </span>
+                </label>
+                {settings.material.type === "holographic" ? (
+                  <div className="holographic-color-controls">
+                    <span>{t.holographicPalette}</span>
+                    <div className="holographic-color-row">
+                      {[
+                        t.holographicColor1,
+                        t.holographicColor2,
+                        t.holographicColor3,
+                      ].map((label, index) => (
+                        <ColorPicker
+                          key={label}
+                          className="compact-color holographic-color"
+                          swatchClassName="compact-color-swatch"
+                          value={
+                            settings.material.holographicColors[index]
+                          }
+                          label={label}
+                          onChange={(color) => {
+                            const holographicColors = [
+                              ...settings.material.holographicColors,
+                            ] as [string, string, string];
+                            holographicColors[index] = color;
+                            updateSetting("material", {
+                              ...settings.material,
+                              holographicColors,
+                            });
+                          }}
+                        >
+                          <span>{index + 1}</span>
+                        </ColorPicker>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <div className="range-stack">
+                  <RangeRow
+                    id="material-intensity"
+                    label={t.materialIntensity}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.material.intensity}
+                    display={`${Math.round(
+                      settings.material.intensity * 100,
+                    )}%`}
+                    onChange={(intensity) =>
+                      updateSetting("material", {
+                        ...settings.material,
+                        intensity,
+                      })
+                    }
+                  />
+                  <RangeRow
+                    id="material-scale"
+                    label={t.materialDetail}
+                    min={0.4}
+                    max={3}
+                    step={0.05}
+                    value={settings.material.scale}
+                    display={`${settings.material.scale.toFixed(2)}×`}
+                    onChange={(scale) =>
+                      updateSetting("material", {
+                        ...settings.material,
+                        scale,
+                      })
+                    }
+                  />
+                  <RangeRow
+                    id="back-gloss"
+                    label={t.backGloss}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.back.gloss}
+                    display={`${Math.round(settings.back.gloss * 100)}%`}
+                    onChange={(gloss) =>
+                      updateSetting("back", { ...settings.back, gloss })
+                    }
+                  />
+                </div>
+                </div>
+            </ControlSection>
+
             <ControlSection title={t.lighting} defaultOpen>
                 <div
                   className="lighting-presets"
@@ -3589,16 +3777,33 @@ export function StickerForgeStudio() {
                       })
                     }
                   />
+                </div>
+            </ControlSection>
+
+            <ControlSection title={t.shadow}>
+                <div className="range-stack">
                   <RangeRow
-                    id="back-gloss"
-                    label={t.backGloss}
+                    id="shadow-opacity"
+                    label={t.shadowOpacity}
                     min={0}
-                    max={1}
+                    max={0.5}
                     step={0.01}
-                    value={settings.back.gloss}
-                    display={`${Math.round(settings.back.gloss * 100)}%`}
-                    onChange={(gloss) =>
-                      updateSetting("back", { ...settings.back, gloss })
+                    value={settings.shadow.opacity}
+                    display={settings.shadow.opacity.toFixed(2)}
+                    onChange={(opacity) =>
+                      updateSetting("shadow", { ...settings.shadow, opacity })
+                    }
+                  />
+                  <RangeRow
+                    id="shadow-blur"
+                    label={t.shadowBlur}
+                    min={4}
+                    max={42}
+                    step={1}
+                    value={settings.shadow.blur}
+                    display={`${settings.shadow.blur}px`}
+                    onChange={(blur) =>
+                      updateSetting("shadow", { ...settings.shadow, blur })
                     }
                   />
                 </div>

@@ -1,6 +1,8 @@
 import { prepareArtwork } from "./source";
+import { createMaterialPreviewCanvas } from "./material-preview";
 import {
   DEFAULT_STICKER_OPTIONS,
+  type StickerMaterialOptions,
   type StickerOutlineOptions,
   type StickerSource,
 } from "./types";
@@ -17,6 +19,8 @@ export interface GalleryPreviewOptions {
   galleryLongEdge?: number;
   /** WebP encoder quality from 0 to 1. */
   webpQuality?: number;
+  /** Optional front material baked into the immutable thumbnail. */
+  material?: StickerMaterialOptions;
 }
 
 export interface GalleryPreviewResult {
@@ -121,17 +125,12 @@ export async function createGalleryPreview(
     const previewWidth = Math.max(1, Math.round(artwork.width * previewScale));
     const previewHeight = Math.max(1, Math.round(artwork.height * previewScale));
 
-    const canvas = document.createElement("canvas");
-    canvas.width = previewWidth;
-    canvas.height = previewHeight;
-    const context = canvas.getContext("2d", { alpha: true });
-    if (!context) {
-      throw new GalleryPreviewError("Canvas 2D is unavailable.");
-    }
-    context.clearRect(0, 0, previewWidth, previewHeight);
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = "high";
-    context.drawImage(artwork.canvas, 0, 0, previewWidth, previewHeight);
+    const canvas = createMaterialPreviewCanvas(
+      artwork.canvas,
+      previewWidth,
+      previewHeight,
+      options.material,
+    );
 
     const encoded = encodePreview(canvas, webpQuality);
     const suggestedLongEdge = Math.min(

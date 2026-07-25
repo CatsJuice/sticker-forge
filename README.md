@@ -81,6 +81,11 @@ exported and returns immediately (`void`).
     },
     sound: { enabled: true, volume: 0.68 },
     back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+    material: {
+      type: "holographic",
+      intensity: 0.86,
+      scale: 1,
+    },
     tilt: -3,
   });
 
@@ -215,6 +220,18 @@ slice profile.
 starts the same rebuild but cannot be awaited. `destroy()` should be called
 before a single-page application permanently removes an imperative sticker
 instance. A disconnected `<sticker-forge>` cleans itself up automatically.
+
+### Front materials
+
+Set `material.type` to `original`, `holographic`, `glitter`, or `reflective`.
+`original` is the default and uses the same front rendering as Sticker Forge
+before selectable finishes were introduced. The other three finishes are
+procedural, respond to the live surface normal while peeling, and remain
+deterministic in Gallery previews and recorded exports.
+
+Use `material.intensity` in the `0..1` range and `material.scale` to resize
+procedural detail. `material.seed` keeps glitter flakes and similar detail
+stable between frames.
 
 ## Rendering notes
 

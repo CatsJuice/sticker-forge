@@ -1383,6 +1383,62 @@ input[type="range"] {
   gap: 16px;
 }
 
+.material-select-row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: #37363d;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.material-select-shell {
+  position: relative;
+  display: block;
+}
+
+.material-select-shell select {
+  width: 100%;
+  min-height: 40px;
+  padding: 0 38px 0 12px;
+  appearance: none;
+  border: 1px solid rgba(24, 23, 29, 0.1);
+  border-radius: 11px;
+  outline: none;
+  background: rgba(255, 255, 255, 0.7);
+  color: #27262c;
+  font: inherit;
+  cursor: pointer;
+}
+
+.material-select-shell select:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(36, 126, 245, 0.12);
+}
+
+.material-select-shell svg {
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.holographic-color-controls {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 16px;
+  color: #37363d;
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.holographic-color-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
 .range-row {
   display: grid;
   gap: 8px;

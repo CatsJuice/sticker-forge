@@ -85,6 +85,37 @@ export interface StickerBackOptions {
   roughness?: number;
 }
 
+export type StickerMaterialType =
+  | "original"
+  | "holographic"
+  | "glitter"
+  | "reflective";
+
+export const STICKER_MATERIAL_TYPES: readonly StickerMaterialType[] = [
+  "original",
+  "holographic",
+  "glitter",
+  "reflective",
+];
+
+export function stickerMaterialTypeIndex(type: StickerMaterialType): number {
+  const index = STICKER_MATERIAL_TYPES.indexOf(type);
+  return index < 0 ? 0 : index;
+}
+
+/** Appearance of the printed face. Procedural effects stay stable across exports. */
+export interface StickerMaterialOptions {
+  type?: StickerMaterialType;
+  /** Overall strength of the material response, from 0 to 1. */
+  intensity?: number;
+  /** Relative size of procedural bands, flakes, and reflective detail. */
+  scale?: number;
+  /** Stable procedural variation seed. */
+  seed?: number;
+  /** Three colors blended cyclically across the holographic diffraction bands. */
+  holographicColors?: [string, string, string];
+}
+
 export interface StickerSoundOptions {
   /** Custom peel-sound URL. Omit or leave empty to use the bundled sound. */
   src?: string;
@@ -113,6 +144,7 @@ export interface StickerOptions {
   lighting?: StickerLightingOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
+  material?: StickerMaterialOptions;
   sound?: StickerSoundOptions;
   tilt?: number;
   wind?: number;
@@ -199,6 +231,17 @@ export const DEFAULT_STICKER_OPTIONS = {
     release: "snap" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+  material: {
+    type: "original" as const,
+    intensity: 0.86,
+    scale: 1,
+    seed: 0.37,
+    holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"] as [
+      string,
+      string,
+      string,
+    ],
+  },
   sound: { src: "", volume: 0.7, enabled: true },
   tilt: -3,
   wind: 0.25,
@@ -218,6 +261,7 @@ export type ResolvedStickerOptions = {
   };
   peel: Required<StickerPeelOptions>;
   back: Required<StickerBackOptions>;
+  material: Required<StickerMaterialOptions>;
   sound: Required<StickerSoundOptions>;
   tilt: number;
   wind: number;
@@ -244,6 +288,7 @@ export function resolveStickerOptions(
     },
     peel: { ...base.peel, ...patch.peel },
     back: { ...base.back, ...patch.back },
+    material: { ...base.material, ...patch.material },
     sound: { ...base.sound, ...patch.sound },
     tilt: patch.tilt ?? base.tilt,
     wind: patch.wind ?? base.wind,

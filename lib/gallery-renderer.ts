@@ -13,7 +13,11 @@ import {
   stickerFragmentShader,
   stickerVertexShader,
 } from "./shaders";
-import { resolveStickerOptions, type ResolvedStickerOptions } from "./types";
+import {
+  resolveStickerOptions,
+  stickerMaterialTypeIndex,
+  type ResolvedStickerOptions,
+} from "./types";
 
 export type GalleryRenderItem = {
   item: GalleryItem;
@@ -186,6 +190,7 @@ class GalleryStickerMesh {
     asset: GalleryAsset,
     audio: PeelAudioEngine,
     maxAnisotropy: number,
+    idleTexture: THREE.Texture | null,
     setDynamicShadowOpacity: (opacity: number) => void,
   ) {
     this.root = root;
@@ -212,10 +217,19 @@ class GalleryStickerMesh {
     );
     this.effectivePeelRadius = this.basePeelRadius;
     const shadowAngle = THREE.MathUtils.degToRad(this.options.shadow.angle);
+    const lightDirection = new THREE.Vector3(
+      this.options.lighting.direction.x,
+      this.options.lighting.direction.y,
+      this.options.lighting.direction.z,
+    );
+    if (lightDirection.lengthSq() < 0.0001) {
+      lightDirection.set(-0.38, 0.52, 0.76);
+    }
+    lightDirection.normalize();
     this.uniforms = {
       uMap: { value: this.texture },
-      uPreparedMap: { value: this.texture },
-      uPreparedMix: { value: 0 },
+      uPreparedMap: { value: idleTexture ?? this.texture },
+      uPreparedMix: { value: idleTexture ? 1 : 0 },
       uPeel: { value: 0 },
       uPeelDepth: { value: 0 },
       uDetachedTension: { value: 0 },
@@ -243,6 +257,45 @@ class GalleryStickerMesh {
       uBackColor: { value: colorFrom(this.options.back.color, "#f7f5f2") },
       uGloss: { value: clamp(this.options.back.gloss, 0, 1) },
       uRoughness: { value: clamp(this.options.back.roughness, 0, 1) },
+      uLightDirection: { value: lightDirection },
+      uLightIntensity: {
+        value: clamp(this.options.lighting.intensity, 0, 1.5),
+      },
+      uAmbientLight: {
+        value: clamp(this.options.lighting.ambient, 0, 1),
+      },
+      uLightSoftness: {
+        value: clamp(this.options.lighting.softness, 0, 1),
+      },
+      uMaterialType: {
+        value: stickerMaterialTypeIndex(this.options.material.type),
+      },
+      uMaterialIntensity: {
+        value: clamp(this.options.material.intensity, 0, 1),
+      },
+      uMaterialScale: {
+        value: clamp(this.options.material.scale, 0.2, 4),
+      },
+      uMaterialSeed: { value: this.options.material.seed },
+      uMaterialBaked: { value: idleTexture ? 1 : 0 },
+      uHolographicColorA: {
+        value: colorFrom(
+          this.options.material.holographicColors[0],
+          "#f2a7c5",
+        ),
+      },
+      uHolographicColorB: {
+        value: colorFrom(
+          this.options.material.holographicColors[1],
+          "#8edfd5",
+        ),
+      },
+      uHolographicColorC: {
+        value: colorFrom(
+          this.options.material.holographicColors[2],
+          "#9db4ea",
+        ),
+      },
       uShadowColor: { value: colorFrom(this.options.shadow.color, "#191823") },
       uShadowOpacity: {
         value: clamp(this.options.shadow.opacity, 0, 0.9),
@@ -350,13 +403,16 @@ class GalleryStickerMesh {
     this.stickerMesh.receiveShadow = true;
     this.stickerMesh.customDepthMaterial = this.peelShadowDepthMaterial;
     this.flatMaterial = new THREE.MeshBasicMaterial({
-      map: this.texture,
+      // Reuse the decoded, material-baked gallery preview while idle. The
+      // expensive live shader is only needed once the sticker is peeled.
+      map: idleTexture ?? this.texture,
       transparent: true,
       depthTest: false,
       depthWrite: false,
       toneMapped: false,
     });
     this.flatMesh = new THREE.Mesh(this.geometry, this.flatMaterial);
+    this.flatMesh.visible = true;
     this.stickerMesh.visible = false;
     this.residueMesh.visible = false;
     root.add(this.shadowMesh, this.residueMesh, this.stickerMesh, this.flatMesh);
@@ -480,6 +536,9 @@ class GalleryStickerMesh {
     this.shadowMesh.visible = false;
     this.flatMesh.visible = false;
     this.stickerMesh.visible = true;
+    this.stickerMaterial.depthTest = true;
+    this.stickerMaterial.depthWrite = true;
+    this.stickerMaterial.needsUpdate = true;
     this.stickerMesh.castShadow = true;
     this.residueMesh.visible = true;
     this.setDynamicShadowOpacity(1);
@@ -1095,7 +1154,10 @@ export class GalleryRenderer {
       ) {
         record.stickerLoading = true;
         const generation = ++record.generation;
-        this.enqueue(() => this.loadSticker(record!, renderItem.asset!, generation));
+        this.enqueue(
+          () => this.loadSticker(record!, renderItem.asset!, generation),
+          true,
+        );
       } else if (!renderItem.interactive && (record.sticker || record.stickerLoading)) {
         record.generation += 1;
         record.sticker?.dispose();
@@ -1196,8 +1258,9 @@ export class GalleryRenderer {
     record.root.updateMatrixWorld(true);
   }
 
-  private enqueue(job: QueueJob) {
-    this.queue.push(job);
+  private enqueue(job: QueueJob, priority = false) {
+    if (priority) this.queue.unshift(job);
+    else this.queue.push(job);
     this.scheduleNextJob();
   }
 
@@ -1279,6 +1342,12 @@ export class GalleryRenderer {
       !record.stickerLoading
     ) return;
     try {
+      // Priority live jobs can overtake the normal preview queue. Resolve this
+      // sticker's baked texture first so the idle-to-peel handoff never falls
+      // back to the unbaked source image.
+      if (!record.preview && record.previewLoading) {
+        await this.loadPreview(record);
+      }
       const options = resolveStickerOptions(undefined, asset.options);
       const artwork = await prepareArtwork(asset.source, options.outline);
       if (
@@ -1292,6 +1361,7 @@ export class GalleryRenderer {
         asset,
         this.audio,
         this.renderer.capabilities.getMaxAnisotropy(),
+        record.preview?.material.map ?? null,
         (opacity) =>
           this.setDynamicShadow(
             record.item.id,

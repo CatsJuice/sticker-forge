@@ -89,6 +89,11 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     !holographicBlock.includes("normal.xy"),
     "holographic band direction must not follow the peeled surface normal",
   );
+  assert.match(
+    holographicBlock,
+    /float holographicViewShift =[\s\S]*\(1\.0 - facing\)[\s\S]*vCurl/,
+  );
+  assert.match(holographicBlock, /float broadSpec = pow\(ndh, 12\.0\)/);
   assert.match(gallery, /shader-backed face visible while idle/);
 });
 

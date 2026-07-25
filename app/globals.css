@@ -1439,12 +1439,6 @@ input[type="range"] {
   gap: 8px;
 }
 
-.holographic-color {
-  grid-template-columns: 28px 1fr;
-  padding: 3px 9px 3px 4px;
-  text-align: center;
-}
-
 .range-row {
   display: grid;
   gap: 8px;

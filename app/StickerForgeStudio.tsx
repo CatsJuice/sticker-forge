@@ -3614,7 +3614,6 @@ export function StickerForgeStudio() {
                             settings.material.holographicColors[index]
                           }
                           label={label}
-                          swatchPosition="start"
                           onChange={(color) => {
                             const holographicColors = [
                               ...settings.material.holographicColors,

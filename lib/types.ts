@@ -37,6 +37,10 @@ export interface StickerImageSource {
   /** Browser-decodable image URL, typically a data URL from a local upload. */
   src: string;
   name?: string;
+  /** Transparent texture padding in pixels. Defaults to 144 for peel clearance. */
+  padding?: number;
+  /** Maximum decoded texture edge. Defaults to 2048; capped at 8192. */
+  textureMaxEdge?: number;
 }
 
 export interface StickerOutlineOptions {
@@ -124,6 +128,13 @@ export interface StickerSoundOptions {
   enabled?: boolean;
 }
 
+export interface StickerDisplayOptions {
+  /** Exact rendered width in CSS pixels. Zero uses the normal responsive fit. */
+  width?: number;
+  /** Exact rendered height in CSS pixels. Zero uses the normal responsive fit. */
+  height?: number;
+}
+
 export interface StickerPeelOptions {
   /** Curl radius, normalized to the sticker's short side when <= 1. */
   radius?: number;
@@ -133,6 +144,12 @@ export interface StickerPeelOptions {
   grabWidth?: number;
   /** Maximum curl angle in radians; degree values are also accepted when > 2π. */
   maxAngle?: number;
+  /** Progress required for a snap release to fully detach. Defaults to 0.74. */
+  detachThreshold?: number;
+  /** Whether peeling reveals the faint adhesive residue beneath the sticker. */
+  residue?: boolean;
+  /** Whether the lifted sheet casts onto the adhered printed face. */
+  surfaceShadow?: boolean;
   release?: "reset" | "stay" | "snap";
 }
 
@@ -146,6 +163,7 @@ export interface StickerOptions {
   back?: StickerBackOptions;
   material?: StickerMaterialOptions;
   sound?: StickerSoundOptions;
+  display?: StickerDisplayOptions;
   tilt?: number;
   wind?: number;
   quality?: "low" | "medium" | "high";
@@ -228,6 +246,9 @@ export const DEFAULT_STICKER_OPTIONS = {
     stiffness: 0.72,
     grabWidth: 22,
     maxAngle: 3.55,
+    detachThreshold: 0.74,
+    residue: true,
+    surfaceShadow: true,
     release: "snap" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
@@ -243,6 +264,7 @@ export const DEFAULT_STICKER_OPTIONS = {
     ],
   },
   sound: { src: "", volume: 0.7, enabled: true },
+  display: { width: 0, height: 0 },
   tilt: -3,
   wind: 0.25,
   quality: "high" as const,
@@ -263,6 +285,7 @@ export type ResolvedStickerOptions = {
   back: Required<StickerBackOptions>;
   material: Required<StickerMaterialOptions>;
   sound: Required<StickerSoundOptions>;
+  display: Required<StickerDisplayOptions>;
   tilt: number;
   wind: number;
   quality: "low" | "medium" | "high";
@@ -290,6 +313,7 @@ export function resolveStickerOptions(
     back: { ...base.back, ...patch.back },
     material: { ...base.material, ...patch.material },
     sound: { ...base.sound, ...patch.sound },
+    display: { ...base.display, ...patch.display },
     tilt: patch.tilt ?? base.tilt,
     wind: patch.wind ?? base.wind,
     quality: patch.quality ?? base.quality,

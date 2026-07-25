@@ -89,6 +89,7 @@ import {
 } from "./GalleryAddFlight";
 import { ExportDialog } from "./ExportDialog";
 import { BackgroundRemovalEffect } from "./BackgroundRemovalEffect";
+import { SidebarPeelEasterEgg } from "./SidebarPeelEasterEgg";
 import {
   removeImageBackground,
   type BackgroundRemovalResult,
@@ -3008,6 +3009,11 @@ export function StickerForgeStudio() {
           data-open={isPanelOpen}
           aria-label={t.controls}
         >
+          <SidebarPeelEasterEgg
+            panelRef={controlsCardRef}
+            optionsRef={settingsRef}
+            onDetached={() => setIsPanelOpen(false)}
+          />
           <button
             className="controls-drag-region"
             type="button"

@@ -11,6 +11,14 @@ import {
   LASER_PREVIEW_EVENT,
   updateLaserEffectSettings,
 } from "@/lib/laser-debug";
+import {
+  getSidebarPeelBackSettings,
+  getSidebarPeelLightingSettings,
+  getSidebarPeelShadowSettings,
+  updateSidebarPeelBackSettings,
+  updateSidebarPeelLightingSettings,
+  updateSidebarPeelShadowSettings,
+} from "@/lib/sidebar-peel-debug";
 
 type DebugBinding = {
   on: (event: "change" | "click", callback: () => void) => void;
@@ -18,16 +26,25 @@ type DebugBinding = {
 
 type DebugFolder = {
   addButton: (options: { title: string }) => DebugBinding;
-  addBinding: (
-    target: Record<string, number>,
-    key: string,
-    options: {
-      label: string;
-      min: number;
-      max: number;
-      step: number;
-    },
-  ) => DebugBinding;
+  addBinding: {
+    (
+      target: Record<string, number>,
+      key: string,
+      options: {
+        label: string;
+        min: number;
+        max: number;
+        step: number;
+      },
+    ): DebugBinding;
+    (
+      target: Record<string, string>,
+      key: string,
+      options: {
+        label: string;
+      },
+    ): DebugBinding;
+  };
 };
 
 type DebugPaneInstance = {
@@ -70,6 +87,16 @@ const COPY = {
     rippleDensity: "波纹密度",
     rippleSpeed: "波纹速度",
     previewLaser: "预览扫描",
+    sidebarPeelShadow: "侧边栏彩蛋 · 阴影",
+    shadowOpacity: "阴影强度",
+    shadowBlur: "扩散范围",
+    shadowDistance: "投影距离",
+    sidebarPeelLighting: "侧边栏彩蛋 · 光源",
+    lightX: "光源 X",
+    lightY: "光源 Y",
+    lightZ: "光源 Z",
+    sidebarPeelBack: "侧边栏彩蛋 · 背胶",
+    backColor: "背胶颜色",
   },
   en: {
     title: "Sticker Forge Debug",
@@ -99,6 +126,16 @@ const COPY = {
     rippleDensity: "Ripple density",
     rippleSpeed: "Ripple speed",
     previewLaser: "Preview scan",
+    sidebarPeelShadow: "Sidebar Easter Egg · Shadow",
+    shadowOpacity: "Shadow opacity",
+    shadowBlur: "Blur radius",
+    shadowDistance: "Shadow distance",
+    sidebarPeelLighting: "Sidebar Easter Egg · Light",
+    lightX: "Light X",
+    lightY: "Light Y",
+    lightZ: "Light Z",
+    sidebarPeelBack: "Sidebar Easter Egg · Back",
+    backColor: "Back color",
   },
 } satisfies Record<DebugLocale, Record<string, string>>;
 
@@ -313,6 +350,93 @@ export function DebugPanel() {
           pane.refresh();
         });
       }
+
+      const sidebarShadow = { ...getSidebarPeelShadowSettings() };
+      const sidebarShadowFolder = pane.addFolder({
+        title: t.sidebarPeelShadow,
+        expanded: true,
+      });
+      const sidebarShadowBindings = [
+        sidebarShadowFolder.addBinding(sidebarShadow, "opacity", {
+          label: t.shadowOpacity,
+          min: 0,
+          max: 1,
+          step: 0.01,
+        }),
+        sidebarShadowFolder.addBinding(sidebarShadow, "blur", {
+          label: t.shadowBlur,
+          min: 0,
+          max: 160,
+          step: 1,
+        }),
+        sidebarShadowFolder.addBinding(sidebarShadow, "distance", {
+          label: t.shadowDistance,
+          min: 0,
+          max: 80,
+          step: 1,
+        }),
+      ];
+      for (const binding of sidebarShadowBindings) {
+        binding.on("change", () => {
+          Object.assign(
+            sidebarShadow,
+            updateSidebarPeelShadowSettings(sidebarShadow),
+          );
+          pane.refresh();
+        });
+      }
+
+      const sidebarLighting = { ...getSidebarPeelLightingSettings() };
+      const sidebarLightingFolder = pane.addFolder({
+        title: t.sidebarPeelLighting,
+        expanded: true,
+      });
+      const sidebarLightingBindings = [
+        sidebarLightingFolder.addBinding(sidebarLighting, "x", {
+          label: t.lightX,
+          min: -1,
+          max: 1,
+          step: 0.01,
+        }),
+        sidebarLightingFolder.addBinding(sidebarLighting, "y", {
+          label: t.lightY,
+          min: -1,
+          max: 1,
+          step: 0.01,
+        }),
+        sidebarLightingFolder.addBinding(sidebarLighting, "z", {
+          label: t.lightZ,
+          min: -1,
+          max: 1,
+          step: 0.01,
+        }),
+      ];
+      for (const binding of sidebarLightingBindings) {
+        binding.on("change", () => {
+          Object.assign(
+            sidebarLighting,
+            updateSidebarPeelLightingSettings(sidebarLighting),
+          );
+          pane.refresh();
+        });
+      }
+
+      const sidebarBack = { ...getSidebarPeelBackSettings() };
+      const sidebarBackFolder = pane.addFolder({
+        title: t.sidebarPeelBack,
+        expanded: true,
+      });
+      sidebarBackFolder
+        .addBinding(sidebarBack, "color", {
+          label: t.backColor,
+        })
+        .on("change", () => {
+          Object.assign(
+            sidebarBack,
+            updateSidebarPeelBackSettings(sidebarBack),
+          );
+          pane.refresh();
+        });
 
       disposePane = () => {
         pane.dispose();

@@ -300,6 +300,9 @@ class GalleryStickerMesh {
       uShadowOpacity: {
         value: clamp(this.options.shadow.opacity, 0, 0.9),
       },
+      uSurfaceShadowEnabled: {
+        value: this.options.peel.surfaceShadow ? 1 : 0,
+      },
       uShadowDeleteOpacity: { value: 1 },
       uShadowBlur: {
         value: clamp(this.options.shadow.blur * 0.18, 0.75, 7),

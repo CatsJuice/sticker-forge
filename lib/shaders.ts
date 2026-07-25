@@ -123,6 +123,7 @@ export const stickerVertexShader = /* glsl */ `
   varying float vLift;
   varying float vCurl;
   varying float vAdhered;
+  varying float vShadowReceiverProximity;
 
   void main() {
     vUv = uv;
@@ -140,6 +141,8 @@ export const stickerVertexShader = /* glsl */ `
     float normalizedArc = arcDistance / effectiveRadius;
     float receiverFeather = max(min(uMeshSize.x, uMeshSize.y) * 0.006, 0.004);
     float activePeel = step(0.00001, uPeelDepth);
+    float receiverDistance = max(along - front, 0.0);
+    float receiverShadowReach = max(effectiveRadius * 1.6, receiverFeather * 3.0);
 
     vLift = max(deformed.z, 0.0);
     vCurl = peelMask
@@ -150,6 +153,13 @@ export const stickerVertexShader = /* glsl */ `
       smoothstep(front - receiverFeather, front + receiverFeather, along),
       activePeel
     );
+    vShadowReceiverProximity =
+      activePeel
+      * (1.0 - smoothstep(
+        receiverFeather,
+        receiverShadowReach,
+        receiverDistance
+      ));
 
     vec4 viewPosition = modelViewMatrix * vec4(deformed, 1.0);
     vViewPosition = viewPosition.xyz;
@@ -248,6 +258,7 @@ export const stickerFragmentShader = /* glsl */ `
   uniform vec3 uHolographicColorC;
   uniform vec3 uShadowColor;
   uniform float uShadowOpacity;
+  uniform float uSurfaceShadowEnabled;
   uniform float uEntranceSweep;
   uniform vec2 uEntranceAxis;
   uniform float uLaserCoreWidth;
@@ -264,6 +275,7 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uInteractionHintRadius;
   uniform vec3 uInteractionHintColor;
   uniform float uTime;
+  uniform float uPeel;
   uniform float uPreserveFrontColor;
   uniform float uOpacity;
 
@@ -273,6 +285,7 @@ export const stickerFragmentShader = /* glsl */ `
   varying float vLift;
   varying float vCurl;
   varying float vAdhered;
+  varying float vShadowReceiverProximity;
 
   #include <common>
   #include <packing>
@@ -711,11 +724,22 @@ export const stickerFragmentShader = /* glsl */ `
 
     vec3 color = mix(backColor, frontColor, frontMix);
 
-    float projectedShadow = (1.0 - getShadowMask()) * vAdhered;
+    float projectedShadow =
+      (1.0 - getShadowMask())
+      * vAdhered
+      * vShadowReceiverProximity;
+    float peelShadowActivation = smoothstep(0.001, 0.035, uPeel);
     color = mix(
       color,
       uShadowColor,
-      clamp(projectedShadow * uShadowOpacity, 0.0, 1.0)
+      clamp(
+        projectedShadow
+          * uShadowOpacity
+          * uSurfaceShadowEnabled
+          * peelShadowActivation,
+        0.0,
+        1.0
+      )
     );
 
     if (uEntranceSweep >= 0.0) {

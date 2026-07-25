@@ -26,6 +26,7 @@
     "drizzle-orm": "0.45.2",
     "gifenc": "^1.0.3",
     "heic-decode": "^2.1.0",
+    "modern-screenshot": "^4.7.0",
     "next": "16.2.6",
     "prores-wasm-encoder": "^0.2.3",
     "react": "19.2.6",

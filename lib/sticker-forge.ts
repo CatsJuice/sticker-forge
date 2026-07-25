@@ -30,6 +30,7 @@ import {
 
 export type {
   StickerBackOptions,
+  StickerDisplayOptions,
   StickerEdgeOptions,
   StickerInstance,
   StickerMaterialOptions,
@@ -175,6 +176,7 @@ function mergePublicOptions(
     back: { ...current.back, ...patch.back },
     material: { ...current.material, ...patch.material },
     sound: { ...current.sound, ...patch.sound },
+    display: { ...current.display, ...patch.display },
   };
 }
 
@@ -346,6 +348,9 @@ class StickerRenderer implements StickerInstance {
         value: colorFrom(this.options.shadow.color, "#191823"),
       },
       uShadowOpacity: { value: this.options.shadow.opacity },
+      uSurfaceShadowEnabled: {
+        value: this.options.peel.surfaceShadow ? 1 : 0,
+      },
       uShadowBlur: { value: this.options.shadow.blur },
       uShadowDistance: { value: 0.04 },
       uShadowDirection: { value: new THREE.Vector2(0.7, -0.7) },
@@ -561,6 +566,7 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) return;
     const previousOutline = this.options.outline;
     const previousQuality = this.options.quality;
+    const previousDisplay = this.options.display;
     const previousMaterialKey = this.materialKey();
     this.options = resolveStickerOptions(this.options, patch);
     this.applyOptionsToRenderer();
@@ -592,7 +598,12 @@ class StickerRenderer implements StickerInstance {
         });
       }, 70);
     }
-    if (this.options.quality !== previousQuality && this.artwork) {
+    if (
+      (this.options.quality !== previousQuality ||
+        this.options.display.width !== previousDisplay.width ||
+        this.options.display.height !== previousDisplay.height) &&
+      this.artwork
+    ) {
       this.updateMeshGeometry(this.artwork.aspect);
     }
     this.requestRender();
@@ -936,22 +947,33 @@ class StickerRenderer implements StickerInstance {
   private updateMeshGeometry(aspect: number) {
     const worldUnitsPerPixel =
       this.viewHeight / Math.max(1, this.viewportHeightPx);
-    const maxWidth = Math.min(
-      this.viewWidth * 0.78,
-      MAX_STICKER_WIDTH_PX * worldUnitsPerPixel,
-    );
-    const maxHeight = Math.min(
-      this.viewHeight * 0.58,
-      MAX_STICKER_HEIGHT_PX * worldUnitsPerPixel,
-    );
-    let width = maxWidth;
-    let height = width / aspect;
-    if (height > maxHeight) {
-      height = maxHeight;
-      width = height * aspect;
+    let width: number;
+    let height: number;
+    if (this.options.display.width > 0 && this.options.display.height > 0) {
+      width = this.options.display.width * worldUnitsPerPixel;
+      height = this.options.display.height * worldUnitsPerPixel;
+    } else {
+      const maxWidth = Math.min(
+        this.viewWidth * 0.78,
+        MAX_STICKER_WIDTH_PX * worldUnitsPerPixel,
+      );
+      const maxHeight = Math.min(
+        this.viewHeight * 0.58,
+        MAX_STICKER_HEIGHT_PX * worldUnitsPerPixel,
+      );
+      width = maxWidth;
+      height = width / aspect;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspect;
+      }
     }
-    this.meshWidth = Math.max(0.34, width);
-    this.meshHeight = Math.max(0.25, height);
+    this.meshWidth =
+      this.options.display.width > 0
+        ? Math.max(0.001, width)
+        : Math.max(0.34, width);
+    this.meshHeight =
+      this.options.display.height > 0 ? Math.max(0.001, height) : Math.max(0.25, height);
 
     const longSegments =
       this.options.quality === "high"
@@ -1084,6 +1106,9 @@ class StickerRenderer implements StickerInstance {
         1.16,
         clamp(this.options.peel.stiffness, 0, 1),
       );
+    this.residueMesh.visible = this.options.peel.residue;
+    this.uniforms.uSurfaceShadowEnabled.value =
+      this.options.peel.surfaceShadow ? 1 : 0;
     this.setCreaseDepth(this.creaseDepth);
 
     this.uniforms.uShadowColor.value = colorFrom(
@@ -1144,10 +1169,13 @@ class StickerRenderer implements StickerInstance {
       Math.max(0.8, lightDirection.z * lightOffset),
     );
     this.peelShadowTarget.position.set(0, 0, 0);
-    this.peelShadowLight.shadow.radius = THREE.MathUtils.lerp(
+    // Use the configured CSS-like blur as the kernel size. Previously every
+    // shadow was squeezed into the same tiny 1-7 texel range.
+    this.peelShadowLight.shadow.radius = clamp(
+      this.options.shadow.blur *
+        THREE.MathUtils.lerp(0.42, 0.72, lightSoftness),
       1,
-      7,
-      lightSoftness,
+      56,
     );
     const shadowMapSize = this.options.quality === "high" ? 2048 : 1024;
     this.peelShadowLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);
@@ -1628,7 +1656,11 @@ class StickerRenderer implements StickerInstance {
         )
       : this.state.progress;
     const shouldDetach =
-      release === "snap" && releaseProgress >= SNAP_DETACH_THRESHOLD;
+      (release === "snap" && releaseProgress >= SNAP_DETACH_THRESHOLD) ||
+      (release === "snap" &&
+        this.options.peel.detachThreshold < SNAP_DETACH_THRESHOLD &&
+        releaseProgress >=
+          clamp(this.options.peel.detachThreshold, 0.1, SNAP_DETACH_THRESHOLD));
     if (shouldDetach) {
       this.setCreaseDepth(this.grabExtent);
       this.state.pointer = {
@@ -1665,6 +1697,8 @@ class StickerRenderer implements StickerInstance {
     });
     if (shouldDetach) {
       if (reducedMotion) {
+        this.emit("detachcomplete", { progress: 1 });
+        if (this.destroyed) return;
         this.reset();
         return;
       }
@@ -1880,6 +1914,8 @@ class StickerRenderer implements StickerInstance {
         this.activeDirection.y * exitSpeed * delta;
       this.stickerMesh.rotation.z += this.detachedExitSpin * delta;
       if (this.detachedExitElapsed >= 0.46) {
+        this.emit("detachcomplete", { progress: 1 });
+        if (this.destroyed) return;
         this.startEntranceAnimation();
         return;
       }
@@ -2028,6 +2064,7 @@ export class StickerForgeElement extends HTMLElementBase {
         "peelstart",
         "peelchange",
         "peelend",
+        "detachcomplete",
         "cyclecomplete",
         "error",
       ]) {

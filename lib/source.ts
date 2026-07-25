@@ -412,19 +412,24 @@ async function renderImageSource(source: StickerImageSource) {
   const image = await loadImage(source.src);
   const hasTransparency = imageHasTransparency(image);
   const aspect = clamp(image.naturalWidth / image.naturalHeight, 0.15, 8);
-  const contentMax = 1740;
-  const padding = 144;
+  const padding = clamp(source.padding ?? 144, 0, 512);
+  const textureMaxEdge = clamp(
+    source.textureMaxEdge ?? MAX_TEXTURE_EDGE,
+    MIN_TEXTURE_EDGE,
+    8192,
+  );
+  const contentMax = Math.max(1, textureMaxEdge - padding * 2);
   const contentWidth = aspect >= 1 ? contentMax : contentMax * aspect;
   const contentHeight = aspect >= 1 ? contentMax / aspect : contentMax;
   const width = clamp(
     Math.ceil(contentWidth + padding * 2),
     MIN_TEXTURE_EDGE,
-    MAX_TEXTURE_EDGE,
+    textureMaxEdge,
   );
   const height = clamp(
     Math.ceil(contentHeight + padding * 2),
     MIN_TEXTURE_EDGE,
-    MAX_TEXTURE_EDGE,
+    textureMaxEdge,
   );
   const canvas = document.createElement("canvas");
   canvas.width = width;

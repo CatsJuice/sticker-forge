@@ -189,6 +189,7 @@ and error events bubble across the shadow boundary.
 | `peelstart` | `{ amount, progress, origin }` |
 | `peelchange` | `{ amount, progress, direction? }` |
 | `peelend` | `{ amount, progress, willReset }` |
+| `detachcomplete` | `{ progress: 1 }` |
 | `error` | `{ message }` |
 
 `amount` and `progress` are the same normalized value from `0` (flat) to `1`

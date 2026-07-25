@@ -352,8 +352,9 @@ input[type="range"] {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background: var(--panel);
-  backdrop-filter: blur(24px) saturate(1.14);
+  background: #fff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 .controls-header {
@@ -1180,10 +1181,13 @@ input[type="range"] {
 }
 
 .lighting-direction-control {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 15px;
 }
 
 .lighting-direction-meta {
+  width: 100%;
   margin-bottom: 8px;
   display: flex;
   align-items: center;
@@ -1238,9 +1242,10 @@ input[type="range"] {
 
 .lighting-direction-pad {
   position: relative;
+  align-self: center;
   width: min(164px, 60%);
   aspect-ratio: 1;
-  margin: 0 auto;
+  margin: 0;
   overflow: hidden;
   border: 1px solid rgba(45, 44, 50, 0.12);
   border-radius: 50%;
@@ -1841,6 +1846,74 @@ body {
   clip-path: circle(160% at calc(100% - 37px) 37px);
   transform: scale(1);
   transition-delay: 0s;
+}
+
+.controls-card[data-peel-captured="true"] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  transition: none !important;
+}
+
+.controls-card[data-peel-restoring="true"] {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transition: none !important;
+}
+
+.sidebar-peel-trigger {
+  position: absolute;
+  z-index: 50;
+  width: 72px;
+  height: 72px;
+  display: block;
+  cursor: grab;
+  background: transparent;
+}
+
+.sidebar-peel-trigger[data-corner="top-left"] {
+  top: 0;
+  left: 0;
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+}
+
+.sidebar-peel-trigger[data-corner="top-right"] {
+  top: 0;
+  right: 0;
+  clip-path: polygon(0 0, 100% 0, 100% 100%);
+}
+
+.sidebar-peel-trigger[data-corner="bottom-left"] {
+  bottom: 0;
+  left: 0;
+  clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+
+.sidebar-peel-trigger[data-corner="bottom-right"] {
+  right: 0;
+  bottom: 0;
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.sidebar-peel-overlay {
+  position: fixed;
+  z-index: 9000;
+  inset: 0;
+  overflow: hidden;
+  background: transparent;
+  pointer-events: auto;
+}
+
+.sidebar-peel-sticker-host {
+  position: absolute;
+  overflow: visible;
+}
+
+.sidebar-peel-overlay:not([data-sidebar-peel-ready="true"])
+  .sidebar-peel-sticker-host
+  canvas {
+  opacity: 0;
 }
 
 .controls-drag-region {
@@ -4927,6 +5000,10 @@ body {
 }
 
 @media (max-width: 620px) {
+  .sidebar-peel-trigger {
+    display: none;
+  }
+
   html.export-sheet-open,
   body.export-sheet-open {
     background: #000;
@@ -5050,7 +5127,7 @@ body {
     clip-path: none;
     transform: none;
     transform-origin: bottom center;
-    background: rgba(255, 255, 255, 0.94);
+    background: #fff;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     box-shadow:

@@ -762,7 +762,7 @@ class StickerRenderer implements StickerInstance {
 
   setRenderScale(scale: number): void {
     if (this.destroyed) return;
-    const nextScale = clamp(scale, 1, 2.6);
+    const nextScale = clamp(scale, 1, 6);
     if (Math.abs(nextScale - this.renderScale) < 0.001) return;
     this.renderScale = nextScale;
     this.resize();

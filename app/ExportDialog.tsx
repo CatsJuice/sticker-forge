@@ -1001,12 +1001,14 @@ export function ExportDialog({
       format,
       frameRate,
       frames,
+      outputScale = exportScale,
       signal,
     }: {
       audio?: Awaited<ReturnType<typeof renderStickerExportAudio>>;
       format: StickerExportFormat;
       frameRate: number;
       frames: ExportFrame[];
+      outputScale?: ExportScale;
       signal: AbortSignal;
     }) => {
       throwIfAborted(signal);
@@ -1018,7 +1020,7 @@ export function ExportDialog({
           frames,
           gifShadow,
           id: createRandomId(),
-          outputScale: exportScale,
+          outputScale,
           playbackInterval,
         },
         (message) => {
@@ -1992,24 +1994,34 @@ export function ExportDialog({
   const exportPng = async () => {
     if (exportAbortRef.current) return;
     const signal = beginExport("png");
+    const previewRenderScale = Math.max(1, transformRef.current.zoom);
     setStatus(t.exporting);
     try {
+      controllerRef.current?.setRenderScale(
+        Math.max(1, transformRef.current.zoom * exportScale),
+      );
       await nextFrame();
       throwIfAborted(signal);
-      const { context } = composeCurrent(EMPTY_MOTION);
+      const { context } = composeCurrent(EMPTY_MOTION, exportScale);
+      const exportSize = scaledExportSize(
+        size.width,
+        size.height,
+        exportScale,
+      );
       const frame: ExportFrame = {
         durationMs: 0,
-        height: size.height,
+        height: exportSize.height,
         rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, size.width, size.height).data,
+          context.getImageData(0, 0, exportSize.width, exportSize.height).data,
         ),
-        width: size.width,
+        width: exportSize.width,
       };
       updateExportProgress(0.34, "preparing");
       const blob = await runExportWorker({
         format: "png",
         frameRate: 1,
         frames: [frame],
+        outputScale: 1,
         signal,
       });
       throwIfAborted(signal);
@@ -2023,6 +2035,7 @@ export function ExportDialog({
         setStatus(t.exportFailed);
       }
     } finally {
+      controllerRef.current?.setRenderScale(previewRenderScale);
       exportAbortRef.current = null;
       exportWorkerTaskRef.current = null;
       setBusy(null);

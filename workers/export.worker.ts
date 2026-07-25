@@ -32,6 +32,12 @@ function createFrameScaler(outputScale: number) {
   let destination: OffscreenCanvas | null = null;
 
   return (frame: ExportFrame): ExportFrame => {
+    if (outputScale === 1) {
+      return {
+        ...frame,
+        rgba: new Uint8ClampedArray(frame.rgba),
+      };
+    }
     const outputSize = scaledFrameSize(frame, outputScale);
     source ??= new OffscreenCanvas(frame.width, frame.height);
     destination ??= new OffscreenCanvas(outputSize.width, outputSize.height);

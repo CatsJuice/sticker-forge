@@ -15,8 +15,8 @@ export type SidebarPeelBackSettings = {
 };
 
 export const DEFAULT_SIDEBAR_PEEL_SHADOW_SETTINGS: SidebarPeelShadowSettings = {
-  opacity: 0.3,
-  blur: 80,
+  opacity: 0.16,
+  blur: 43,
   distance: 24,
 };
 

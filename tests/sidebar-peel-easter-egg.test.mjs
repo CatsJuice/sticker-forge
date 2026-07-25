@@ -30,8 +30,8 @@ test("turns the desktop sidebar into a cancellable no-outline sticker", async ()
   assert.match(component, /controller\?\.setOptions\(/);
   assert.match(debugPanel, /sidebarShadowFolder/);
   assert.match(debugPanel, /updateSidebarPeelShadowSettings/);
-  assert.match(debugSettings, /opacity: 0\.3/);
-  assert.match(debugSettings, /blur: 80/);
+  assert.match(debugSettings, /opacity: 0\.16/);
+  assert.match(debugSettings, /blur: 43/);
   assert.match(debugSettings, /distance: 24/);
   assert.match(
     debugSettings,

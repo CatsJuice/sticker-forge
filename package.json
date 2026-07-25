@@ -29,6 +29,7 @@
     "next": "16.2.6",
     "prores-wasm-encoder": "^0.2.3",
     "react": "19.2.6",
+    "react-colorful": "^5.8.0",
     "react-dom": "19.2.6",
     "three": "^0.185.1",
     "tweakpane": "^4.0.5"

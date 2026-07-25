@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -10,6 +11,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
@@ -76,6 +78,7 @@ import {
 } from "./GalleryCanvas";
 import { GalleryFolderDock } from "./GalleryFolderDock";
 import { GalleryQuickEditFlight } from "./GalleryQuickEditFlight";
+import { ColorPicker } from "./ColorPicker";
 import {
   GalleryAddFlight,
   type GalleryAddFlightRect,
@@ -757,6 +760,50 @@ function RangeRow({
 }) {
   const fill = ((value - min) / (max - min)) * 100;
   const rangeStyle = { "--range-fill": `${fill}%` } as CSSProperties;
+  const sliderRef = useRef<HTMLDivElement>(null);
+  const pointerGestureRef = useRef<{
+    startX: number;
+    startFill: string;
+    moved: boolean;
+  } | null>(null);
+
+  const beginPointerGesture = (event: ReactPointerEvent<HTMLInputElement>) => {
+    const slider = sliderRef.current;
+    if (!slider) return;
+    const startFill = `${fill}%`;
+    pointerGestureRef.current = {
+      startX: event.clientX,
+      startFill,
+      moved: false,
+    };
+    slider.style.setProperty("--range-pointer-from", startFill);
+    slider.removeAttribute("data-click-animating");
+    slider.setAttribute("data-pointer-active", "true");
+    slider.removeAttribute("data-pointer-moved");
+  };
+
+  const movePointerGesture = (event: ReactPointerEvent<HTMLInputElement>) => {
+    const gesture = pointerGestureRef.current;
+    const slider = sliderRef.current;
+    if (!gesture || !slider || gesture.moved) return;
+    if (Math.abs(event.clientX - gesture.startX) < 4) return;
+    gesture.moved = true;
+    slider.setAttribute("data-pointer-moved", "true");
+  };
+
+  const finishPointerGesture = () => {
+    const gesture = pointerGestureRef.current;
+    const slider = sliderRef.current;
+    pointerGestureRef.current = null;
+    if (!gesture || !slider) return;
+    slider.removeAttribute("data-pointer-active");
+    slider.removeAttribute("data-pointer-moved");
+    if (gesture.moved) return;
+    slider.style.setProperty("--range-click-from", gesture.startFill);
+    slider.removeAttribute("data-click-animating");
+    slider.getBoundingClientRect();
+    slider.setAttribute("data-click-animating", "true");
+  };
 
   return (
     <div className="range-row">
@@ -768,18 +815,79 @@ function RangeRow({
           {display}
         </output>
       </div>
-      <input
-        className="range-control"
-        id={id}
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
+      <div
+        ref={sliderRef}
+        className="range-slider"
         style={rangeStyle}
-        onChange={(event) => onChange(Number(event.target.value))}
-      />
+        onAnimationEnd={() =>
+          sliderRef.current?.removeAttribute("data-click-animating")
+        }
+      >
+        <span
+          className="range-track-segment range-track-fill"
+          aria-hidden="true"
+        />
+        <span
+          className="range-track-segment range-track-remainder"
+          aria-hidden="true"
+        />
+        <input
+          className="range-control"
+          id={id}
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onPointerDown={beginPointerGesture}
+          onPointerMove={movePointerGesture}
+          onPointerUp={finishPointerGesture}
+          onPointerCancel={finishPointerGesture}
+          onChange={(event) => onChange(Number(event.target.value))}
+        />
+      </div>
     </div>
+  );
+}
+
+function ControlSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const contentId = useId();
+
+  return (
+    <section className="control-section" data-state={open ? "open" : "closed"}>
+      <button
+        className="section-heading"
+        type="button"
+        aria-expanded={open}
+        aria-controls={contentId}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span className="section-title">{title}</span>
+        <FontAwesomeIcon
+          className="section-chevron"
+          icon={faChevronDown}
+          aria-hidden="true"
+        />
+      </button>
+      <div
+        id={contentId}
+        className="control-section-container"
+        data-state={open ? "open" : "closed"}
+        aria-hidden={!open}
+        inert={!open ? true : undefined}
+      >
+        <div className="control-section-wrapper">
+          <div className="control-section-content">{children}</div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -889,6 +997,9 @@ export function StickerForgeStudio() {
   const stageRef = useRef<HTMLDivElement>(null);
   const studioShellRef = useRef<HTMLElement>(null);
   const controlsCardRef = useRef<HTMLElement>(null);
+  const controlsScrollRef = useRef<HTMLDivElement>(null);
+  const controlsScrollShellRef = useRef<HTMLDivElement>(null);
+  const controlsScrollContentRef = useRef<HTMLDivElement>(null);
   const panelDragRef = useRef<{
     pointerId: number;
     startY: number;
@@ -935,6 +1046,30 @@ export function StickerForgeStudio() {
   const [editorLineHeightValue, setEditorLineHeightValue] = useState("1.2");
   const [editorAlign, setEditorAlign] =
     useState<"left" | "center" | "right">("center");
+
+  const syncControlsScrollEdges = useCallback(() => {
+    const scroll = controlsScrollRef.current;
+    const shell = controlsScrollShellRef.current;
+    if (!scroll || !shell) return;
+    const remaining = scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop;
+    shell.dataset.atStart = String(scroll.scrollTop <= 1);
+    shell.dataset.atEnd = String(remaining <= 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    const scroll = controlsScrollRef.current;
+    const content = controlsScrollContentRef.current;
+    if (!scroll || !content) return;
+    syncControlsScrollEdges();
+    const observer = new ResizeObserver(syncControlsScrollEdges);
+    observer.observe(scroll);
+    observer.observe(content);
+    window.addEventListener("resize", syncControlsScrollEdges);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncControlsScrollEdges);
+    };
+  }, [syncControlsScrollEdges]);
   const [imageDataUrl, setImageDataUrl] = useState(DEFAULT_IMAGE_SRC);
   const [imageName, setImageName] = useState("");
   const [settings, setSettings] =
@@ -2571,7 +2706,21 @@ export function StickerForgeStudio() {
             </div>
           </div>
 
-          <div className="controls-scroll">
+          <div
+            ref={controlsScrollShellRef}
+            className="controls-scroll-shell"
+            data-at-start="true"
+            data-at-end="false"
+          >
+            <div
+              ref={controlsScrollRef}
+              className="controls-scroll"
+              onScroll={syncControlsScrollEdges}
+            >
+              <div
+                ref={controlsScrollContentRef}
+                className="controls-scroll-content"
+              >
             <div
               className="source-tabs"
               data-mode={sourceMode}
@@ -2735,17 +2884,16 @@ export function StickerForgeStudio() {
                           </button>
                         ))}
                       </div>
-                      <label className="rich-color-control" title={t.textColor}>
+                      <ColorPicker
+                        className="rich-color-control"
+                        swatchClassName="rich-color-swatch"
+                        value={inkColor}
+                        onChange={handleEditorColor}
+                        label={t.textColor}
+                        onTriggerMouseDown={rememberEditorSelection}
+                      >
                         <span className="sr-only">{t.textColor}</span>
-                        <span style={{ background: inkColor }} aria-hidden="true" />
-                        <input
-                          type="color"
-                          value={inkColor}
-                          aria-label={t.textColor}
-                          onMouseDown={rememberEditorSelection}
-                          onChange={(event) => handleEditorColor(event.target.value)}
-                        />
-                      </label>
+                      </ColorPicker>
                     </div>
                     <div
                       ref={richEditorRef}
@@ -2888,168 +3036,161 @@ export function StickerForgeStudio() {
               )}
             </div>
 
-            <div className="section-divider" />
-            <div className="section-heading">
-              <h3>{t.surface}</h3>
-              <span>Surface</span>
-            </div>
-            <div className="range-stack">
-              <RangeRow
-                id="outline-width"
-                label={t.outlineWidth}
-                min={0}
-                max={44}
-                step={1}
-                value={settings.outline.width}
-                display={`${settings.outline.width}px`}
-                onChange={(width) =>
-                  updateSetting("outline", { ...settings.outline, width })
-                }
-              />
-              <RangeRow
-                id="tilt"
-                label={t.tilt}
-                min={-12}
-                max={12}
-                step={0.5}
-                value={settings.tilt}
-                display={`${settings.tilt.toFixed(1)}°`}
-                onChange={(value) => updateSetting("tilt", value)}
-              />
-            </div>
-            <div className="dual-color-row">
-              <label className="compact-color">
-                <span>{t.outline}</span>
-                <input
-                  type="color"
-                  value={settings.outline.color}
-                  aria-label={t.outlineColor}
-                  onChange={(event) =>
-                    updateSetting("outline", {
-                      ...settings.outline,
-                      color: event.target.value,
-                    })
-                  }
-                />
-              </label>
-              <label className="compact-color">
-                <span>{t.backing}</span>
-                <input
-                  type="color"
-                  value={settings.back.color}
-                  aria-label={t.backColor}
-                  onChange={(event) =>
-                    updateSetting("back", {
-                      ...settings.back,
-                      color: event.target.value,
-                    })
-                  }
-                />
-              </label>
-            </div>
+            <ControlSection title={t.surface}>
+                <div className="range-stack">
+                  <RangeRow
+                    id="outline-width"
+                    label={t.outlineWidth}
+                    min={0}
+                    max={44}
+                    step={1}
+                    value={settings.outline.width}
+                    display={`${settings.outline.width}px`}
+                    onChange={(width) =>
+                      updateSetting("outline", { ...settings.outline, width })
+                    }
+                  />
+                  <RangeRow
+                    id="tilt"
+                    label={t.tilt}
+                    min={-12}
+                    max={12}
+                    step={0.5}
+                    value={settings.tilt}
+                    display={`${settings.tilt.toFixed(1)}°`}
+                    onChange={(value) => updateSetting("tilt", value)}
+                  />
+                </div>
+                <div className="dual-color-row">
+                  <ColorPicker
+                    className="compact-color"
+                    swatchClassName="compact-color-swatch"
+                    value={settings.outline.color}
+                    label={t.outlineColor}
+                    onChange={(color) =>
+                      updateSetting("outline", {
+                        ...settings.outline,
+                        color,
+                      })
+                    }
+                  >
+                    <span>{t.outline}</span>
+                  </ColorPicker>
+                  <ColorPicker
+                    className="compact-color"
+                    swatchClassName="compact-color-swatch"
+                    value={settings.back.color}
+                    label={t.backColor}
+                    onChange={(color) =>
+                      updateSetting("back", {
+                        ...settings.back,
+                        color,
+                      })
+                    }
+                  >
+                    <span>{t.backing}</span>
+                  </ColorPicker>
+                </div>
+            </ControlSection>
 
-            <div className="section-divider" />
-            <div className="section-heading">
-              <h3>{t.peel}</h3>
-              <span>Peel physics</span>
-            </div>
-            <div className="range-stack">
-              <RangeRow
-                id="curl-radius"
-                label={t.curlRadius}
-                min={0.08}
-                max={0.2}
-                step={0.005}
-                value={settings.peel.radius}
-                display={settings.peel.radius.toFixed(3)}
-                onChange={(radius) =>
-                  updateSetting("peel", { ...settings.peel, radius })
-                }
-              />
-              <RangeRow
-                id="stiffness"
-                label={t.stiffness}
-                min={0.4}
-                max={0.95}
-                step={0.01}
-                value={settings.peel.stiffness}
-                display={`${Math.round(settings.peel.stiffness * 100)}%`}
-                onChange={(stiffness) =>
-                  updateSetting("peel", { ...settings.peel, stiffness })
-                }
-              />
-              <RangeRow
-                id="wind"
-                label={t.wind}
-                min={0}
-                max={1.5}
-                step={0.05}
-                value={settings.wind}
-                display={settings.wind.toFixed(2)}
-                onChange={(value) => updateSetting("wind", value)}
-              />
-              <RangeRow
-                id="peel-volume"
-                label={t.volume}
-                min={0}
-                max={1}
-                step={0.01}
-                value={settings.sound?.volume ?? DEFAULT_SETTINGS.sound.volume}
-                display={`${Math.round(
-                  (settings.sound?.volume ?? DEFAULT_SETTINGS.sound.volume) *
-                    100,
-                )}%`}
-                onChange={(volume) =>
-                  updateSetting("sound", {
-                    enabled: settings.sound?.enabled ?? true,
-                    volume,
-                  })
-                }
-              />
-            </div>
+            <ControlSection title={t.peel}>
+                <div className="range-stack">
+                  <RangeRow
+                    id="curl-radius"
+                    label={t.curlRadius}
+                    min={0.08}
+                    max={0.2}
+                    step={0.005}
+                    value={settings.peel.radius}
+                    display={settings.peel.radius.toFixed(3)}
+                    onChange={(radius) =>
+                      updateSetting("peel", { ...settings.peel, radius })
+                    }
+                  />
+                  <RangeRow
+                    id="stiffness"
+                    label={t.stiffness}
+                    min={0.4}
+                    max={0.95}
+                    step={0.01}
+                    value={settings.peel.stiffness}
+                    display={`${Math.round(settings.peel.stiffness * 100)}%`}
+                    onChange={(stiffness) =>
+                      updateSetting("peel", { ...settings.peel, stiffness })
+                    }
+                  />
+                  <RangeRow
+                    id="wind"
+                    label={t.wind}
+                    min={0}
+                    max={1.5}
+                    step={0.05}
+                    value={settings.wind}
+                    display={settings.wind.toFixed(2)}
+                    onChange={(value) => updateSetting("wind", value)}
+                  />
+                  <RangeRow
+                    id="peel-volume"
+                    label={t.volume}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.sound?.volume ?? DEFAULT_SETTINGS.sound.volume}
+                    display={`${Math.round(
+                      (settings.sound?.volume ?? DEFAULT_SETTINGS.sound.volume) *
+                        100,
+                    )}%`}
+                    onChange={(volume) =>
+                      updateSetting("sound", {
+                        enabled: settings.sound?.enabled ?? true,
+                        volume,
+                      })
+                    }
+                  />
+                </div>
+            </ControlSection>
 
-            <div className="section-divider" />
-            <div className="section-heading">
-              <h3>{t.material}</h3>
-              <span>Light</span>
-            </div>
-            <div className="range-stack">
-              <RangeRow
-                id="shadow-opacity"
-                label={t.shadowOpacity}
-                min={0}
-                max={0.5}
-                step={0.01}
-                value={settings.shadow.opacity}
-                display={settings.shadow.opacity.toFixed(2)}
-                onChange={(opacity) =>
-                  updateSetting("shadow", { ...settings.shadow, opacity })
-                }
-              />
-              <RangeRow
-                id="shadow-blur"
-                label={t.shadowBlur}
-                min={4}
-                max={42}
-                step={1}
-                value={settings.shadow.blur}
-                display={`${settings.shadow.blur}px`}
-                onChange={(blur) =>
-                  updateSetting("shadow", { ...settings.shadow, blur })
-                }
-              />
-              <RangeRow
-                id="back-gloss"
-                label={t.backGloss}
-                min={0}
-                max={1}
-                step={0.01}
-                value={settings.back.gloss}
-                display={`${Math.round(settings.back.gloss * 100)}%`}
-                onChange={(gloss) =>
-                  updateSetting("back", { ...settings.back, gloss })
-                }
-              />
+            <ControlSection title={t.material}>
+                <div className="range-stack">
+                  <RangeRow
+                    id="shadow-opacity"
+                    label={t.shadowOpacity}
+                    min={0}
+                    max={0.5}
+                    step={0.01}
+                    value={settings.shadow.opacity}
+                    display={settings.shadow.opacity.toFixed(2)}
+                    onChange={(opacity) =>
+                      updateSetting("shadow", { ...settings.shadow, opacity })
+                    }
+                  />
+                  <RangeRow
+                    id="shadow-blur"
+                    label={t.shadowBlur}
+                    min={4}
+                    max={42}
+                    step={1}
+                    value={settings.shadow.blur}
+                    display={`${settings.shadow.blur}px`}
+                    onChange={(blur) =>
+                      updateSetting("shadow", { ...settings.shadow, blur })
+                    }
+                  />
+                  <RangeRow
+                    id="back-gloss"
+                    label={t.backGloss}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.back.gloss}
+                    display={`${Math.round(settings.back.gloss * 100)}%`}
+                    onChange={(gloss) =>
+                      updateSetting("back", { ...settings.back, gloss })
+                    }
+                  />
+                </div>
+            </ControlSection>
+              </div>
             </div>
           </div>
 

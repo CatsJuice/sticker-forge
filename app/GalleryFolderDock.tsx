@@ -42,6 +42,7 @@ import type {
 } from "./GalleryCanvas";
 import { GalleryFolder } from "./GalleryFolder";
 import { useSpringValue } from "./gallery-spring";
+import { ColorPicker } from "./ColorPicker";
 
 type GalleryFolderDockProps = {
   folders: GalleryFolderRecord[];
@@ -416,16 +417,16 @@ function FolderEditMenu({
       }}
       onClick={(event) => event.stopPropagation()}
     >
-      <label className="gallery-folder-edit-menu-color">
-        <span className="gallery-folder-edit-menu-swatch" style={{ background: color }} />
+      <ColorPicker
+        className="gallery-folder-edit-menu-color"
+        swatchClassName="gallery-folder-edit-menu-swatch"
+        swatchPosition="start"
+        value={color}
+        onChange={onColorChange}
+        label={colorLabel}
+      >
         <span>{colorLabel}</span>
-        <input
-          type="color"
-          value={color}
-          aria-label={colorLabel}
-          onChange={(event) => onColorChange(event.target.value)}
-        />
-      </label>
+      </ColorPicker>
       <div className="gallery-folder-edit-delete-viewport">
         <button
           className="gallery-folder-edit-menu-delete"

@@ -100,8 +100,13 @@ function applyMaterialPreview(
   if (["glossy", "reflective", "spot-uv"].includes(resolved.type)) {
     const sheen = context.createLinearGradient(0, height, width, 0);
     sheen.addColorStop(0.25, "rgba(255,255,255,0)");
-    sheen.addColorStop(0.48, `rgba(255,255,255,${0.28 * amount})`);
-    sheen.addColorStop(0.58, `rgba(255,255,255,${0.08 * amount})`);
+    sheen.addColorStop(
+      0.46,
+      `rgba(255,255,255,${
+        (resolved.type === "reflective" ? 0.7 : 0.44) * amount
+      })`,
+    );
+    sheen.addColorStop(0.58, `rgba(255,255,255,${0.14 * amount})`);
     sheen.addColorStop(0.78, "rgba(255,255,255,0)");
     context.fillStyle = sheen;
     context.fillRect(0, 0, width, height);
@@ -116,13 +121,13 @@ function applyMaterialPreview(
     context.fillStyle = rainbow;
     context.fillRect(0, 0, width, height);
   } else if (resolved.type === "metallic") {
-    context.globalAlpha = 0.32 * amount;
+    context.globalAlpha = 0.58 * amount;
     context.fillStyle = resolved.tint;
     context.fillRect(0, 0, width, height);
     const foil = context.createLinearGradient(0, 0, width, height);
-    foil.addColorStop(0, "rgba(255,255,255,0.42)");
-    foil.addColorStop(0.5, "rgba(0,0,0,0.12)");
-    foil.addColorStop(1, "rgba(255,255,255,0.28)");
+    foil.addColorStop(0, "rgba(255,255,255,0.58)");
+    foil.addColorStop(0.48, "rgba(0,0,0,0.28)");
+    foil.addColorStop(1, "rgba(255,255,255,0.44)");
     context.fillStyle = foil;
     context.fillRect(0, 0, width, height);
   } else if (resolved.type === "pearlescent" || resolved.type === "lenticular") {
@@ -130,15 +135,19 @@ function applyMaterialPreview(
     tint.addColorStop(0, resolved.tint);
     tint.addColorStop(0.5, "rgba(255,255,255,0.08)");
     tint.addColorStop(1, resolved.secondaryTint);
-    context.globalAlpha = (resolved.type === "lenticular" ? 0.28 : 0.2) * amount;
+    context.globalAlpha = (resolved.type === "lenticular" ? 0.48 : 0.38) * amount;
     context.fillStyle = tint;
     context.fillRect(0, 0, width, height);
   } else if (resolved.type === "kraft") {
-    context.globalAlpha = 0.34 * amount;
+    context.globalAlpha = 0.62 * amount;
     context.fillStyle = "#9f6b38";
     context.fillRect(0, 0, width, height);
+  } else if (resolved.type === "paper") {
+    context.globalAlpha = 0.16 * amount;
+    context.fillStyle = "#d8c69e";
+    context.fillRect(0, 0, width, height);
   } else if (resolved.type === "clear" || resolved.type === "frosted") {
-    context.globalAlpha = (resolved.type === "clear" ? 0.1 : 0.18) * amount;
+    context.globalAlpha = (resolved.type === "clear" ? 0.2 : 0.42) * amount;
     context.fillStyle = resolved.tint;
     context.fillRect(0, 0, width, height);
   }
@@ -158,7 +167,13 @@ function applyMaterialPreview(
       const y = random() * height;
       const bright = random() > 0.5;
       context.globalAlpha =
-        (resolved.type === "glitter" ? 0.38 : 0.055) * amount * random();
+        (resolved.type === "glitter"
+          ? 0.38
+          : resolved.type === "matte"
+            ? 0.12
+            : 0.085) *
+        amount *
+        random();
       context.fillStyle = bright ? "#ffffff" : "#34281f";
       const size =
         resolved.type === "glitter"
@@ -168,6 +183,18 @@ function applyMaterialPreview(
     }
   }
   context.restore();
+
+  if (resolved.type === "clear" || resolved.type === "frosted") {
+    context.save();
+    context.globalCompositeOperation = "destination-in";
+    context.globalAlpha =
+      resolved.type === "clear"
+        ? 1 - amount * 0.52
+        : 1 - amount * 0.25;
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.restore();
+  }
 }
 
 /**

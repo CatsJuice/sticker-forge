@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
+test("keeps the desktop canvas fullscreen behind the floating controls", async () => {
+  const styles = await readFile(
+    new URL("../app/globals.css", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    styles,
+    /\.stage-card\s*\{[^}]*position: fixed;[^}]*inset: 0;/s,
+  );
+  assert.match(
+    styles,
+    /@media \(min-width: 621px\)[\s\S]*?\.studio-shell\[data-panel-open="true"\] \.sticker-stage\s*\{[^}]*left: calc\(-1 \* var\(--controls-reserve\)\)/,
+  );
+});
+
 test("renders the gallery through one shared WebGL canvas", async () => {
   const [gallery, renderer] = await Promise.all([
     readFile(new URL("../app/GalleryCanvas.tsx", import.meta.url), "utf8"),

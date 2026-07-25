@@ -1195,15 +1195,25 @@ body {
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  transition: right 320ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.studio-shell[data-panel-open="true"] .stage-card {
-  right: var(--controls-reserve);
 }
 
 .sticker-stage {
   inset: 0;
+}
+
+@media (min-width: 621px) {
+  .sticker-stage {
+    transition: left 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .studio-shell[data-panel-open="true"] .sticker-stage {
+    /*
+     * Keep the canvas covering the viewport beneath the floating panel, while
+     * centering its world origin in the unobscured area. Extending the canvas
+     * left by the full reserve moves its center left by half that amount.
+     */
+    left: calc(-1 * var(--controls-reserve));
+  }
 }
 
 .panel-toggle {
@@ -3176,6 +3186,13 @@ body {
 }
 
 .gallery-folder-dock::before {
+  --gallery-dock-vertical-mask: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.16) 18%,
+    rgba(0, 0, 0, 0.58) 56%,
+    #000 100%
+  );
   position: absolute;
   z-index: 0;
   top: -124px;
@@ -3192,21 +3209,33 @@ body {
   );
   -webkit-backdrop-filter: blur(15px) saturate(1.08);
   backdrop-filter: blur(15px) saturate(1.08);
-  -webkit-mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.16) 18%,
-    rgba(0, 0, 0, 0.58) 56%,
-    #000 100%
-  );
-  mask-image: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 0, 0, 0.16) 18%,
-    rgba(0, 0, 0, 0.58) 56%,
-    #000 100%
-  );
+  -webkit-mask-image: var(--gallery-dock-vertical-mask);
+  mask-image: var(--gallery-dock-vertical-mask);
   pointer-events: none;
+}
+
+@media (min-width: 621px) {
+  .studio-shell[data-panel-open="true"][data-gallery-open="false"]
+    .gallery-folder-dock::before {
+    -webkit-mask-image:
+      var(--gallery-dock-vertical-mask),
+      linear-gradient(
+        to right,
+        #000 0%,
+        #000 calc(100% - 140px),
+        transparent 100%
+      );
+    -webkit-mask-composite: source-in;
+    mask-image:
+      var(--gallery-dock-vertical-mask),
+      linear-gradient(
+        to right,
+        #000 0%,
+        #000 calc(100% - 140px),
+        transparent 100%
+      );
+    mask-composite: intersect;
+  }
 }
 
 .studio-shell[data-panel-open="true"][data-gallery-open="false"]

@@ -16,7 +16,10 @@ export type ExportFrame = {
 
 export type ExportFrameProcessingOptions = {
   onProgress?: (progress: number) => void;
-  transformFrame?: (frame: ExportFrame, index: number) => ExportFrame;
+  transformFrame?: (
+    frame: ExportFrame,
+    index: number,
+  ) => ExportFrame | Promise<ExportFrame>;
 };
 
 export type PcmAudioTrack = {
@@ -224,9 +227,9 @@ export async function encodeTransparentGif(
   if (!frames.length) throw new Error("No frames were provided for GIF export.");
   const gif = GIFEncoder({ initialCapacity: 1024 * 1024 });
   for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
-    const frame =
-      options.transformFrame?.(frames[frameIndex], frameIndex) ??
-      frames[frameIndex];
+    const frame = options.transformFrame
+      ? await options.transformFrame(frames[frameIndex], frameIndex)
+      : frames[frameIndex];
     const gifRgba = prepareGifAlpha(
       frame.rgba,
       frame.width,
@@ -349,7 +352,9 @@ export async function encodeTransparentApng(
   options: ExportFrameProcessingOptions = {},
 ) {
   if (!frames.length) throw new Error("No frames were provided for APNG export.");
-  const firstFrame = options.transformFrame?.(frames[0], 0) ?? frames[0];
+  const firstFrame = options.transformFrame
+    ? await options.transformFrame(frames[0], 0)
+    : frames[0];
   const { width, height } = firstFrame;
   const signature = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const header = new Uint8Array(13);
@@ -375,8 +380,9 @@ export async function encodeTransparentApng(
     const frame =
       frameIndex === 0
         ? firstFrame
-        : (options.transformFrame?.(frames[frameIndex], frameIndex) ??
-          frames[frameIndex]);
+        : options.transformFrame
+          ? await options.transformFrame(frames[frameIndex], frameIndex)
+          : frames[frameIndex];
     if (
       frame.width !== width ||
       frame.height !== height ||
@@ -667,7 +673,9 @@ export async function encodeTransparentMov(
   options: ExportFrameProcessingOptions = {},
 ) {
   if (!frames.length) throw new Error("No frames were provided for MOV export.");
-  const firstFrame = options.transformFrame?.(frames[0], 0) ?? frames[0];
+  const firstFrame = options.transformFrame
+    ? await options.transformFrame(frames[0], 0)
+    : frames[0];
   const width = firstFrame.width;
   const height = firstFrame.height;
   if (width % 2 !== 0 || height % 2 !== 0) {
@@ -703,7 +711,9 @@ export async function encodeTransparentMov(
       const frame =
         index === 0
           ? firstFrame
-          : (options.transformFrame?.(frames[index], index) ?? frames[index]);
+          : options.transformFrame
+            ? await options.transformFrame(frames[index], index)
+            : frames[index];
       if (
         frame.width !== width ||
         frame.height !== height ||

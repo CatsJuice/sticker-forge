@@ -192,6 +192,21 @@ export interface StickerPlaybackMotion {
   target: StickerPoint;
 }
 
+export interface StickerRenderSnapshot {
+  readonly progress: number;
+  readonly peelDepth: number;
+  readonly peelRadius: number;
+  readonly detachedTension: number;
+  readonly origin: StickerPoint;
+  readonly direction: StickerPoint;
+  readonly position: StickerPoint;
+  readonly scale: StickerPoint;
+  readonly rotation: number;
+  readonly entranceSweep: number;
+  readonly entranceScaleProgress: number;
+  readonly time: number;
+}
+
 export interface PreparedStickerSource {
   /** Atomically installs the already decoded, outlined, and GPU-warmed source. */
   commit(): void;
@@ -219,6 +234,10 @@ export interface StickerInstance {
   reappear(): void;
   /** Increase the backing-buffer density without changing the logical layout. */
   setRenderScale(scale: number): void;
+  /** Capture the exact visual pose for deterministic high-resolution replay. */
+  getRenderSnapshot(): StickerRenderSnapshot;
+  /** Render a previously captured visual pose without advancing animation. */
+  setRenderSnapshot(snapshot: StickerRenderSnapshot): void;
   resize(): void;
   getState(): Readonly<StickerState>;
   destroy(): void;

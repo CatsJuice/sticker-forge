@@ -85,6 +85,33 @@ function createFrameScaler(outputScale: number) {
   };
 }
 
+function createEncodedFrameDecoder(encodedFrames: Blob[]) {
+  let canvas: OffscreenCanvas | null = null;
+
+  return async (frame: ExportFrame, index: number): Promise<ExportFrame> => {
+    const blob = encodedFrames[Math.min(index, encodedFrames.length - 1)];
+    if (!blob) throw new Error("An encoded export frame is missing.");
+    const bitmap = await createImageBitmap(blob);
+    try {
+      canvas ??= new OffscreenCanvas(frame.width, frame.height);
+      canvas.width = frame.width;
+      canvas.height = frame.height;
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("Offscreen canvas is unavailable.");
+      context.clearRect(0, 0, frame.width, frame.height);
+      context.drawImage(bitmap, 0, 0, frame.width, frame.height);
+      return {
+        ...frame,
+        rgba: new Uint8ClampedArray(
+          context.getImageData(0, 0, frame.width, frame.height).data,
+        ),
+      };
+    } finally {
+      bitmap.close();
+    }
+  };
+}
+
 function mimeTypeFor(format: StickerExportWorkerRequest["format"]) {
   if (format === "gif") return "image/gif";
   if (format === "apng") return "image/apng";
@@ -111,6 +138,9 @@ self.onmessage = async (
   try {
     report(0.01, "preparing");
     const scaleFrame = createFrameScaler(request.outputScale);
+    const transformFrame = request.encodedFrames?.length
+      ? createEncodedFrameDecoder(request.encodedFrames)
+      : scaleFrame;
     let blob: Blob;
 
     if (request.format === "png") {
@@ -134,10 +164,9 @@ self.onmessage = async (
       report(0.82, "encoding");
       blob = await canvas.convertToBlob({ type: "image/png" });
     } else {
-      const sampledFrames = resampleExportFrames(
-        request.frames,
-        request.frameRate,
-      );
+      const sampledFrames = request.encodedFrames?.length
+        ? request.frames
+        : resampleExportFrames(request.frames, request.frameRate);
       const frames = appendPlaybackInterval(
         sampledFrames,
         request.frameRate,
@@ -151,12 +180,12 @@ self.onmessage = async (
         blob = await encodeTransparentGif(frames, {
           includeShadow: request.gifShadow,
           onProgress,
-          transformFrame: scaleFrame,
+          transformFrame,
         });
       } else if (request.format === "apng") {
         blob = await encodeTransparentApng(frames, {
           onProgress,
-          transformFrame: scaleFrame,
+          transformFrame,
         });
       } else {
         blob = await encodeTransparentMov(
@@ -165,7 +194,7 @@ self.onmessage = async (
           request.audio,
           {
             onProgress,
-            transformFrame: scaleFrame,
+            transformFrame,
           },
         );
       }

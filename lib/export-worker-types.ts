@@ -7,6 +7,7 @@ export type StickerExportWorkerRequest = {
   id: string;
   format: StickerExportFormat;
   frames: ExportFrame[];
+  encodedFrames?: Blob[];
   frameRate: number;
   playbackInterval: number;
   outputScale: number;

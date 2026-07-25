@@ -320,14 +320,7 @@ class StickerRenderer implements StickerInstance {
         value: stickerMaterialTypeIndex(this.options.material.type),
       },
       uMaterialIntensity: { value: this.options.material.intensity },
-      uMaterialRoughness: { value: this.options.material.roughness },
       uMaterialScale: { value: this.options.material.scale },
-      uMaterialTint: {
-        value: colorFrom(this.options.material.tint, "#d8dde7"),
-      },
-      uMaterialSecondaryTint: {
-        value: colorFrom(this.options.material.secondaryTint, "#f2b7ff"),
-      },
       uMaterialSeed: { value: this.options.material.seed },
       uShadowColor: {
         value: colorFrom(this.options.shadow.color, "#191823"),
@@ -957,23 +950,10 @@ class StickerRenderer implements StickerInstance {
       0,
       1,
     );
-    this.uniforms.uMaterialRoughness.value = clamp(
-      this.options.material.roughness,
-      0,
-      1,
-    );
     this.uniforms.uMaterialScale.value = clamp(
       this.options.material.scale,
       0.2,
       4,
-    );
-    this.uniforms.uMaterialTint.value = colorFrom(
-      this.options.material.tint,
-      "#d8dde7",
-    );
-    this.uniforms.uMaterialSecondaryTint.value = colorFrom(
-      this.options.material.secondaryTint,
-      "#f2b7ff",
     );
     this.uniforms.uMaterialSeed.value = this.options.material.seed;
     this.uniforms.uWind.value = Math.max(0, this.options.wind);

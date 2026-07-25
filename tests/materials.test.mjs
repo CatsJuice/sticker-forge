@@ -9,15 +9,19 @@ async function source(path) {
 }
 
 const MATERIALS = [
+  "original",
+  "holographic",
+  "glitter",
+  "reflective",
+];
+
+const REMOVED_MATERIALS = [
   "satin",
   "matte",
   "glossy",
-  "holographic",
   "metallic",
-  "glitter",
   "paper",
   "kraft",
-  "reflective",
   "pearlescent",
   "clear",
   "frosted",
@@ -35,6 +39,10 @@ test("exposes every front material through the public options API", async () => 
     assert.match(types, new RegExp(`"${material.replace("-", "\\-")}"`));
     assert.match(declarations, new RegExp(`"${material.replace("-", "\\-")}"`));
   }
+  for (const material of REMOVED_MATERIALS) {
+    assert.ok(!types.includes(`| "${material}"`));
+    assert.ok(!declarations.includes(`| "${material}"`));
+  }
   assert.match(types, /material\?: StickerMaterialOptions/);
   assert.match(declarations, /material\?: StickerMaterialOptions/);
 });
@@ -49,10 +57,7 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   for (const name of [
     "uMaterialType",
     "uMaterialIntensity",
-    "uMaterialRoughness",
     "uMaterialScale",
-    "uMaterialTint",
-    "uMaterialSecondaryTint",
     "uMaterialSeed",
   ]) {
     assert.match(renderer, new RegExp(name));
@@ -60,6 +65,7 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     assert.match(shader, new RegExp(name));
   }
   assert.match(shader, /applyFrontMaterial/);
+  assert.match(shader, /if \(kind < 0\.5\) return base/);
   assert.match(gallery, /shader-backed face visible while idle/);
 });
 

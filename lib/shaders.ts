@@ -240,10 +240,7 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uLightSoftness;
   uniform float uMaterialType;
   uniform float uMaterialIntensity;
-  uniform float uMaterialRoughness;
   uniform float uMaterialScale;
-  uniform vec3 uMaterialTint;
-  uniform vec3 uMaterialSecondaryTint;
   uniform float uMaterialSeed;
   uniform vec3 uShadowColor;
   uniform float uShadowOpacity;
@@ -312,12 +309,14 @@ export const stickerFragmentShader = /* glsl */ `
     vec3 base,
     vec3 normal,
     vec3 viewDirection,
-    vec3 lightDirection,
     vec3 halfDirection
   ) {
     float kind = floor(uMaterialType + 0.5);
+    // The default path is deliberately a no-op so it is pixel-identical to
+    // Sticker Forge's front material before selectable finishes were added.
+    if (kind < 0.5) return base;
+
     float amount = clamp(uMaterialIntensity, 0.0, 1.0);
-    float roughness = clamp(uMaterialRoughness, 0.0, 1.0);
     float scale = max(uMaterialScale, 0.2);
     vec2 detailUv = vUv * scale;
     float facing = max(dot(normal, viewDirection), 0.0);
@@ -325,41 +324,10 @@ export const stickerFragmentShader = /* glsl */ `
     float edge = pow(1.0 - facing, 3.0);
     float grain = hash21(detailUv * 913.7 + uMaterialSeed * 71.3) - 0.5;
     float fineGrain = hash21(detailUv * 2471.0 + uMaterialSeed * 131.0);
-    float sharpSpec = pow(ndh, mix(120.0, 24.0, roughness));
-    float broadSpec = pow(ndh, mix(34.0, 7.0, roughness));
-    float diagonalCoordinate =
-      dot(vUv - 0.5, normalize(vec2(0.72, 1.0)))
-      + normal.x * 0.34
-      - normal.y * 0.18;
-    float movingBand = exp(-pow(diagonalCoordinate * 4.2, 2.0));
+    float sharpSpec = pow(ndh, 72.0);
 
-    // Satin is the neutral baseline.
-    if (kind < 0.5) {
-      vec3 satin = base * (0.985 + grain * 0.012 * amount);
-      satin = screenBlend(
-        satin,
-        vec3((movingBand * 0.1 + broadSpec * 0.08 + edge * 0.025) * amount)
-      );
-      return satin;
-    }
-    // Matte vinyl.
-    if (kind < 1.5) {
-      float luminance = dot(base, vec3(0.299, 0.587, 0.114));
-      vec3 chalky = mix(base, vec3(luminance), 0.075 * amount);
-      chalky = mix(chalky, vec3(0.965), 0.045 * amount);
-      return chalky * (0.965 + grain * 0.085 * amount)
-        + broadSpec * 0.008 * amount;
-    }
-    // Gloss vinyl.
-    if (kind < 2.5) {
-      float gloss =
-        sharpSpec * 0.58
-        + movingBand * 0.34
-        + edge * 0.11;
-      return screenBlend(base, vec3(gloss * amount));
-    }
     // Diffractive holographic film.
-    if (kind < 3.5) {
+    if (kind < 1.5) {
       float phase =
         dot(vUv - 0.5, vec2(1.15, 0.72)) * 2.8
         + dot(normal.xy, vec2(1.7, -1.2))
@@ -370,22 +338,9 @@ export const stickerFragmentShader = /* glsl */ `
       return mix(base, screenBlend(base, rainbow * band), amount * 0.58)
         + sharpSpec * rainbow * amount * 0.26;
     }
-    // Metallic foil.
-    if (kind < 4.5) {
-      float luminance = dot(base, vec3(0.299, 0.587, 0.114));
-      float foilBand =
-        0.58
-        + movingBand * 0.65
-        + 0.13 * sin((diagonalCoordinate + grain * 0.05) * 31.0);
-      vec3 printedFoil =
-        uMaterialTint
-        * mix(0.3 + luminance * 0.52, foilBand, 0.62);
-      vec3 foil = mix(base, printedFoil, amount * 0.86);
-      return foil
-        + (sharpSpec * 0.88 + edge * 0.14) * uMaterialTint * amount;
-    }
+
     // Glitter laminate.
-    if (kind < 5.5) {
+    if (kind < 2.5) {
       vec2 cell = floor(detailUv * 115.0);
       float flake = hash21(cell + uMaterialSeed * 97.0);
       float orientation = hash21(cell.yx + uMaterialSeed * 43.0);
@@ -399,97 +354,12 @@ export const stickerFragmentShader = /* glsl */ `
         + sparkleColor * sparkle * amount * 1.35
         + sharpSpec * 0.08 * amount;
     }
-    // Uncoated paper.
-    if (kind < 6.5) {
-      float longFiber =
-        sin(detailUv.y * 920.0 + sin(detailUv.x * 47.0) * 3.1);
-      float crossFiber =
-        sin(detailUv.x * 370.0 + sin(detailUv.y * 29.0) * 1.7);
-      float fiber = longFiber * 0.52 + crossFiber * 0.18 + grain * 0.75;
-      vec3 paper = mix(base, base * vec3(1.04, 0.995, 0.9), amount * 0.32);
-      paper = mix(paper, vec3(0.94, 0.91, 0.83), 0.075 * amount);
-      return paper * (0.97 + fiber * 0.075 * amount);
-    }
-    // Kraft stock.
-    if (kind < 7.5) {
-      float fiber =
-        sin(detailUv.y * 610.0 + grain * 5.0) * 0.5
-        + sin(detailUv.x * 97.0) * 0.2
-        + grain;
-      vec3 kraftStock = vec3(0.63, 0.39, 0.19);
-      float printLuminance = dot(base, vec3(0.299, 0.587, 0.114));
-      vec3 kraftInk = mix(
-        base * kraftStock,
-        kraftStock * (0.32 + printLuminance * 0.86),
-        0.52
-      );
-      return mix(base, kraftInk, amount * 0.9)
-        * (0.96 + fiber * 0.095 * amount);
-    }
+
     // Retroreflective film.
-    if (kind < 8.5) {
-      float retro = pow(facing, mix(38.0, 12.0, roughness));
-      float beads = 0.78 + fineGrain * 0.28;
-      return screenBlend(base, vec3(retro * beads * amount * 0.9))
-        + edge * 0.025 * amount;
-    }
-    // Pearlescent film.
-    if (kind < 9.5) {
-      float phase =
-        facing * 1.8
-        + dot(normal.xy, vec2(0.9, -0.6))
-        + diagonalCoordinate * 1.4
-        + grain * 0.08;
-      vec3 pearl = mix(
-        uMaterialTint,
-        uMaterialSecondaryTint,
-        0.5 + 0.5 * sin(phase * 3.14159265)
-      );
-      vec3 pearlLayer = pearl * (0.48 + movingBand * 0.36 + edge * 0.5);
-      return mix(base, screenBlend(base, pearlLayer), amount * 0.68)
-        + broadSpec * pearl * amount * 0.28;
-    }
-    // Clear vinyl.
-    if (kind < 10.5) {
-      vec3 clearBase = mix(base, base * uMaterialTint, amount * 0.28);
-      float plasticBand = movingBand * 0.42 + sharpSpec * 0.38 + edge * 0.2;
-      return clearBase * mix(1.0, 0.88, amount)
-        + uMaterialTint * plasticBand * amount;
-    }
-    // Frosted translucent vinyl.
-    if (kind < 11.5) {
-      float luminance = dot(base, vec3(0.299, 0.587, 0.114));
-      vec3 milk = mix(base, vec3(luminance), amount * 0.2);
-      milk = mix(milk, uMaterialTint, amount * 0.44);
-      return milk * (0.91 + grain * 0.15 * amount)
-        + broadSpec * 0.09 * amount;
-    }
-    // Spot UV: light artwork regions receive a raised gloss coat.
-    if (kind < 12.5) {
-      float luminance = dot(base, vec3(0.299, 0.587, 0.114));
-      float chroma =
-        max(max(base.r, base.g), base.b) - min(min(base.r, base.g), base.b);
-      float inkMask = smoothstep(
-        0.08,
-        0.52,
-        chroma + (1.0 - luminance) * 0.62
-      );
-      float varnish =
-        (sharpSpec * 0.72 + movingBand * 0.26 + edge * 0.08)
-        * inkMask
-        * amount;
-      vec3 coated = screenBlend(base, vec3(varnish));
-      coated *= 1.0 - inkMask * grain * 0.025 * amount;
-      return coated;
-    }
-    // Lenticular ridges shift between two color responses with view angle.
-    float ridgePhase = (vUv.x * scale * 150.0) + normal.x * 42.0;
-    float ridge = sin(ridgePhase);
-    float viewShift = smoothstep(-0.12, 0.12, ridge + normal.x * 2.6);
-    vec3 shifted = mix(uMaterialTint, uMaterialSecondaryTint, viewShift);
-    float ridgeHighlight = pow(0.5 + 0.5 * cos(ridgePhase), 10.0);
-    return mix(base, base * shifted * 1.45, amount * 0.72)
-      + (ridgeHighlight * 0.22 + sharpSpec * 0.2) * amount;
+    float retro = pow(facing, 22.0);
+    float beads = 0.78 + fineGrain * 0.28;
+    return screenBlend(base, vec3(retro * beads * amount * 0.9))
+      + edge * 0.025 * amount;
   }
 
   float interactionHitArea(vec2 uv, float centerAlpha, float radius) {
@@ -680,7 +550,6 @@ export const stickerFragmentShader = /* glsl */ `
       neutralFrontColor,
       normal,
       viewDirection,
-      lightDirection,
       halfDirection
     );
     frontColor = mix(
@@ -796,13 +665,7 @@ export const stickerFragmentShader = /* glsl */ `
       );
     }
 
-    float materialAlpha = printSample.a;
-    if (frontMix > 0.5 && uMaterialType > 9.5 && uMaterialType < 10.5) {
-      materialAlpha *= mix(1.0, 0.42, clamp(uMaterialIntensity, 0.0, 1.0));
-    } else if (frontMix > 0.5 && uMaterialType > 10.5 && uMaterialType < 11.5) {
-      materialAlpha *= mix(1.0, 0.7, clamp(uMaterialIntensity, 0.0, 1.0));
-    }
-    gl_FragColor = vec4(color, materialAlpha * uOpacity);
+    gl_FragColor = vec4(color, printSample.a * uOpacity);
     #include <colorspace_fragment>
   }
 `;

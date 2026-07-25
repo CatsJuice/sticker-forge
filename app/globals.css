@@ -1424,10 +1424,6 @@ input[type="range"] {
   transform: translateY(-50%);
 }
 
-.material-color-row {
-  margin-bottom: 16px;
-}
-
 .range-row {
   display: grid;
   gap: 8px;

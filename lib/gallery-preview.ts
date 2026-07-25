@@ -91,21 +91,16 @@ function applyMaterialPreview(
     ...DEFAULT_STICKER_OPTIONS.material,
     ...material,
   };
-  if (resolved.type === "satin" || resolved.intensity <= 0) return;
+  if (resolved.type === "original" || resolved.intensity <= 0) return;
 
   const amount = Math.min(1, Math.max(0, resolved.intensity));
   context.save();
   context.globalCompositeOperation = "source-atop";
 
-  if (["glossy", "reflective", "spot-uv"].includes(resolved.type)) {
+  if (resolved.type === "reflective") {
     const sheen = context.createLinearGradient(0, height, width, 0);
     sheen.addColorStop(0.25, "rgba(255,255,255,0)");
-    sheen.addColorStop(
-      0.46,
-      `rgba(255,255,255,${
-        (resolved.type === "reflective" ? 0.7 : 0.44) * amount
-      })`,
-    );
+    sheen.addColorStop(0.46, `rgba(255,255,255,${0.7 * amount})`);
     sheen.addColorStop(0.58, `rgba(255,255,255,${0.14 * amount})`);
     sheen.addColorStop(0.78, "rgba(255,255,255,0)");
     context.fillStyle = sheen;
@@ -120,39 +115,9 @@ function applyMaterialPreview(
     rainbow.addColorStop(1, `rgba(255,80,132,${0.2 * amount})`);
     context.fillStyle = rainbow;
     context.fillRect(0, 0, width, height);
-  } else if (resolved.type === "metallic") {
-    context.globalAlpha = 0.58 * amount;
-    context.fillStyle = resolved.tint;
-    context.fillRect(0, 0, width, height);
-    const foil = context.createLinearGradient(0, 0, width, height);
-    foil.addColorStop(0, "rgba(255,255,255,0.58)");
-    foil.addColorStop(0.48, "rgba(0,0,0,0.28)");
-    foil.addColorStop(1, "rgba(255,255,255,0.44)");
-    context.fillStyle = foil;
-    context.fillRect(0, 0, width, height);
-  } else if (resolved.type === "pearlescent" || resolved.type === "lenticular") {
-    const tint = context.createLinearGradient(0, 0, width, 0);
-    tint.addColorStop(0, resolved.tint);
-    tint.addColorStop(0.5, "rgba(255,255,255,0.08)");
-    tint.addColorStop(1, resolved.secondaryTint);
-    context.globalAlpha = (resolved.type === "lenticular" ? 0.48 : 0.38) * amount;
-    context.fillStyle = tint;
-    context.fillRect(0, 0, width, height);
-  } else if (resolved.type === "kraft") {
-    context.globalAlpha = 0.62 * amount;
-    context.fillStyle = "#9f6b38";
-    context.fillRect(0, 0, width, height);
-  } else if (resolved.type === "paper") {
-    context.globalAlpha = 0.16 * amount;
-    context.fillStyle = "#d8c69e";
-    context.fillRect(0, 0, width, height);
-  } else if (resolved.type === "clear" || resolved.type === "frosted") {
-    context.globalAlpha = (resolved.type === "clear" ? 0.2 : 0.42) * amount;
-    context.fillStyle = resolved.tint;
-    context.fillRect(0, 0, width, height);
   }
 
-  if (["matte", "paper", "kraft", "frosted", "glitter"].includes(resolved.type)) {
+  if (resolved.type === "glitter") {
     let state = Math.floor(resolved.seed * 2147483647) || 1;
     const random = () => {
       state = (state * 48271) % 2147483647;
@@ -160,41 +125,19 @@ function applyMaterialPreview(
     };
     const count = Math.min(
       2400,
-      Math.round((width * height) / (resolved.type === "glitter" ? 520 : 240)),
+      Math.round((width * height) / 520),
     );
     for (let index = 0; index < count; index += 1) {
       const x = random() * width;
       const y = random() * height;
       const bright = random() > 0.5;
-      context.globalAlpha =
-        (resolved.type === "glitter"
-          ? 0.38
-          : resolved.type === "matte"
-            ? 0.12
-            : 0.085) *
-        amount *
-        random();
+      context.globalAlpha = 0.38 * amount * random();
       context.fillStyle = bright ? "#ffffff" : "#34281f";
-      const size =
-        resolved.type === "glitter"
-          ? 0.7 + random() * 1.8
-          : 0.35 + random() * 0.75;
-      context.fillRect(x, y, size, resolved.type === "paper" ? size * 0.3 : size);
+      const size = 0.7 + random() * 1.8;
+      context.fillRect(x, y, size, size);
     }
   }
   context.restore();
-
-  if (resolved.type === "clear" || resolved.type === "frosted") {
-    context.save();
-    context.globalCompositeOperation = "destination-in";
-    context.globalAlpha =
-      resolved.type === "clear"
-        ? 1 - amount * 0.52
-        : 1 - amount * 0.25;
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, width, height);
-    context.restore();
-  }
 }
 
 /**

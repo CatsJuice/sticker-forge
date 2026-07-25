@@ -293,9 +293,6 @@ const UI = {
     frontMaterial: "正面材质",
     materialIntensity: "材质强度",
     materialDetail: "纹理尺寸",
-    materialRoughness: "表面粗糙度",
-    materialTint: "材质主色",
-    materialSecondaryTint: "材质辅色",
     copy: "复制嵌入代码",
     export: "导出",
     addToGallery: "添加到 Gallery",
@@ -390,9 +387,6 @@ const UI = {
     frontMaterial: "Front material",
     materialIntensity: "Material intensity",
     materialDetail: "Detail scale",
-    materialRoughness: "Surface roughness",
-    materialTint: "Material tint",
-    materialSecondaryTint: "Secondary tint",
     copy: "Copy embed code",
     export: "Export",
     addToGallery: "Add to Gallery",
@@ -432,12 +426,9 @@ const DEFAULT_SETTINGS: StudioSettings = {
   sound: { enabled: true, volume: 0.68 },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
   material: {
-    type: "satin",
-    intensity: 0.72,
-    roughness: 0.38,
+    type: "original",
+    intensity: 0.86,
     scale: 1,
-    tint: "#d8dde7",
-    secondaryTint: "#f2b7ff",
     seed: 0.37,
   },
   tilt: -3,
@@ -504,36 +495,16 @@ function lightingPresetFor(
 
 const MATERIAL_LABELS: Record<Locale, Record<StickerMaterialType, string>> = {
   zh: {
-    satin: "缎面",
-    matte: "哑光",
-    glossy: "光面",
+    original: "原始材质",
     holographic: "镭射 / 全息",
-    metallic: "金属箔",
     glitter: "闪粉",
-    paper: "纸质",
-    kraft: "牛皮纸",
     reflective: "反光膜",
-    pearlescent: "珠光",
-    clear: "透明贴",
-    frosted: "磨砂透明",
-    "spot-uv": "局部 UV / 凸印",
-    lenticular: "光栅",
   },
   en: {
-    satin: "Satin",
-    matte: "Matte",
-    glossy: "Glossy",
+    original: "Original",
     holographic: "Holographic",
-    metallic: "Metallic foil",
     glitter: "Glitter",
-    paper: "Paper",
-    kraft: "Kraft paper",
     reflective: "Reflective",
-    pearlescent: "Pearlescent",
-    clear: "Clear vinyl",
-    frosted: "Frosted clear",
-    "spot-uv": "Spot UV / embossed",
-    lenticular: "Lenticular",
   },
 };
 
@@ -541,20 +512,10 @@ const MATERIAL_PRESETS: Record<
   StickerMaterialType,
   Required<StickerMaterialOptions>
 > = {
-  satin: { type: "satin", intensity: 0.72, roughness: 0.38, scale: 1, tint: "#d8dde7", secondaryTint: "#f2b7ff", seed: 0.37 },
-  matte: { type: "matte", intensity: 0.8, roughness: 0.9, scale: 1, tint: "#e7e7e7", secondaryTint: "#ffffff", seed: 0.21 },
-  glossy: { type: "glossy", intensity: 0.88, roughness: 0.08, scale: 1, tint: "#ffffff", secondaryTint: "#dcecff", seed: 0.43 },
-  holographic: { type: "holographic", intensity: 0.86, roughness: 0.16, scale: 1, tint: "#d7e8ff", secondaryTint: "#ffbfe8", seed: 0.61 },
-  metallic: { type: "metallic", intensity: 0.82, roughness: 0.18, scale: 1, tint: "#d7dbe2", secondaryTint: "#ffffff", seed: 0.31 },
-  glitter: { type: "glitter", intensity: 0.9, roughness: 0.28, scale: 1, tint: "#f4e3ff", secondaryTint: "#b8edff", seed: 0.77 },
-  paper: { type: "paper", intensity: 0.78, roughness: 0.96, scale: 1, tint: "#f4efe4", secondaryTint: "#ffffff", seed: 0.19 },
-  kraft: { type: "kraft", intensity: 0.82, roughness: 1, scale: 1, tint: "#a8713f", secondaryTint: "#e2bc86", seed: 0.53 },
-  reflective: { type: "reflective", intensity: 0.9, roughness: 0.12, scale: 1, tint: "#f7fbff", secondaryTint: "#ffffff", seed: 0.67 },
-  pearlescent: { type: "pearlescent", intensity: 0.76, roughness: 0.24, scale: 1, tint: "#bde9ff", secondaryTint: "#ffc8ef", seed: 0.29 },
-  clear: { type: "clear", intensity: 0.72, roughness: 0.08, scale: 1, tint: "#d9f4ff", secondaryTint: "#ffffff", seed: 0.47 },
-  frosted: { type: "frosted", intensity: 0.8, roughness: 0.88, scale: 1, tint: "#e6f4f6", secondaryTint: "#ffffff", seed: 0.73 },
-  "spot-uv": { type: "spot-uv", intensity: 0.9, roughness: 0.05, scale: 1, tint: "#ffffff", secondaryTint: "#dbe9ff", seed: 0.41 },
-  lenticular: { type: "lenticular", intensity: 0.82, roughness: 0.16, scale: 1, tint: "#a9dcff", secondaryTint: "#ffb7d9", seed: 0.59 },
+  original: { type: "original", intensity: 0.86, scale: 1, seed: 0.37 },
+  holographic: { type: "holographic", intensity: 0.86, scale: 1, seed: 0.61 },
+  glitter: { type: "glitter", intensity: 0.9, scale: 1, seed: 0.77 },
+  reflective: { type: "reflective", intensity: 0.9, scale: 1, seed: 0.67 },
 };
 
 function makeTextSource(
@@ -3668,23 +3629,6 @@ export function StickerForgeStudio() {
                     }
                   />
                   <RangeRow
-                    id="material-roughness"
-                    label={t.materialRoughness}
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={settings.material.roughness}
-                    display={`${Math.round(
-                      settings.material.roughness * 100,
-                    )}%`}
-                    onChange={(roughness) =>
-                      updateSetting("material", {
-                        ...settings.material,
-                        roughness,
-                      })
-                    }
-                  />
-                  <RangeRow
                     id="material-scale"
                     label={t.materialDetail}
                     min={0.4}
@@ -3699,36 +3643,6 @@ export function StickerForgeStudio() {
                       })
                     }
                   />
-                </div>
-                <div className="dual-color-row material-color-row">
-                  <ColorPicker
-                    className="compact-color"
-                    swatchClassName="compact-color-swatch"
-                    value={settings.material.tint}
-                    label={t.materialTint}
-                    onChange={(tint) =>
-                      updateSetting("material", {
-                        ...settings.material,
-                        tint,
-                      })
-                    }
-                  >
-                    <span>{t.materialTint}</span>
-                  </ColorPicker>
-                  <ColorPicker
-                    className="compact-color"
-                    swatchClassName="compact-color-swatch"
-                    value={settings.material.secondaryTint}
-                    label={t.materialSecondaryTint}
-                    onChange={(secondaryTint) =>
-                      updateSetting("material", {
-                        ...settings.material,
-                        secondaryTint,
-                      })
-                    }
-                  >
-                    <span>{t.materialSecondaryTint}</span>
-                  </ColorPicker>
                 </div>
                 </div>
                 <div className="range-stack">

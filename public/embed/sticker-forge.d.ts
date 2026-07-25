@@ -93,31 +93,17 @@ export interface StickerBackOptions {
 }
 
 export type StickerMaterialType =
-  | "satin"
-  | "matte"
-  | "glossy"
+  | "original"
   | "holographic"
-  | "metallic"
   | "glitter"
-  | "paper"
-  | "kraft"
-  | "reflective"
-  | "pearlescent"
-  | "clear"
-  | "frosted"
-  | "spot-uv"
-  | "lenticular";
+  | "reflective";
 
 export interface StickerMaterialOptions {
   type?: StickerMaterialType;
   /** Overall strength of the material response, from 0 to 1. */
   intensity?: number;
-  /** Surface roughness, from 0 (mirror-like) to 1 (diffuse). */
-  roughness?: number;
   /** Relative size of procedural surface detail. */
   scale?: number;
-  tint?: string;
-  secondaryTint?: string;
   /** Stable procedural variation seed. */
   seed?: number;
 }

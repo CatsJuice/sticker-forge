@@ -84,7 +84,6 @@ exported and returns immediately (`void`).
     material: {
       type: "holographic",
       intensity: 0.86,
-      roughness: 0.16,
       scale: 1,
     },
     tilt: -3,
@@ -224,16 +223,15 @@ instance. A disconnected `<sticker-forge>` cleans itself up automatically.
 
 ### Front materials
 
-Set `material.type` to `satin`, `matte`, `glossy`, `holographic`, `metallic`,
-`glitter`, `paper`, `kraft`, `reflective`, `pearlescent`, `clear`, `frosted`,
-`spot-uv`, or `lenticular`. Every material is procedural, responds to the live
-surface normal while peeling, and remains deterministic in Gallery previews and
-recorded exports.
+Set `material.type` to `original`, `holographic`, `glitter`, or `reflective`.
+`original` is the default and uses the same front rendering as Sticker Forge
+before selectable finishes were introduced. The other three finishes are
+procedural, respond to the live surface normal while peeling, and remain
+deterministic in Gallery previews and recorded exports.
 
-Use `material.intensity` and `material.roughness` in the `0..1` range,
-`material.scale` to resize procedural detail, and `tint`/`secondaryTint` for
-color-responsive finishes. `material.seed` keeps paper fibers, glitter flakes,
-and similar detail stable between frames.
+Use `material.intensity` in the `0..1` range and `material.scale` to resize
+procedural detail. `material.seed` keeps glitter flakes and similar detail
+stable between frames.
 
 ## Rendering notes
 

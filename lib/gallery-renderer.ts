@@ -253,17 +253,8 @@ class GalleryStickerMesh {
       uMaterialIntensity: {
         value: clamp(this.options.material.intensity, 0, 1),
       },
-      uMaterialRoughness: {
-        value: clamp(this.options.material.roughness, 0, 1),
-      },
       uMaterialScale: {
         value: clamp(this.options.material.scale, 0.2, 4),
-      },
-      uMaterialTint: {
-        value: colorFrom(this.options.material.tint, "#d8dde7"),
-      },
-      uMaterialSecondaryTint: {
-        value: colorFrom(this.options.material.secondaryTint, "#f2b7ff"),
       },
       uMaterialSeed: { value: this.options.material.seed },
       uShadowColor: { value: colorFrom(this.options.shadow.color, "#191823") },

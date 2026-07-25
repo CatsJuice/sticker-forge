@@ -86,36 +86,16 @@ export interface StickerBackOptions {
 }
 
 export type StickerMaterialType =
-  | "satin"
-  | "matte"
-  | "glossy"
+  | "original"
   | "holographic"
-  | "metallic"
   | "glitter"
-  | "paper"
-  | "kraft"
-  | "reflective"
-  | "pearlescent"
-  | "clear"
-  | "frosted"
-  | "spot-uv"
-  | "lenticular";
+  | "reflective";
 
 export const STICKER_MATERIAL_TYPES: readonly StickerMaterialType[] = [
-  "satin",
-  "matte",
-  "glossy",
+  "original",
   "holographic",
-  "metallic",
   "glitter",
-  "paper",
-  "kraft",
   "reflective",
-  "pearlescent",
-  "clear",
-  "frosted",
-  "spot-uv",
-  "lenticular",
 ];
 
 export function stickerMaterialTypeIndex(type: StickerMaterialType): number {
@@ -128,14 +108,8 @@ export interface StickerMaterialOptions {
   type?: StickerMaterialType;
   /** Overall strength of the material response, from 0 to 1. */
   intensity?: number;
-  /** Surface roughness, from 0 (mirror-like) to 1 (diffuse). */
-  roughness?: number;
-  /** Relative size of fibers, flakes, ridges, and other procedural detail. */
+  /** Relative size of procedural bands, flakes, and reflective detail. */
   scale?: number;
-  /** Primary material tint, used by metallic and translucent materials. */
-  tint?: string;
-  /** Secondary tint, used by lenticular and pearlescent materials. */
-  secondaryTint?: string;
   /** Stable procedural variation seed. */
   seed?: number;
 }
@@ -256,12 +230,9 @@ export const DEFAULT_STICKER_OPTIONS = {
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
   material: {
-    type: "satin" as const,
-    intensity: 0.72,
-    roughness: 0.38,
+    type: "original" as const,
+    intensity: 0.86,
     scale: 1,
-    tint: "#d8dde7",
-    secondaryTint: "#f2b7ff",
     seed: 0.37,
   },
   sound: { src: "", volume: 0.7, enabled: true },

@@ -89,7 +89,10 @@ import {
 } from "./GalleryAddFlight";
 import { ExportDialog } from "./ExportDialog";
 import { BackgroundRemovalEffect } from "./BackgroundRemovalEffect";
-import { SidebarPeelEasterEgg } from "./SidebarPeelEasterEgg";
+import {
+  SidebarPeelEasterEgg,
+  type SidebarPeelPrankPhase,
+} from "./SidebarPeelEasterEgg";
 import {
   removeImageBackground,
   type BackgroundRemovalResult,
@@ -148,6 +151,7 @@ type StudioSettings = {
 const DEFAULT_INK = "#19191d";
 const DEFAULT_ACCENT = "rgb(36, 126, 245)";
 const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
+const PEEL_PRANK_TEXT = "🤯🤯🤯";
 const DEFAULT_IMAGE_SRC = "/default-image.svg";
 const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
@@ -309,6 +313,7 @@ const UI = {
     copied: "已复制代码",
     copiedAnnouncement: "嵌入代码已复制",
     resetSticker: "重置贴纸",
+    peelCloseWarning: "😇 再撕可就关了",
   },
   en: {
     preview: "Interactive sticker preview",
@@ -408,6 +413,7 @@ const UI = {
     copied: "Code copied",
     copiedAnnouncement: "Embed code copied",
     resetSticker: "Reset sticker",
+    peelCloseWarning: "😇 Keep peeling\nand it'll close",
   },
 } as const;
 
@@ -567,6 +573,23 @@ function makeTextSource(
     color,
     richText,
   };
+}
+
+function makeCenteredPrankSource(text: string): StickerSource {
+  return makeTextSource(text, DEFAULT_INK, {
+    blocks: text.split("\n").map((line) => ({
+      align: "center",
+      lineHeight: 1.05,
+      runs: [
+        {
+          text: line,
+          color: DEFAULT_INK,
+          fontSize: 28,
+          fontWeight: 900,
+        },
+      ],
+    })),
+  });
 }
 
 function editorAlignment(value: string): "left" | "center" | "right" {
@@ -2043,6 +2066,22 @@ export function StickerForgeStudio() {
     controllerRef.current?.setOptions(partial);
   }, []);
 
+  const handleSidebarPeelPrankPhaseChange = useCallback(
+    (phase: SidebarPeelPrankPhase) => {
+      const controller = controllerRef.current;
+      if (!controller) return;
+      const source = phase
+        ? makeCenteredPrankSource(
+            phase === "warning" ? t.peelCloseWarning : PEEL_PRANK_TEXT,
+          )
+        : sourceRef.current;
+      void controller.setSource(source).catch(() => {
+        // This visual-only easter egg must never disturb the user's real source.
+      });
+    },
+    [t.peelCloseWarning],
+  );
+
   const updateSetting = useCallback(
     <K extends keyof StudioSettings>(key: K, value: StudioSettings[K]) => {
       const next = { ...settingsRef.current, [key]: value } as StudioSettings;
@@ -3013,6 +3052,7 @@ export function StickerForgeStudio() {
             panelRef={controlsCardRef}
             optionsRef={settingsRef}
             onDetached={() => setIsPanelOpen(false)}
+            onPrankPhaseChange={handleSidebarPeelPrankPhaseChange}
           />
           <button
             className="controls-drag-region"

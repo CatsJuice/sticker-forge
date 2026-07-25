@@ -30,14 +30,19 @@ const DESKTOP_POINTER_QUERY =
 const CORNER_SIZE = 72;
 const READY_CURL_PROGRESS = 0.012;
 const READY_CURL_DURATION = 300;
+const PRANK_DRAG_THRESHOLD = 32;
+const SIDEBAR_DETACH_THRESHOLD = 0.5;
 
 type Corner = "top-left" | "top-right" | "bottom-left" | "bottom-right";
+export type SidebarPeelPrankPhase = "shock" | "warning" | null;
 
 type ActiveCapture = {
   corner: Corner;
   rect: DOMRect;
   lastPoint: { x: number; y: number };
+  dragStartPoint: { x: number; y: number } | null;
   startedPeeling: boolean;
+  prankPhase: SidebarPeelPrankPhase;
   cancelled: boolean;
   panelHidden: boolean;
   overlay: HTMLDivElement | null;
@@ -158,15 +163,19 @@ export function SidebarPeelEasterEgg({
   panelRef,
   optionsRef,
   onDetached,
+  onPrankPhaseChange,
 }: {
   panelRef: RefObject<HTMLElement | null>;
   optionsRef: RefObject<StickerOptions>;
   onDetached: () => void;
+  onPrankPhaseChange: (phase: SidebarPeelPrankPhase) => void;
 }) {
   const activeRef = useRef<ActiveCapture | null>(null);
   const cooldownUntilRef = useRef(0);
   const onDetachedRef = useRef(onDetached);
+  const onPrankPhaseChangeRef = useRef(onPrankPhaseChange);
   onDetachedRef.current = onDetached;
+  onPrankPhaseChangeRef.current = onPrankPhaseChange;
 
   useEffect(() => {
     const updateActiveShadow = (event: Event) => {
@@ -235,6 +244,10 @@ export function SidebarPeelEasterEgg({
   const cleanup = useCallback((active: ActiveCapture, restorePanel = true) => {
     if (active.cancelled) return;
     active.cancelled = true;
+    if (active.prankPhase) {
+      active.prankPhase = null;
+      onPrankPhaseChangeRef.current(null);
+    }
     if (active.cleanupTimer !== null) {
       window.clearTimeout(active.cleanupTimer);
     }
@@ -282,6 +295,18 @@ export function SidebarPeelEasterEgg({
     if (!active || active.cancelled) return;
     active.lastPoint = { x: event.clientX, y: event.clientY };
     if (
+      active.startedPeeling &&
+      !active.prankPhase &&
+      active.dragStartPoint &&
+      Math.hypot(
+        active.lastPoint.x - active.dragStartPoint.x,
+        active.lastPoint.y - active.dragStartPoint.y,
+      ) >= PRANK_DRAG_THRESHOLD
+    ) {
+      active.prankPhase = "shock";
+      onPrankPhaseChangeRef.current("shock");
+    }
+    if (
       !active.startedPeeling &&
       event.buttons === 0 &&
       !pointIsInCorner(active.lastPoint, active.rect, active.corner)
@@ -319,7 +344,9 @@ export function SidebarPeelEasterEgg({
           event.clientX === 0 && event.clientY === 0
             ? fallbackPoint
             : { x: event.clientX, y: event.clientY },
+        dragStartPoint: null,
         startedPeeling: false,
+        prankPhase: null,
         cancelled: false,
         panelHidden: false,
         overlay: null,
@@ -408,7 +435,7 @@ export function SidebarPeelEasterEgg({
           peel: {
             ...current.peel,
             grabWidth: Math.max(28, current.peel?.grabWidth ?? 28),
-            detachThreshold: 0.5,
+            detachThreshold: SIDEBAR_DETACH_THRESHOLD,
             residue: false,
             surfaceShadow: false,
             release: "snap",
@@ -474,6 +501,7 @@ export function SidebarPeelEasterEgg({
 
         host.addEventListener("peelstart", () => {
           active.startedPeeling = true;
+          active.dragStartPoint = { ...active.lastPoint };
           overlay.dataset.peeling = "true";
           controller.setOptions({
             peel: { surfaceShadow: true },
@@ -483,7 +511,23 @@ export function SidebarPeelEasterEgg({
             active.hintFrame = null;
           }
         });
+        host.addEventListener("peelchange", (peelEvent) => {
+          if (!active.prankPhase) return;
+          const progress =
+            (peelEvent as CustomEvent<{ progress?: number }>).detail
+              ?.progress ?? 0;
+          const nextPhase =
+            progress >= SIDEBAR_DETACH_THRESHOLD ? "warning" : "shock";
+          if (nextPhase !== active.prankPhase) {
+            active.prankPhase = nextPhase;
+            onPrankPhaseChangeRef.current(nextPhase);
+          }
+        });
         host.addEventListener("peelend", (peelEvent) => {
+          if (active.prankPhase) {
+            active.prankPhase = null;
+            onPrankPhaseChangeRef.current(null);
+          }
           const detail = (
             peelEvent as CustomEvent<{
               progress?: number;

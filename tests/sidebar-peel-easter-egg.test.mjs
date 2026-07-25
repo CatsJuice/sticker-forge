@@ -64,12 +64,49 @@ test("turns the desktop sidebar into a cancellable no-outline sticker", async ()
     /Math\.max\(panelCenterY, window\.innerHeight - panelCenterY\) \* 2/,
   );
   assert.doesNotMatch(component, /sidebar-peel-canvas-scale/);
-  assert.match(component, /detachThreshold: 0\.5/);
+  assert.match(component, /SIDEBAR_DETACH_THRESHOLD = 0\.5/);
+  assert.match(component, /detachThreshold: SIDEBAR_DETACH_THRESHOLD/);
   assert.match(component, /residue: false/);
   assert.match(component, /surfaceShadow: false/);
   assert.match(
     component,
     /host\.addEventListener\("peelstart"[\s\S]*peel: \{ surfaceShadow: true \}/,
+  );
+  assert.match(
+    component,
+    /PRANK_DRAG_THRESHOLD = 32/,
+  );
+  assert.match(
+    component,
+    /Math\.hypot\([\s\S]*active\.lastPoint\.x - active\.dragStartPoint\.x[\s\S]*active\.lastPoint\.y - active\.dragStartPoint\.y[\s\S]*PRANK_DRAG_THRESHOLD[\s\S]*onPrankPhaseChangeRef\.current\("shock"\)/,
+  );
+  assert.match(
+    component,
+    /host\.addEventListener\("peelstart"[\s\S]*active\.dragStartPoint = \{ \.\.\.active\.lastPoint \}/,
+  );
+  assert.match(
+    component,
+    /host\.addEventListener\("peelchange"[\s\S]*progress >= SIDEBAR_DETACH_THRESHOLD \? "warning" : "shock"[\s\S]*onPrankPhaseChangeRef\.current\(nextPhase\)/,
+  );
+  assert.match(
+    component,
+    /host\.addEventListener\("peelend"[\s\S]*onPrankPhaseChangeRef\.current\(null\)/,
+  );
+  assert.match(component, /cleanup[\s\S]*onPrankPhaseChangeRef\.current\(null\)/);
+  assert.match(studio, /PEEL_PRANK_TEXT = "🤯🤯🤯"/);
+  assert.match(studio, /peelCloseWarning: "😇 再撕可就关了"/);
+  assert.match(studio, /peelCloseWarning: "😇 Keep peeling\\nand it'll close"/);
+  assert.match(
+    studio,
+    /function makeCenteredPrankSource[\s\S]*text\.split\("\\n"\)[\s\S]*align: "center"/,
+  );
+  assert.match(
+    studio,
+    /handleSidebarPeelPrankPhaseChange[\s\S]*phase === "warning" \? t\.peelCloseWarning : PEEL_PRANK_TEXT[\s\S]*sourceRef\.current/,
+  );
+  assert.match(
+    studio,
+    /onPrankPhaseChange=\{handleSidebarPeelPrankPhaseChange\}/,
   );
   assert.match(component, /host\.addEventListener\("detachcomplete"/);
   assert.doesNotMatch(component, /onDetachedRef\.current\(\)[\s\S]*430/);

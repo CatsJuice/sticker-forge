@@ -84,7 +84,7 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   );
   assert.match(
     shader,
-    /vec2 holographicUv = \(vUv - 0\.5\) \* scale/,
+    /\(previewGradientPhase\(\) - 0\.5\) \* scale \+ 0\.5/,
   );
   const holographicBlock = shader.match(
     /\/\/ Diffractive holographic film\.([\s\S]*?)\/\/ Glitter laminate\./,
@@ -165,4 +165,8 @@ test("offers all materials in the studio and shares one baked material source", 
   assert.match(renderer, /createMaterialPreviewCanvas/);
   assert.match(renderer, /uMaterialBaked\.value = 1/);
   assert.match(renderer, /uPreserveFrontColor: \{ value: 1 \}/);
+  assert.match(materialPreview, /scaledPhase\(position, scale\)/);
+  assert.match(materialPreview, /\* scale \* scale/);
+  assert.match(materialPreview, /addHolographicStops\(rainbow, scale/);
+  assert.match(materialPreview, /addReflectiveStops\(sheen, scale/);
 });

@@ -619,6 +619,10 @@ test("finishes the die-cut edge with a clean directional bevel", async () => {
   assert.match(shader, /uniform float uEdgeBevelWidth/);
   assert.match(shader, /uniform float uEdgeFinishStrength/);
   assert.match(shader, /float edgeBand = smoothstep/);
+  assert.doesNotMatch(
+    shader,
+    /uEdgeFinishStrength[\s\S]{0,120}\* materialFinishActivation/,
+  );
   assert.doesNotMatch(shader, /thicknessAlpha|thicknessSample/);
   assert.match(shader, /gl_FragColor = vec4\(color, printSample\.a \* uOpacity\)/);
   assert.match(renderer, /uEdgeFinishScale: \{ value: 1 \}/);

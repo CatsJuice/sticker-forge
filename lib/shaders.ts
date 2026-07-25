@@ -354,14 +354,15 @@ export const stickerFragmentShader = /* glsl */ `
   }
 
   float previewReflectiveOpacity(float phase) {
-    if (phase < 0.25 || phase > 0.78) return 0.0;
-    if (phase < 0.46) {
-      return mix(0.0, 0.7, (phase - 0.25) / 0.21);
+    float position = fract(phase);
+    if (position < 0.25 || position > 0.78) return 0.0;
+    if (position < 0.46) {
+      return mix(0.0, 0.7, (position - 0.25) / 0.21);
     }
-    if (phase < 0.58) {
-      return mix(0.7, 0.14, (phase - 0.46) / 0.12);
+    if (position < 0.58) {
+      return mix(0.7, 0.14, (position - 0.46) / 0.12);
     }
-    return mix(0.14, 0.0, (phase - 0.58) / 0.2);
+    return mix(0.14, 0.0, (position - 0.58) / 0.2);
   }
 
   vec3 applyFrontMaterial(
@@ -401,7 +402,6 @@ export const stickerFragmentShader = /* glsl */ `
       // Keep the diffraction bands anchored to the undeformed sticker.
       // Match the gallery thumbnail's single, soft diagonal color wash. Light
       // and view changes move that wash without replacing the printed artwork.
-      vec2 holographicUv = (vUv - 0.5) * scale;
       vec3 defaultLightDirection = normalize(vec3(-0.38, 0.52, 0.76));
       float holographicLightShift =
         dot(
@@ -412,7 +412,7 @@ export const stickerFragmentShader = /* glsl */ `
         (1.0 - facing) * 0.12
         + vCurl * 0.08;
       float phase =
-        previewGradientPhase()
+        (previewGradientPhase() - 0.5) * scale + 0.5
         + holographicLightShift
         + holographicViewShift;
       vec3 rainbow = holographicPalette(phase);
@@ -469,7 +469,7 @@ export const stickerFragmentShader = /* glsl */ `
     );
     vec3 defaultLightDirection = normalize(vec3(-0.38, 0.52, 0.76));
     float reflectivePhase =
-      previewGradientPhase()
+      (previewGradientPhase() - 0.5) * scale + 0.5
       + dot(
         lightDirection.xy - defaultLightDirection.xy,
         vec2(0.28, -0.22)
@@ -679,7 +679,7 @@ export const stickerFragmentShader = /* glsl */ `
       printSample.rgb,
       preservedFront
     );
-    float finishActivation = mix(
+    float materialFinishActivation = mix(
       1.0,
       smoothstep(0.0, 0.22, frontDeformation) * 0.35,
       clamp(uMaterialBaked, 0.0, 1.0)
@@ -690,7 +690,7 @@ export const stickerFragmentShader = /* glsl */ `
       viewDirection,
       lightDirection,
       halfDirection,
-      finishActivation,
+      materialFinishActivation,
       frontDeformation
     );
     frontColor = mix(
@@ -699,14 +699,12 @@ export const stickerFragmentShader = /* glsl */ `
       edgeBand
         * edgeHighlight
         * clamp(uEdgeFinishStrength, 0.0, 1.0)
-        * finishActivation
         * 0.2
     );
     frontColor *= 1.0
       - edgeBand
         * edgeShade
         * clamp(uEdgeFinishStrength, 0.0, 1.0)
-        * finishActivation
         * 0.12;
 
     float exponent =

@@ -66,6 +66,18 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   }
   assert.match(shader, /applyFrontMaterial/);
   assert.match(shader, /if \(kind < 0\.5\) return base/);
+  assert.match(
+    shader,
+    /vec2 holographicUv = \(vUv - 0\.5\) \* scale/,
+  );
+  const holographicBlock = shader.match(
+    /\/\/ Diffractive holographic film\.([\s\S]*?)\/\/ Glitter laminate\./,
+  )?.[1];
+  assert.ok(holographicBlock, "missing holographic shader block");
+  assert.ok(
+    !holographicBlock.includes("normal.xy"),
+    "holographic band direction must not follow the peeled surface normal",
+  );
   assert.match(gallery, /shader-backed face visible while idle/);
 });
 

@@ -328,13 +328,17 @@ export const stickerFragmentShader = /* glsl */ `
 
     // Diffractive holographic film.
     if (kind < 1.5) {
+      // Keep the diffraction bands anchored to the undeformed sticker.
+      // Mixing the curled surface normal into their phase rotates the bands
+      // independently on either side of the peel front and creates a hard
+      // join between the adhered and lifted regions.
+      vec2 holographicUv = (vUv - 0.5) * scale;
       float phase =
-        dot(vUv - 0.5, vec2(1.15, 0.72)) * 2.8
-        + dot(normal.xy, vec2(1.7, -1.2))
-        + (1.0 - facing) * 1.4
+        dot(holographicUv, vec2(1.15, 0.72)) * 2.8
         + grain * 0.16;
       vec3 rainbow = spectralPalette(phase);
       float band = 0.38 + 0.62 * pow(0.5 + 0.5 * sin(phase * 13.0), 3.0);
+      band *= 0.78 + 0.22 * facing;
       return mix(base, screenBlend(base, rainbow * band), amount * 0.58)
         + sharpSpec * rainbow * amount * 0.26;
     }

@@ -3315,8 +3315,12 @@ body {
 .gallery-folder-menu {
   position: absolute;
   z-index: 3;
-  right: 10px;
+  right: auto;
   bottom: 23px;
+  left: min(
+    var(--gallery-folder-menu-left),
+    calc(100% - 42px)
+  );
   width: 32px;
   height: 32px;
   pointer-events: auto;
@@ -4607,6 +4611,7 @@ body {
   .gallery-folder-menu {
     right: 20px;
     bottom: 26px;
+    left: auto;
   }
 
   .gallery-folder-add {

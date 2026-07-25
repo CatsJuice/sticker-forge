@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -853,7 +854,13 @@ export function GalleryFolderDock({
         </div>
       </div>
 
-      <div ref={dockMenuRef} className="gallery-folder-menu">
+      <div
+        ref={dockMenuRef}
+        className="gallery-folder-menu"
+        style={{
+          "--gallery-folder-menu-left": `${folders.length * 80 + 10}px`,
+        } as CSSProperties}
+      >
         {menuOpen && mode === null ? (
           <div className="gallery-folder-menu-actions">
             <svg className="gallery-folder-menu-goo-defs" aria-hidden="true">

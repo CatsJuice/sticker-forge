@@ -53,6 +53,8 @@ test("exposes every front material through the public options API", async () => 
     declarations,
     /holographicColors\?: \[string, string, string\]/,
   );
+  assert.match(types, /holographicGrain\?: number/);
+  assert.match(declarations, /holographicGrain\?: number/);
 });
 
 test("binds material uniforms in editor and gallery renderers", async () => {
@@ -66,6 +68,7 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     "uMaterialType",
     "uMaterialIntensity",
     "uMaterialScale",
+    "uHolographicGrain",
     "uMaterialSeed",
     "uMaterialBaked",
     "uHolographicColorA",
@@ -106,6 +109,8 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   assert.match(holographicBlock, /uLightIntensity - 0\.8/);
   assert.match(holographicBlock, /float holographicMix =[\s\S]*0\.24/);
   assert.match(holographicBlock, /float frostGrain =/);
+  assert.match(holographicBlock, /float frostAmount =/);
+  assert.match(holographicBlock, /uHolographicGrain/);
   assert.match(holographicBlock, /detailUv \* 1380\.0/);
   assert.ok(
     !holographicBlock.includes("sin(phase * 13.0)"),
@@ -159,6 +164,8 @@ test("offers all materials in the studio and shares one baked material source", 
   }
   assert.match(studio, /MATERIAL_PRESETS/);
   assert.match(studio, /holographic-color-controls/);
+  assert.match(studio, /id="holographic-grain"/);
+  assert.match(studio, /holographicGrain: "磨砂颗粒"/);
   assert.match(studio, /holographicColors/);
   assert.match(preview, /createMaterialPreviewCanvas/);
   assert.match(preview, /options\.material/);
@@ -178,6 +185,11 @@ test("offers all materials in the studio and shares one baked material source", 
   assert.match(materialPreview, /Math\.cos\(orientation - lightAngle\)/);
   assert.match(materialPreview, /function applyHolographicFrost/);
   assert.match(materialPreview, /pattern\.setTransform/);
+  assert.match(materialPreview, /0\.42 \* amount \* grain/);
+  assert.match(
+    materialPreview,
+    /brightness = value > 0\.48 \? 255 : 20/,
+  );
   assert.match(renderer, /lighting\.direction\.x/);
   assert.match(renderer, /lighting\.intensity/);
   assert.match(

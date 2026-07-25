@@ -299,6 +299,7 @@ const UI = {
     frontMaterial: "正面材质",
     materialIntensity: "材质强度",
     materialDetail: "纹理尺寸",
+    holographicGrain: "磨砂颗粒",
     holographicPalette: "镭射配色",
     holographicColor1: "镭射颜色 1",
     holographicColor2: "镭射颜色 2",
@@ -399,6 +400,7 @@ const UI = {
     frontMaterial: "Front material",
     materialIntensity: "Material intensity",
     materialDetail: "Detail scale",
+    holographicGrain: "Frost grain",
     holographicPalette: "Holographic palette",
     holographicColor1: "Holographic color 1",
     holographicColor2: "Holographic color 2",
@@ -446,6 +448,7 @@ const DEFAULT_SETTINGS: StudioSettings = {
     type: "original",
     intensity: 0.86,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.37,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
@@ -534,6 +537,7 @@ const MATERIAL_PRESETS: Record<
     type: "original",
     intensity: 0.86,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.37,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
@@ -541,6 +545,7 @@ const MATERIAL_PRESETS: Record<
     type: "holographic",
     intensity: 0.86,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.61,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
@@ -548,6 +553,7 @@ const MATERIAL_PRESETS: Record<
     type: "glitter",
     intensity: 0.9,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.77,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
@@ -555,6 +561,7 @@ const MATERIAL_PRESETS: Record<
     type: "reflective",
     intensity: 0.9,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.67,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"],
   },
@@ -3712,6 +3719,25 @@ export function StickerForgeStudio() {
                       })
                     }
                   />
+                  {settings.material.type === "holographic" ? (
+                    <RangeRow
+                      id="holographic-grain"
+                      label={t.holographicGrain}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={settings.material.holographicGrain}
+                      display={`${Math.round(
+                        settings.material.holographicGrain * 100,
+                      )}%`}
+                      onChange={(holographicGrain) =>
+                        updateSetting("material", {
+                          ...settings.material,
+                          holographicGrain,
+                        })
+                      }
+                    />
+                  ) : null}
                   <RangeRow
                     id="back-gloss"
                     label={t.backGloss}

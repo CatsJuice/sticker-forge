@@ -17,6 +17,8 @@ test("ships a local, permissively licensed background-removal path", async () =>
     modelConfig,
     modelLicense,
     modelSource,
+    client,
+    viteConfig,
   ] = await Promise.all([
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(
@@ -56,6 +58,8 @@ test("ships a local, permissively licensed background-removal path", async () =>
       ),
       "utf8",
     ),
+    readFile(new URL("../lib/background-removal.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
   ]);
 
   assert.match(packageJson, /"@huggingface\/transformers"/);
@@ -71,6 +75,14 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.match(worker, /const LOCAL_MODEL_PATH\s*=\s*"\/models\/"/);
   assert.match(worker, /device:\s*"wasm"/);
   assert.match(worker, /type:\s*"progress"/);
+  assert.match(client, /request\.retries < 1/);
+  assert.match(client, /postWorkerRequest\(restartedWorker, id, request\)/);
+  assert.match(client, /workerFailureMessage\(event\)/);
+  assert.match(client, /window\.setTimeout\(\(\) =>/);
+  assert.match(
+    viteConfig,
+    /optimizeDeps:\s*\{[\s\S]*?include:\s*\["@huggingface\/transformers"\]/,
+  );
   assert.match(worker, /MATTE_BLACK_POINT\s*=\s*0\.12/);
   assert.match(worker, /MATTE_WHITE_POINT\s*=\s*0\.78/);
   assert.match(worker, /clipped \* clipped \* \(3 - 2 \* clipped\)/);
@@ -163,7 +175,10 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.match(renderer, /uPreparedMix\.value = easedProgress/);
   assert.match(renderer, /uPreEntranceProgress\.value = easedProgress/);
   assert.match(renderer, /this\.startEntranceAnimation\(\)/);
-  assert.match(shaders, /printSample = mix\(printSample, preparedSample, uPreparedMix\)/);
+  assert.match(
+    shaders,
+    /artwork = mix\([\s\S]*?texture2D\(uPreparedMap, safeUv\),[\s\S]*?uPreparedMix/,
+  );
   assert.match(shaders, /base\.xy \*= mix\(1\.0, 0\.6, preEntrance\)/);
   assert.match(shaders, /if \(printSample\.a < 0\.1\) discard/);
   assert.match(shaders, /if \(artworkAlpha < 0\.1/);

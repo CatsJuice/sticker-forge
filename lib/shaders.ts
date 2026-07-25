@@ -251,6 +251,7 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uMaterialType;
   uniform float uMaterialIntensity;
   uniform float uMaterialScale;
+  uniform float uHolographicGrain;
   uniform float uMaterialSeed;
   uniform float uMaterialBaked;
   uniform vec3 uHolographicColorA;
@@ -433,11 +434,13 @@ export const stickerFragmentShader = /* glsl */ `
       );
       float frostGrain =
         hash21(detailUv * 1380.0 + uMaterialSeed * 113.0) - 0.5;
-      holographicBase *= 1.0 + frostGrain * 0.095 * amount;
+      float frostAmount =
+        clamp(uHolographicGrain, 0.0, 1.0) * amount;
+      holographicBase *= 1.0 + frostGrain * 0.22 * frostAmount;
       holographicBase = mix(
         holographicBase,
         vec3(0.92 + frostGrain * 0.16),
-        abs(frostGrain) * 0.045 * amount
+        abs(frostGrain) * 0.1 * frostAmount
       );
       float holographicHighlight =
         broadSpec * 0.1

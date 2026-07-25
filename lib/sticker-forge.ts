@@ -326,6 +326,9 @@ class StickerRenderer implements StickerInstance {
       },
       uMaterialIntensity: { value: this.options.material.intensity },
       uMaterialScale: { value: this.options.material.scale },
+      uHolographicGrain: {
+        value: this.options.material.holographicGrain,
+      },
       uMaterialSeed: { value: this.options.material.seed },
       uMaterialBaked: { value: 0 },
       uHolographicColorA: {
@@ -930,6 +933,7 @@ class StickerRenderer implements StickerInstance {
       material.type,
       material.intensity,
       material.scale,
+      material.holographicGrain,
       material.seed,
       ...material.holographicColors,
       lighting.direction.x,
@@ -1113,6 +1117,11 @@ class StickerRenderer implements StickerInstance {
       this.options.material.scale,
       0.2,
       4,
+    );
+    this.uniforms.uHolographicGrain.value = clamp(
+      this.options.material.holographicGrain,
+      0,
+      1,
     );
     this.uniforms.uMaterialSeed.value = this.options.material.seed;
     this.uniforms.uHolographicColorA.value = colorFrom(

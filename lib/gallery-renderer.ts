@@ -276,6 +276,9 @@ class GalleryStickerMesh {
       uMaterialScale: {
         value: clamp(this.options.material.scale, 0.2, 4),
       },
+      uHolographicGrain: {
+        value: clamp(this.options.material.holographicGrain, 0, 1),
+      },
       uMaterialSeed: { value: this.options.material.seed },
       uMaterialBaked: { value: idleTexture ? 1 : 0 },
       uHolographicColorA: {

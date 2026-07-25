@@ -114,6 +114,8 @@ export interface StickerMaterialOptions {
   intensity?: number;
   /** Relative size of procedural bands, flakes, and reflective detail. */
   scale?: number;
+  /** Frosted micro-grain strength for the holographic finish, from 0 to 1. */
+  holographicGrain?: number;
   /** Stable procedural variation seed. */
   seed?: number;
   /** Three colors blended cyclically across the holographic diffraction bands. */
@@ -275,6 +277,7 @@ export const DEFAULT_STICKER_OPTIONS = {
     type: "original" as const,
     intensity: 0.86,
     scale: 1,
+    holographicGrain: 0.72,
     seed: 0.37,
     holographicColors: ["#f2a7c5", "#8edfd5", "#9db4ea"] as [
       string,

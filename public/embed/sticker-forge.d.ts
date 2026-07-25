@@ -104,6 +104,8 @@ export interface StickerMaterialOptions {
   intensity?: number;
   /** Relative size of procedural surface detail. */
   scale?: number;
+  /** Frosted micro-grain strength for the holographic finish, from 0 to 1. */
+  holographicGrain?: number;
   /** Stable procedural variation seed. */
   seed?: number;
   /** Three colors blended cyclically across the holographic diffraction bands. */

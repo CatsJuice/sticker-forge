@@ -63,6 +63,7 @@ function applyHolographicFrost(
   width: number,
   height: number,
   amount: number,
+  grain: number,
   scale: number,
   seed: number,
 ) {
@@ -95,7 +96,7 @@ function applyHolographicFrost(
     new DOMMatrix().scaleSelf(1 / Math.sqrt(scale), 1 / Math.sqrt(scale)),
   );
   context.save();
-  context.globalAlpha = 0.16 * amount;
+  context.globalAlpha = 0.42 * amount * grain;
   context.fillStyle = pattern;
   context.fillRect(0, 0, width, height);
   context.restore();
@@ -178,6 +179,7 @@ export function applyMaterialPreview(
       width,
       height,
       amount,
+      Math.min(1, Math.max(0, resolved.holographicGrain)),
       scale,
       resolved.seed,
     );

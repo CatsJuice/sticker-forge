@@ -30,11 +30,45 @@ type PendingRequest = {
   resolve: (result: BackgroundRemovalResult) => void;
   reject: (error: Error) => void;
   onProgress?: (progress: BackgroundRemovalProgress) => void;
+  image: ArrayBuffer;
+  mimeType: string;
+  retries: number;
 };
 
 let worker: Worker | null = null;
 let requestId = 0;
 const pending = new Map<number, PendingRequest>();
+
+function postWorkerRequest(
+  target: Worker,
+  id: number,
+  request: PendingRequest,
+) {
+  const image = request.image.slice(0);
+  target.postMessage(
+    {
+      type: "remove",
+      id,
+      image,
+      mimeType: request.mimeType,
+    },
+    [image],
+  );
+}
+
+function workerFailureMessage(event: ErrorEvent) {
+  const detail =
+    event.error instanceof Error ? event.error.message : event.message;
+  const location = event.filename
+    ? `${event.filename}${event.lineno ? `:${event.lineno}` : ""}`
+    : "";
+  if (detail && location) {
+    return `Background removal worker failed at ${location}: ${detail}`;
+  }
+  if (detail) return `Background removal worker failed: ${detail}`;
+  if (location) return `Background removal worker failed at ${location}`;
+  return "Background removal worker failed";
+}
 
 function pixelsToDataUrl(
   pixels: Uint8ClampedArray,
@@ -91,11 +125,40 @@ function getWorker() {
     }
   });
   worker.addEventListener("error", (event) => {
-    const error = new Error(event.message || "Background removal worker failed");
-    for (const request of pending.values()) request.reject(error);
-    pending.clear();
-    worker?.terminate();
+    const failedWorker = worker;
     worker = null;
+    failedWorker?.terminate();
+    const retryable: Array<[number, PendingRequest]> = [];
+    const error = new Error(workerFailureMessage(event));
+    for (const entry of pending.entries()) {
+      const [id, request] = entry;
+      if (request.retries < 1) {
+        request.retries += 1;
+        retryable.push([id, request]);
+      } else {
+        pending.delete(id);
+        request.reject(error);
+      }
+    }
+    if (!retryable.length) return;
+    window.setTimeout(() => {
+      let restartedWorker: Worker;
+      try {
+        restartedWorker = getWorker();
+      } catch (restartError) {
+        const failure =
+          restartError instanceof Error ? restartError : error;
+        for (const [id, request] of retryable) {
+          pending.delete(id);
+          request.reject(failure);
+        }
+        return;
+      }
+      for (const [id, request] of retryable) {
+        request.onProgress?.({ phase: "loading", progress: 0 });
+        postWorkerRequest(restartedWorker, id, request);
+      }
+    }, 120);
   });
   return worker;
 }
@@ -140,10 +203,15 @@ export async function removeImageBackground(
   const image = await blob.arrayBuffer();
   const id = ++requestId;
   return new Promise<BackgroundRemovalResult>((resolve, reject) => {
-    pending.set(id, { resolve, reject, onProgress });
-    getWorker().postMessage(
-      { type: "remove", id, image, mimeType: blob.type || "image/png" },
-      [image],
-    );
+    const request: PendingRequest = {
+      resolve,
+      reject,
+      onProgress,
+      image,
+      mimeType: blob.type || "image/png",
+      retries: 0,
+    };
+    pending.set(id, request);
+    postWorkerRequest(getWorker(), id, request);
   });
 }

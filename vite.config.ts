@@ -44,6 +44,11 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    // Prebundle the worker's ML runtime at startup. Otherwise Vite discovers it
+    // on the first background-removal click and reloads the page mid-request.
+    optimizeDeps: {
+      include: ["@huggingface/transformers"],
+    },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,

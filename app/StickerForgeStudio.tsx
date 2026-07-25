@@ -111,6 +111,7 @@ type BackgroundRemovalPhase =
 
 type StudioSettings = {
   outline: { width: number; color: string };
+  edge: { width: number; strength: number };
   shadow: {
     opacity: number;
     blur: number;
@@ -254,6 +255,9 @@ const UI = {
     tilt: "整体倾斜",
     outline: "描边",
     outlineColor: "描边颜色",
+    edgeFinish: "边缘质感",
+    edgeWidth: "倒角宽度",
+    edgeStrength: "质感强度",
     backing: "背胶",
     backColor: "贴纸背面颜色",
     peel: "撕起手感",
@@ -332,6 +336,9 @@ const UI = {
     tilt: "Tilt",
     outline: "Outline",
     outlineColor: "Outline color",
+    edgeFinish: "Edge finish",
+    edgeWidth: "Bevel width",
+    edgeStrength: "Finish strength",
     backing: "Backing",
     backColor: "Sticker back color",
     peel: "Peel feel",
@@ -358,6 +365,7 @@ const UI = {
 
 const DEFAULT_SETTINGS: StudioSettings = {
   outline: { width: 18, color: "#ffffff" },
+  edge: { width: 2.4, strength: 0.7 },
   shadow: {
     opacity: 0.22,
     blur: 22,
@@ -567,6 +575,7 @@ function asStickerOptions(
 function studioSettingsFrom(options: StickerOptions): StudioSettings {
   return {
     outline: { ...DEFAULT_SETTINGS.outline, ...options.outline },
+    edge: { ...DEFAULT_SETTINGS.edge, ...options.edge },
     shadow: { ...DEFAULT_SETTINGS.shadow, ...options.shadow },
     peel: {
       ...DEFAULT_SETTINGS.peel,
@@ -3090,6 +3099,35 @@ export function StickerForgeStudio() {
                   >
                     <span>{t.backing}</span>
                   </ColorPicker>
+                </div>
+            </ControlSection>
+
+            <ControlSection title={t.edgeFinish}>
+                <div className="range-stack">
+                  <RangeRow
+                    id="edge-width"
+                    label={t.edgeWidth}
+                    min={0.5}
+                    max={6}
+                    step={0.1}
+                    value={settings.edge.width}
+                    display={`${settings.edge.width.toFixed(1)}px`}
+                    onChange={(width) =>
+                      updateSetting("edge", { ...settings.edge, width })
+                    }
+                  />
+                  <RangeRow
+                    id="edge-strength"
+                    label={t.edgeStrength}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.edge.strength}
+                    display={`${Math.round(settings.edge.strength * 100)}%`}
+                    onChange={(strength) =>
+                      updateSetting("edge", { ...settings.edge, strength })
+                    }
+                  />
                 </div>
             </ControlSection>
 

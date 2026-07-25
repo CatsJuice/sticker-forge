@@ -228,6 +228,9 @@ export const stickerFragmentShader = /* glsl */ `
   uniform sampler2D uPreparedMap;
   uniform float uPreparedMix;
   uniform vec2 uTexel;
+  uniform float uEdgeFinishScale;
+  uniform float uEdgeBevelWidth;
+  uniform float uEdgeFinishStrength;
   uniform vec3 uBackColor;
   uniform float uGloss;
   uniform float uRoughness;
@@ -269,6 +272,19 @@ export const stickerFragmentShader = /* glsl */ `
     point = fract(point * vec2(123.34, 456.21));
     point += dot(point, point + 45.32);
     return fract(point.x * point.y);
+  }
+
+  vec4 artworkSample(vec2 uv) {
+    vec2 safeUv = clamp(uv, vec2(0.0), vec2(1.0));
+    vec4 artwork = texture2D(uMap, safeUv);
+    if (uPreparedMix > 0.0) {
+      artwork = mix(
+        artwork,
+        texture2D(uPreparedMap, safeUv),
+        uPreparedMix
+      );
+    }
+    return artwork;
   }
 
   float interactionHitArea(vec2 uv, float centerAlpha, float radius) {
@@ -364,11 +380,49 @@ export const stickerFragmentShader = /* glsl */ `
       surfaceUv = clamp(surfaceUv, vec2(0.001), vec2(0.999));
     }
 
-    vec4 printSample = texture2D(uMap, surfaceUv);
-    if (uPreparedMix > 0.0) {
-      vec4 preparedSample = texture2D(uPreparedMap, surfaceUv);
-      printSample = mix(printSample, preparedSample, uPreparedMix);
-    }
+    vec4 printSample = artworkSample(surfaceUv);
+    float finishScale = clamp(uEdgeFinishScale, 0.75, 8.0);
+    vec2 bevelOffset = uTexel * clamp(
+      uEdgeBevelWidth * finishScale,
+      0.5,
+      24.0
+    );
+    float alphaLeft = artworkSample(
+      surfaceUv - vec2(bevelOffset.x, 0.0)
+    ).a;
+    float alphaRight = artworkSample(
+      surfaceUv + vec2(bevelOffset.x, 0.0)
+    ).a;
+    float alphaUp = artworkSample(
+      surfaceUv + vec2(0.0, bevelOffset.y)
+    ).a;
+    float alphaDown = artworkSample(
+      surfaceUv - vec2(0.0, bevelOffset.y)
+    ).a;
+    float innerAlpha = min(
+      min(alphaLeft, alphaRight),
+      min(alphaUp, alphaDown)
+    );
+    float edgeBand = smoothstep(0.06, 0.56, printSample.a)
+      * (1.0 - smoothstep(0.1, 0.88, innerAlpha));
+    vec2 inwardGradient = vec2(
+      alphaRight - alphaLeft,
+      alphaUp - alphaDown
+    );
+    vec2 outwardNormal = -inwardGradient
+      / max(length(inwardGradient), 0.0001);
+    vec2 edgeLightDirection = normalize(vec2(-0.65, 0.76));
+    float directionalEdgeLight =
+      dot(outwardNormal, edgeLightDirection);
+    float edgeHighlight = pow(
+      max(directionalEdgeLight, 0.0),
+      1.35
+    );
+    float edgeShade = pow(
+      max(-directionalEdgeLight, 0.0),
+      1.2
+    );
+
     if (printSample.a < 0.1) discard;
 
     vec3 surfaceNormal = normalize(vNormalView);
@@ -401,6 +455,19 @@ export const stickerFragmentShader = /* glsl */ `
       printSample.rgb,
       preservedFront
     );
+    frontColor = mix(
+      frontColor,
+      vec3(1.0),
+      edgeBand
+        * edgeHighlight
+        * clamp(uEdgeFinishStrength, 0.0, 1.0)
+        * 0.2
+    );
+    frontColor *= 1.0
+      - edgeBand
+        * edgeShade
+        * clamp(uEdgeFinishStrength, 0.0, 1.0)
+        * 0.12;
 
     float exponent = mix(17.0, 86.0, clamp(uGloss, 0.0, 1.0));
     float specular = pow(max(dot(normal, halfDirection), 0.0), exponent);

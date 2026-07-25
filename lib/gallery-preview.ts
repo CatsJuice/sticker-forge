@@ -80,8 +80,10 @@ function encodePreview(
 
 /**
  * Renders an immutable gallery thumbnail from the same prepared artwork used by
- * the interactive sticker renderer. The result keeps alpha, prefers WebP, and
- * falls back to PNG when the browser has no WebP canvas encoder.
+ * the interactive sticker renderer. Callers persist this result only when a
+ * gallery item is created; editor changes and layout updates deliberately do
+ * not regenerate or rewrite the thumbnail. The result keeps alpha, prefers
+ * WebP, and falls back to PNG when the browser has no WebP canvas encoder.
  */
 export async function createGalleryPreview(
   source: StickerSource,

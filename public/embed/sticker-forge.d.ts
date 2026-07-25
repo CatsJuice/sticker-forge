@@ -50,6 +50,13 @@ export interface StickerOutlineOptions {
   color?: string;
 }
 
+export interface StickerEdgeOptions {
+  /** Width of the inset edge bevel in CSS pixels. */
+  width?: number;
+  /** Directional edge highlight and shade strength from 0 to 1. */
+  strength?: number;
+}
+
 export interface StickerShadowOptions {
   color?: string;
   opacity?: number;
@@ -89,6 +96,7 @@ export interface StickerPeelOptions {
 export interface StickerOptions {
   source?: StickerSource;
   outline?: StickerOutlineOptions;
+  edge?: StickerEdgeOptions;
   shadow?: StickerShadowOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;

@@ -227,6 +227,19 @@ class GalleryStickerMesh {
       uPeelDir: { value: this.activeDirection.clone() },
       uMeshSize: { value: new THREE.Vector2(1, 1) },
       uTexel: { value: new THREE.Vector2(1 / artwork.width, 1 / artwork.height) },
+      uEdgeFinishScale: {
+        value: clamp(
+          artwork.width / Math.max(Math.abs(root.scale.x), 1),
+          0.75,
+          8,
+        ),
+      },
+      uEdgeBevelWidth: {
+        value: clamp(this.options.edge.width, 0.5, 6),
+      },
+      uEdgeFinishStrength: {
+        value: clamp(this.options.edge.strength, 0, 1),
+      },
       uBackColor: { value: colorFrom(this.options.back.color, "#f7f5f2") },
       uGloss: { value: clamp(this.options.back.gloss, 0, 1) },
       uRoughness: { value: clamp(this.options.back.roughness, 0, 1) },
@@ -372,6 +385,11 @@ class GalleryStickerMesh {
   setShadowScale(scaleX: number, scaleY: number) {
     this.uniforms.uShadowLiftScale.value =
       Math.max(1, Math.min(Math.abs(scaleX), Math.abs(scaleY))) * 0.58;
+    this.uniforms.uEdgeFinishScale.value = clamp(
+      this.artwork.width / Math.max(Math.abs(scaleX), 1),
+      0.75,
+      8,
+    );
   }
 
   setOpacity(opacity: number) {

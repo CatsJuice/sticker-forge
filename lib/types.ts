@@ -44,6 +44,13 @@ export interface StickerOutlineOptions {
   color?: string;
 }
 
+export interface StickerEdgeOptions {
+  /** Width of the inset edge bevel in CSS pixels. */
+  width?: number;
+  /** Directional edge highlight and shade strength from 0 to 1. */
+  strength?: number;
+}
+
 export interface StickerShadowOptions {
   color?: string;
   opacity?: number;
@@ -81,6 +88,7 @@ export interface StickerPeelOptions {
 export interface StickerOptions {
   source?: StickerSource;
   outline?: StickerOutlineOptions;
+  edge?: StickerEdgeOptions;
   shadow?: StickerShadowOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
@@ -148,6 +156,7 @@ export interface StickerInstance {
 export const DEFAULT_STICKER_OPTIONS = {
   source: undefined as StickerSource | undefined,
   outline: { width: 18, color: "#ffffff" },
+  edge: { width: 2.4, strength: 0.7 },
   shadow: {
     color: "#191823",
     opacity: 0.22,
@@ -172,6 +181,7 @@ export const DEFAULT_STICKER_OPTIONS = {
 export type ResolvedStickerOptions = {
   source?: StickerSource;
   outline: Required<StickerOutlineOptions>;
+  edge: Required<StickerEdgeOptions>;
   shadow: Required<StickerShadowOptions>;
   peel: Required<StickerPeelOptions>;
   back: Required<StickerBackOptions>;
@@ -189,6 +199,7 @@ export function resolveStickerOptions(
   return {
     source: patch.source ?? base.source,
     outline: { ...base.outline, ...patch.outline },
+    edge: { ...base.edge, ...patch.edge },
     shadow: { ...base.shadow, ...patch.shadow },
     peel: { ...base.peel, ...patch.peel },
     back: { ...base.back, ...patch.back },

@@ -28,6 +28,7 @@ import {
 
 export type {
   StickerBackOptions,
+  StickerEdgeOptions,
   StickerInstance,
   PreparedStickerSource,
   StickerImageSource,
@@ -156,6 +157,7 @@ function mergePublicOptions(
     ...current,
     ...patch,
     outline: { ...current.outline, ...patch.outline },
+    edge: { ...current.edge, ...patch.edge },
     shadow: { ...current.shadow, ...patch.shadow },
     peel: { ...current.peel, ...patch.peel },
     back: { ...current.back, ...patch.back },
@@ -286,6 +288,9 @@ class StickerRenderer implements StickerInstance {
       uPeelDir: { value: this.activeDirection.clone() },
       uMeshSize: { value: new THREE.Vector2(this.meshWidth, this.meshHeight) },
       uTexel: { value: new THREE.Vector2(1 / 1024, 1 / 512) },
+      uEdgeFinishScale: { value: 1 },
+      uEdgeBevelWidth: { value: this.options.edge.width },
+      uEdgeFinishStrength: { value: this.options.edge.strength },
       uBackColor: { value: colorFrom(this.options.back.color, "#f7f5f2") },
       uGloss: { value: this.options.back.gloss },
       uRoughness: { value: this.options.back.roughness },
@@ -897,6 +902,16 @@ class StickerRenderer implements StickerInstance {
       this.options.back.color,
       "#f7f5f2",
     );
+    this.uniforms.uEdgeBevelWidth.value = clamp(
+      this.options.edge.width,
+      0.5,
+      6,
+    );
+    this.uniforms.uEdgeFinishStrength.value = clamp(
+      this.options.edge.strength,
+      0,
+      1,
+    );
     this.uniforms.uGloss.value = clamp(this.options.back.gloss, 0, 1);
     this.uniforms.uRoughness.value = clamp(this.options.back.roughness, 0, 1);
     this.uniforms.uWind.value = Math.max(0, this.options.wind);
@@ -955,6 +970,7 @@ class StickerRenderer implements StickerInstance {
     const textureScale = this.artwork
       ? this.artwork.width / Math.max(unscaledDisplayWidth, 1)
       : 1;
+    this.uniforms.uEdgeFinishScale.value = clamp(textureScale, 0.75, 8);
     this.uniforms.uInteractionHintRadius.value = this.artwork
       ? clamp(
           this.options.peel.grabWidth * textureScale,

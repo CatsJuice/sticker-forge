@@ -586,6 +586,59 @@ test("keeps text outlines faithful to the artwork alpha", async () => {
   assert.match(renderer, /nextTexture\.minFilter = THREE\.LinearMipmapLinearFilter/);
 });
 
+test("finishes the die-cut edge with a clean directional bevel", async () => {
+  const [
+    source,
+    shader,
+    renderer,
+    galleryRenderer,
+    galleryPreview,
+    storage,
+    types,
+    studio,
+    declarations,
+  ] =
+    await Promise.all([
+      readFile(new URL("../lib/source.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/shaders.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/sticker-forge.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/gallery-renderer.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/gallery-preview.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/gallery-storage.ts", import.meta.url), "utf8"),
+      readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/StickerForgeStudio.tsx", import.meta.url), "utf8"),
+      readFile(new URL("../public/embed/sticker-forge.d.ts", import.meta.url), "utf8"),
+    ]);
+
+  assert.doesNotMatch(source, /function finishOutline\(/);
+  assert.match(source, /tintAlpha\(expandedAlpha, outline\.color\)/);
+  assert.match(shader, /uniform float uEdgeFinishScale/);
+  assert.match(shader, /uniform float uEdgeBevelWidth/);
+  assert.match(shader, /uniform float uEdgeFinishStrength/);
+  assert.match(shader, /float edgeBand = smoothstep/);
+  assert.doesNotMatch(shader, /thicknessAlpha|thicknessSample/);
+  assert.match(shader, /gl_FragColor = vec4\(color, printSample\.a \* uOpacity\)/);
+  assert.match(renderer, /uEdgeFinishScale: \{ value: 1 \}/);
+  assert.match(renderer, /this\.options\.edge\.width/);
+  assert.match(renderer, /this\.options\.edge\.strength/);
+  assert.match(renderer, /const outlineChanged =\s*patch\.outline/);
+  assert.match(galleryRenderer, /uEdgeFinishScale:/);
+  assert.match(types, /export interface StickerEdgeOptions/);
+  assert.match(types, /edge: \{ width: 2\.4, strength: 0\.7 \}/);
+  assert.match(studio, /edgeFinish: "边缘质感"/);
+  assert.match(studio, /id="edge-width"/);
+  assert.match(studio, /id="edge-strength"/);
+  assert.match(studio, /updateSetting\("edge"/);
+  assert.match(declarations, /export interface StickerEdgeOptions/);
+  assert.match(declarations, /edge\?: StickerEdgeOptions/);
+  assert.match(galleryPreview, /layout updates deliberately do\s+\* not regenerate or rewrite the thumbnail/);
+  assert.match(
+    storage,
+    /transaction\.objectStore\(PREVIEW_STORE\)\.add\(preview\)/,
+  );
+  assert.doesNotMatch(storage, /objectStore\(PREVIEW_STORE\)\.put\(/);
+});
+
 test("supports uploaded images and derives transparent silhouettes from alpha", async () => {
   const [types, source, studio, declarations] = await Promise.all([
     readFile(new URL("../lib/types.ts", import.meta.url), "utf8"),

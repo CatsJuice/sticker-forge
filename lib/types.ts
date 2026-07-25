@@ -85,6 +85,61 @@ export interface StickerBackOptions {
   roughness?: number;
 }
 
+export type StickerMaterialType =
+  | "satin"
+  | "matte"
+  | "glossy"
+  | "holographic"
+  | "metallic"
+  | "glitter"
+  | "paper"
+  | "kraft"
+  | "reflective"
+  | "pearlescent"
+  | "clear"
+  | "frosted"
+  | "spot-uv"
+  | "lenticular";
+
+export const STICKER_MATERIAL_TYPES: readonly StickerMaterialType[] = [
+  "satin",
+  "matte",
+  "glossy",
+  "holographic",
+  "metallic",
+  "glitter",
+  "paper",
+  "kraft",
+  "reflective",
+  "pearlescent",
+  "clear",
+  "frosted",
+  "spot-uv",
+  "lenticular",
+];
+
+export function stickerMaterialTypeIndex(type: StickerMaterialType): number {
+  const index = STICKER_MATERIAL_TYPES.indexOf(type);
+  return index < 0 ? 0 : index;
+}
+
+/** Appearance of the printed face. Procedural effects stay stable across exports. */
+export interface StickerMaterialOptions {
+  type?: StickerMaterialType;
+  /** Overall strength of the material response, from 0 to 1. */
+  intensity?: number;
+  /** Surface roughness, from 0 (mirror-like) to 1 (diffuse). */
+  roughness?: number;
+  /** Relative size of fibers, flakes, ridges, and other procedural detail. */
+  scale?: number;
+  /** Primary material tint, used by metallic and translucent materials. */
+  tint?: string;
+  /** Secondary tint, used by lenticular and pearlescent materials. */
+  secondaryTint?: string;
+  /** Stable procedural variation seed. */
+  seed?: number;
+}
+
 export interface StickerSoundOptions {
   /** Custom peel-sound URL. Omit or leave empty to use the bundled sound. */
   src?: string;
@@ -113,6 +168,7 @@ export interface StickerOptions {
   lighting?: StickerLightingOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
+  material?: StickerMaterialOptions;
   sound?: StickerSoundOptions;
   tilt?: number;
   wind?: number;
@@ -199,6 +255,15 @@ export const DEFAULT_STICKER_OPTIONS = {
     release: "snap" as const,
   },
   back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+  material: {
+    type: "satin" as const,
+    intensity: 0.72,
+    roughness: 0.38,
+    scale: 1,
+    tint: "#d8dde7",
+    secondaryTint: "#f2b7ff",
+    seed: 0.37,
+  },
   sound: { src: "", volume: 0.7, enabled: true },
   tilt: -3,
   wind: 0.25,
@@ -218,6 +283,7 @@ export type ResolvedStickerOptions = {
   };
   peel: Required<StickerPeelOptions>;
   back: Required<StickerBackOptions>;
+  material: Required<StickerMaterialOptions>;
   sound: Required<StickerSoundOptions>;
   tilt: number;
   wind: number;
@@ -244,6 +310,7 @@ export function resolveStickerOptions(
     },
     peel: { ...base.peel, ...patch.peel },
     back: { ...base.back, ...patch.back },
+    material: { ...base.material, ...patch.material },
     sound: { ...base.sound, ...patch.sound },
     tilt: patch.tilt ?? base.tilt,
     wind: patch.wind ?? base.wind,

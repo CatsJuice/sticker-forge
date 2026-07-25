@@ -81,6 +81,12 @@ exported and returns immediately (`void`).
     },
     sound: { enabled: true, volume: 0.68 },
     back: { color: "#f7f5f2", gloss: 0.7, roughness: 0.3 },
+    material: {
+      type: "holographic",
+      intensity: 0.86,
+      roughness: 0.16,
+      scale: 1,
+    },
     tilt: -3,
   });
 
@@ -215,6 +221,19 @@ slice profile.
 starts the same rebuild but cannot be awaited. `destroy()` should be called
 before a single-page application permanently removes an imperative sticker
 instance. A disconnected `<sticker-forge>` cleans itself up automatically.
+
+### Front materials
+
+Set `material.type` to `satin`, `matte`, `glossy`, `holographic`, `metallic`,
+`glitter`, `paper`, `kraft`, `reflective`, `pearlescent`, `clear`, `frosted`,
+`spot-uv`, or `lenticular`. Every material is procedural, responds to the live
+surface normal while peeling, and remains deterministic in Gallery previews and
+recorded exports.
+
+Use `material.intensity` and `material.roughness` in the `0..1` range,
+`material.scale` to resize procedural detail, and `tint`/`secondaryTint` for
+color-responsive finishes. `material.seed` keeps paper fibers, glitter flakes,
+and similar detail stable between frames.
 
 ## Rendering notes
 

@@ -71,6 +71,8 @@ test("ships both standalone bundles and a copyable embed example", async () => {
   assert.match(declarations, /interface StickerSoundOptions/);
   assert.match(declarations, /interface StickerLightingOptions/);
   assert.match(declarations, /interface StickerLightDirection/);
+  assert.match(declarations, /interface StickerMaterialOptions/);
+  assert.match(declarations, /material\?: StickerMaterialOptions/);
   assert.match(declarations, /interface StickerRichTextDocument/);
   assert.match(declarations, /richText\?: StickerRichTextDocument/);
   assert.match(declarations, /sound\?: StickerSoundOptions/);

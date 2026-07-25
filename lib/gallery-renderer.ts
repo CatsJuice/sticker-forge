@@ -13,7 +13,11 @@ import {
   stickerFragmentShader,
   stickerVertexShader,
 } from "./shaders";
-import { resolveStickerOptions, type ResolvedStickerOptions } from "./types";
+import {
+  resolveStickerOptions,
+  stickerMaterialTypeIndex,
+  type ResolvedStickerOptions,
+} from "./types";
 
 export type GalleryRenderItem = {
   item: GalleryItem;
@@ -243,6 +247,25 @@ class GalleryStickerMesh {
       uBackColor: { value: colorFrom(this.options.back.color, "#f7f5f2") },
       uGloss: { value: clamp(this.options.back.gloss, 0, 1) },
       uRoughness: { value: clamp(this.options.back.roughness, 0, 1) },
+      uMaterialType: {
+        value: stickerMaterialTypeIndex(this.options.material.type),
+      },
+      uMaterialIntensity: {
+        value: clamp(this.options.material.intensity, 0, 1),
+      },
+      uMaterialRoughness: {
+        value: clamp(this.options.material.roughness, 0, 1),
+      },
+      uMaterialScale: {
+        value: clamp(this.options.material.scale, 0.2, 4),
+      },
+      uMaterialTint: {
+        value: colorFrom(this.options.material.tint, "#d8dde7"),
+      },
+      uMaterialSecondaryTint: {
+        value: colorFrom(this.options.material.secondaryTint, "#f2b7ff"),
+      },
+      uMaterialSeed: { value: this.options.material.seed },
       uShadowColor: { value: colorFrom(this.options.shadow.color, "#191823") },
       uShadowOpacity: {
         value: clamp(this.options.shadow.opacity, 0, 0.9),
@@ -357,7 +380,12 @@ class GalleryStickerMesh {
       toneMapped: false,
     });
     this.flatMesh = new THREE.Mesh(this.geometry, this.flatMaterial);
-    this.stickerMesh.visible = false;
+    // Keep the shader-backed face visible while idle so front materials do
+    // not disappear when an interactive gallery sticker settles flat.
+    this.flatMesh.visible = false;
+    this.stickerMesh.visible = true;
+    this.stickerMaterial.depthTest = false;
+    this.stickerMaterial.depthWrite = false;
     this.residueMesh.visible = false;
     root.add(this.shadowMesh, this.residueMesh, this.stickerMesh, this.flatMesh);
   }
@@ -480,6 +508,9 @@ class GalleryStickerMesh {
     this.shadowMesh.visible = false;
     this.flatMesh.visible = false;
     this.stickerMesh.visible = true;
+    this.stickerMaterial.depthTest = true;
+    this.stickerMaterial.depthWrite = true;
+    this.stickerMaterial.needsUpdate = true;
     this.stickerMesh.castShadow = true;
     this.residueMesh.visible = true;
     this.setDynamicShadowOpacity(1);
@@ -489,8 +520,11 @@ class GalleryStickerMesh {
     this.stickerMesh.castShadow = false;
     this.setDynamicShadowOpacity(0);
     this.shadowMesh.visible = true;
-    this.flatMesh.visible = true;
-    this.stickerMesh.visible = false;
+    this.flatMesh.visible = false;
+    this.stickerMesh.visible = true;
+    this.stickerMaterial.depthTest = false;
+    this.stickerMaterial.depthWrite = false;
+    this.stickerMaterial.needsUpdate = true;
     this.residueMesh.visible = false;
   }
 

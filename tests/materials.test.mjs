@@ -167,6 +167,18 @@ test("offers all materials in the studio and shares one baked material source", 
   assert.match(renderer, /uPreserveFrontColor: \{ value: 1 \}/);
   assert.match(materialPreview, /scaledPhase\(position, scale\)/);
   assert.match(materialPreview, /\* scale \* scale/);
-  assert.match(materialPreview, /addHolographicStops\(rainbow, scale/);
+  assert.match(
+    materialPreview,
+    /addHolographicStops\([\s\S]*?rainbow,[\s\S]*?scale/,
+  );
   assert.match(materialPreview, /addReflectiveStops\(sheen, scale/);
+  assert.match(materialPreview, /lightX - defaultLightX/);
+  assert.match(materialPreview, /Math\.cos\(orientation - lightAngle\)/);
+  assert.match(renderer, /lighting\.direction\.x/);
+  assert.match(renderer, /lighting\.intensity/);
+  assert.match(
+    renderer,
+    /preparedOptions\.material,\s+preparedOptions\.lighting/,
+  );
+  assert.match(preview, /options\.lighting/);
 });

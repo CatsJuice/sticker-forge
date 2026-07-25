@@ -866,6 +866,7 @@ async function createStoredGalleryItem(
 ): Promise<GalleryItem> {
   const preview = await createGalleryPreview(source, options.outline, {
     material: options.material,
+    lighting: options.lighting,
   });
   const payload: CreateGalleryPayload = {
     source,
@@ -891,6 +892,7 @@ async function createStoredGalleryItemWithPreview(
 ): Promise<{ item: GalleryItem; preview: GalleryPreviewResult }> {
   const preview = await createGalleryPreview(source, options.outline, {
     material: options.material,
+    lighting: options.lighting,
   });
   const item = await createGalleryItem({
     folderId,

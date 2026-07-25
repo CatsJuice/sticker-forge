@@ -517,6 +517,7 @@ class StickerRenderer implements StickerInstance {
     const texture = this.createArtworkTexture(
       artwork,
       preparedOptions.material,
+      preparedOptions.lighting,
     );
     this.renderer.initTexture(texture);
     let pending = true;
@@ -924,24 +925,31 @@ class StickerRenderer implements StickerInstance {
 
   private materialKey() {
     const material = this.options.material;
+    const lighting = this.options.lighting;
     return JSON.stringify([
       material.type,
       material.intensity,
       material.scale,
       material.seed,
       ...material.holographicColors,
+      lighting.direction.x,
+      lighting.direction.y,
+      lighting.direction.z,
+      lighting.intensity,
     ]);
   }
 
   private createArtworkTexture(
     artwork: PreparedArtwork,
     material = this.options.material,
+    lighting = this.options.lighting,
   ) {
     const bakedCanvas = createMaterialPreviewCanvas(
       artwork.canvas,
       artwork.width,
       artwork.height,
       material,
+      lighting,
     );
     const nextTexture = new THREE.CanvasTexture(bakedCanvas);
     nextTexture.colorSpace = THREE.SRGBColorSpace;

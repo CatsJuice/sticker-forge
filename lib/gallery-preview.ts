@@ -2,6 +2,7 @@ import { prepareArtwork } from "./source";
 import { createMaterialPreviewCanvas } from "./material-preview";
 import {
   DEFAULT_STICKER_OPTIONS,
+  type StickerLightingOptions,
   type StickerMaterialOptions,
   type StickerOutlineOptions,
   type StickerSource,
@@ -21,6 +22,8 @@ export interface GalleryPreviewOptions {
   webpQuality?: number;
   /** Optional front material baked into the immutable thumbnail. */
   material?: StickerMaterialOptions;
+  /** Optional lighting baked into light-reactive front materials. */
+  lighting?: StickerLightingOptions;
 }
 
 export interface GalleryPreviewResult {
@@ -130,6 +133,7 @@ export async function createGalleryPreview(
       previewWidth,
       previewHeight,
       options.material,
+      options.lighting,
     );
 
     const encoded = encodePreview(canvas, webpQuality);

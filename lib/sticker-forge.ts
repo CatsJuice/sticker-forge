@@ -12,6 +12,7 @@ import {
   PeelAudioEngine,
 } from "./peel-audio";
 import { getLaserEffectSettings } from "./laser-debug";
+import { createMaterialPreviewCanvas } from "./material-preview";
 import { prepareArtwork, type PreparedArtwork } from "./source";
 import {
   resolveStickerOptions,
@@ -322,6 +323,7 @@ class StickerRenderer implements StickerInstance {
       uMaterialIntensity: { value: this.options.material.intensity },
       uMaterialScale: { value: this.options.material.scale },
       uMaterialSeed: { value: this.options.material.seed },
+      uMaterialBaked: { value: 0 },
       uHolographicColorA: {
         value: colorFrom(
           this.options.material.holographicColors[0],
@@ -366,7 +368,10 @@ class StickerRenderer implements StickerInstance {
       uInteractionHintColor: {
         value: colorFrom(INTERACTION_HINT_COLOR, "rgb(36, 126, 245)"),
       },
-      uPreserveFrontColor: { value: 0 },
+      // Keep the resting face pixel-identical to the baked Gallery preview.
+      // The shader fades this protection as soon as the sticker deforms, so
+      // lighting still responds during peel/drag interaction.
+      uPreserveFrontColor: { value: 1 },
       uOpacity: { value: 1 },
     };
 
@@ -502,7 +507,10 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) {
       throw new Error("The sticker renderer has been destroyed.");
     }
-    const texture = this.createArtworkTexture(artwork);
+    const texture = this.createArtworkTexture(
+      artwork,
+      preparedOptions.material,
+    );
     this.renderer.initTexture(texture);
     let pending = true;
     const commitPrepared = () => {
@@ -553,8 +561,16 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) return;
     const previousOutline = this.options.outline;
     const previousQuality = this.options.quality;
+    const previousMaterialKey = this.materialKey();
     this.options = resolveStickerOptions(this.options, patch);
     this.applyOptionsToRenderer();
+    if (
+      this.artwork &&
+      this.materialKey() !== previousMaterialKey &&
+      !patch.source
+    ) {
+      this.refreshMaterialTexture();
+    }
 
     if (patch.source) {
       void this.setSource(patch.source).catch(() => {
@@ -834,8 +850,28 @@ class StickerRenderer implements StickerInstance {
     canvas.remove();
   }
 
-  private createArtworkTexture(artwork: PreparedArtwork) {
-    const nextTexture = new THREE.CanvasTexture(artwork.canvas);
+  private materialKey() {
+    const material = this.options.material;
+    return JSON.stringify([
+      material.type,
+      material.intensity,
+      material.scale,
+      material.seed,
+      ...material.holographicColors,
+    ]);
+  }
+
+  private createArtworkTexture(
+    artwork: PreparedArtwork,
+    material = this.options.material,
+  ) {
+    const bakedCanvas = createMaterialPreviewCanvas(
+      artwork.canvas,
+      artwork.width,
+      artwork.height,
+      material,
+    );
+    const nextTexture = new THREE.CanvasTexture(bakedCanvas);
     nextTexture.colorSpace = THREE.SRGBColorSpace;
     nextTexture.minFilter = THREE.LinearMipmapLinearFilter;
     nextTexture.magFilter = THREE.LinearFilter;
@@ -846,6 +882,19 @@ class StickerRenderer implements StickerInstance {
     );
     nextTexture.needsUpdate = true;
     return nextTexture;
+  }
+
+  private refreshMaterialTexture() {
+    if (!this.artwork) return;
+    const previousTexture = this.texture;
+    const nextTexture = this.createArtworkTexture(this.artwork);
+    this.texture = nextTexture;
+    this.uniforms.uMap.value = nextTexture;
+    if (this.uniforms.uPreparedMap.value === previousTexture) {
+      this.uniforms.uPreparedMap.value = nextTexture;
+    }
+    this.uniforms.uMaterialBaked.value = 1;
+    previousTexture?.dispose();
   }
 
   private cancelPreparedEntrance() {
@@ -867,6 +916,7 @@ class StickerRenderer implements StickerInstance {
     this.uniforms.uMap.value = nextTexture;
     this.uniforms.uPreparedMap.value = nextTexture;
     this.uniforms.uPreparedMix.value = 0;
+    this.uniforms.uMaterialBaked.value = 1;
     this.uniforms.uPreEntranceProgress.value = 0;
     (this.uniforms.uTexel.value as THREE.Vector2).set(
       1 / artwork.width,

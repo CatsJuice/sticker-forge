@@ -67,6 +67,7 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     "uMaterialIntensity",
     "uMaterialScale",
     "uMaterialSeed",
+    "uMaterialBaked",
     "uHolographicColorA",
     "uHolographicColorB",
     "uHolographicColorC",
@@ -77,6 +78,10 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   }
   assert.match(shader, /applyFrontMaterial/);
   assert.match(shader, /if \(kind < 0\.5\) return base/);
+  assert.match(
+    shader,
+    /vec3 applyFrontMaterial\([\s\S]*?vec3 lightDirection/,
+  );
   assert.match(
     shader,
     /vec2 holographicUv = \(vUv - 0\.5\) \* scale/,
@@ -93,14 +98,58 @@ test("binds material uniforms in editor and gallery renderers", async () => {
     holographicBlock,
     /float holographicViewShift =[\s\S]*\(1\.0 - facing\)[\s\S]*vCurl/,
   );
+  assert.match(
+    holographicBlock,
+    /float holographicLightShift =[\s\S]*lightDirection\.xy/,
+  );
+  assert.match(holographicBlock, /previewGradientPhase\(\)/);
+  assert.match(holographicBlock, /uLightIntensity - 0\.8/);
+  assert.match(holographicBlock, /float holographicMix =[\s\S]*0\.24/);
+  assert.ok(
+    !holographicBlock.includes("sin(phase * 13.0)"),
+    "live holographic color must not add bands absent from the baked preview",
+  );
   assert.match(holographicBlock, /float broadSpec = pow\(ndh, 12\.0\)/);
-  assert.match(gallery, /shader-backed face visible while idle/);
+  const reflectiveBlock = shader.match(
+    /\/\/ Retroreflective film\.([\s\S]*?)\n  }/,
+  )?.[1];
+  assert.ok(reflectiveBlock, "missing reflective shader block");
+  assert.match(
+    reflectiveBlock,
+    /dot\(lightDirection, viewDirection\)/,
+  );
+  assert.match(reflectiveBlock, /previewReflectiveOpacity/);
+  assert.match(reflectiveBlock, /previewGradientPhase\(\)/);
+  assert.match(reflectiveBlock, /mix\(base, vec3\(1\.0\)/);
+  assert.match(reflectiveBlock, /uLightIntensity/);
+  assert.match(gallery, /material-baked gallery preview while idle/);
+  assert.match(gallery, /map: idleTexture \?\? this\.texture/);
+  assert.match(gallery, /uPreparedMap: \{ value: idleTexture \?\? this\.texture \}/);
+  assert.match(gallery, /uPreparedMix: \{ value: idleTexture \? 1 : 0 \}/);
+  assert.match(gallery, /uMaterialBaked: \{ value: idleTexture \? 1 : 0 \}/);
+  assert.match(renderer, /uMaterialBaked: \{ value: 0 \}/);
+  assert.match(gallery, /this\.flatMesh\.visible = true/);
+  assert.match(gallery, /this\.stickerMesh\.visible = false/);
+  assert.match(
+    gallery,
+    /this\.loadSticker\(record!, renderItem\.asset!, generation\),\s+true/,
+  );
+  assert.match(
+    gallery,
+    /if \(!record\.preview && record\.previewLoading\) \{\s+await this\.loadPreview\(record\)/,
+  );
+  assert.match(
+    shader,
+    /smoothstep\(0\.0, 0\.22, frontDeformation\) \* 0\.35/,
+  );
 });
 
-test("offers all materials in the studio and bakes gallery previews", async () => {
-  const [studio, preview] = await Promise.all([
+test("offers all materials in the studio and shares one baked material source", async () => {
+  const [studio, preview, materialPreview, renderer] = await Promise.all([
     source("app/StickerForgeStudio.tsx"),
     source("lib/gallery-preview.ts"),
+    source("lib/material-preview.ts"),
+    source("lib/sticker-forge.ts"),
   ]);
 
   for (const material of MATERIALS) {
@@ -109,7 +158,11 @@ test("offers all materials in the studio and bakes gallery previews", async () =
   assert.match(studio, /MATERIAL_PRESETS/);
   assert.match(studio, /holographic-color-controls/);
   assert.match(studio, /holographicColors/);
-  assert.match(preview, /applyMaterialPreview/);
+  assert.match(preview, /createMaterialPreviewCanvas/);
   assert.match(preview, /options\.material/);
-  assert.match(preview, /resolved\.holographicColors/);
+  assert.match(materialPreview, /applyMaterialPreview/);
+  assert.match(materialPreview, /resolved\.holographicColors/);
+  assert.match(renderer, /createMaterialPreviewCanvas/);
+  assert.match(renderer, /uMaterialBaked\.value = 1/);
+  assert.match(renderer, /uPreserveFrontColor: \{ value: 1 \}/);
 });

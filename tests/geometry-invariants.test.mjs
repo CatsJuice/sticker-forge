@@ -35,6 +35,9 @@ test("renders the gallery through one shared WebGL canvas", async () => {
   assert.match(renderer, /private showFlatSurface\(\)/);
   assert.match(renderer, /this\.flatMaterial = new THREE\.MeshBasicMaterial/);
   assert.match(renderer, /this\.showFlatSurface\(\)/);
+  assert.match(renderer, /map: idleTexture \?\? this\.texture/);
+  assert.match(renderer, /private enqueue\(job: QueueJob, priority = false\)/);
+  assert.match(renderer, /if \(priority\) this\.queue\.unshift\(job\)/);
 });
 
 test("keeps gallery entry and gestures on the shared canvas transform", async () => {
@@ -1103,7 +1106,10 @@ test("projects shadows in the sticker material without a receiver seam", async (
   assert.match(shader, /curved\.xy \+= tangent \* windDisplacement \* 0\.04/);
   assert.match(shader, /curved\.xy \+= direction \* windDisplacement \* 0\.01/);
   assert.match(shader, /float projectedShadow = \(1\.0 - getShadowMask\(\)\) \* vAdhered/);
-  assert.match(shader, /vec3 lightDirection = normalize\(uLightDirection\)/);
+  assert.match(
+    shader,
+    /vec3 lightDirection = length\(uLightDirection\) > 0\.0001/,
+  );
   assert.match(
     shader,
     /uAmbientLight \+ normalLight \* uLightIntensity/,

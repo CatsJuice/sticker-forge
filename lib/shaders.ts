@@ -242,6 +242,7 @@ export const stickerFragmentShader = /* glsl */ `
   uniform float uMaterialIntensity;
   uniform float uMaterialScale;
   uniform float uMaterialSeed;
+  uniform float uMaterialBaked;
   uniform vec3 uHolographicColorA;
   uniform vec3 uHolographicColorB;
   uniform vec3 uHolographicColorC;
@@ -331,21 +332,51 @@ export const stickerFragmentShader = /* glsl */ `
     );
   }
 
+  float previewGradientPhase() {
+    float aspect = uTexel.y / max(uTexel.x, 0.000001);
+    float aspectSquared = aspect * aspect;
+    float horizontalWeight = aspectSquared / (aspectSquared + 1.0);
+    return vUv.x * horizontalWeight
+      + vUv.y * (1.0 - horizontalWeight);
+  }
+
+  float previewReflectiveOpacity(float phase) {
+    if (phase < 0.25 || phase > 0.78) return 0.0;
+    if (phase < 0.46) {
+      return mix(0.0, 0.7, (phase - 0.25) / 0.21);
+    }
+    if (phase < 0.58) {
+      return mix(0.7, 0.14, (phase - 0.46) / 0.12);
+    }
+    return mix(0.14, 0.0, (phase - 0.58) / 0.2);
+  }
+
   vec3 applyFrontMaterial(
     vec3 base,
     vec3 normal,
     vec3 viewDirection,
-    vec3 halfDirection
+    vec3 lightDirection,
+    vec3 halfDirection,
+    float finishActivation,
+    float deformation
   ) {
     float kind = floor(uMaterialType + 0.5);
     // The default path is deliberately a no-op so it is pixel-identical to
     // Sticker Forge's front material before selectable finishes were added.
     if (kind < 0.5) return base;
 
-    float amount = clamp(uMaterialIntensity, 0.0, 1.0);
+    float amount =
+      clamp(uMaterialIntensity, 0.0, 1.0)
+      * clamp(finishActivation, 0.0, 1.0);
     float scale = max(uMaterialScale, 0.2);
     vec2 detailUv = vUv * scale;
     float facing = max(dot(normal, viewDirection), 0.0);
+    float directLight = max(dot(normal, lightDirection), 0.0);
+    float materialLight = clamp(
+      uAmbientLight + directLight * uLightIntensity,
+      0.0,
+      1.65
+    );
     float ndh = max(dot(normal, halfDirection), 0.0);
     float edge = pow(1.0 - facing, 3.0);
     float grain = hash21(detailUv * 913.7 + uMaterialSeed * 71.3) - 0.5;
@@ -355,31 +386,50 @@ export const stickerFragmentShader = /* glsl */ `
     // Diffractive holographic film.
     if (kind < 1.5) {
       // Keep the diffraction bands anchored to the undeformed sticker.
-      // The scalar view shift below lets the colors travel as the film bends
-      // without rotating the band direction independently on either side of
-      // the peel front.
+      // Match the gallery thumbnail's single, soft diagonal color wash. Light
+      // and view changes move that wash without replacing the printed artwork.
       vec2 holographicUv = (vUv - 0.5) * scale;
+      vec3 defaultLightDirection = normalize(vec3(-0.38, 0.52, 0.76));
+      float holographicLightShift =
+        dot(
+          lightDirection.xy - defaultLightDirection.xy,
+          vec2(0.32, -0.26)
+        );
       float holographicViewShift =
-        (1.0 - facing) * 0.62
-        + (1.0 - ndh) * 0.08
-        + vCurl * 0.16;
+        (1.0 - facing) * 0.12
+        + vCurl * 0.08;
       float phase =
-        dot(holographicUv, vec2(1.15, 0.72)) * 2.8
-        + holographicViewShift
-        + grain * 0.16;
+        previewGradientPhase()
+        + holographicLightShift
+        + holographicViewShift;
       vec3 rainbow = holographicPalette(phase);
-      float band = 0.38 + 0.62 * pow(0.5 + 0.5 * sin(phase * 13.0), 3.0);
       float broadSpec = pow(ndh, 12.0);
-      float bendSheen = 0.72 + broadSpec * 0.2 + vCurl * 0.18;
-      return mix(
+      float lightStrength = clamp(
+        1.0 + (uLightIntensity - 0.8) * 0.35,
+        0.6,
+        1.3
+      );
+      float holographicMix =
+        0.24
+        * amount
+        * lightStrength;
+      vec3 holographicBase = mix(
         base,
-        screenBlend(base, rainbow * band * bendSheen),
-        amount * (0.48 + 0.14 * facing)
-      ) + (
-        broadSpec * 0.13
-        + sharpSpec * 0.24
-        + vCurl * 0.06
-      ) * rainbow * amount;
+        rainbow,
+        holographicMix
+      );
+      float holographicHighlight =
+        broadSpec * 0.1
+        + sharpSpec * 0.16
+        + vCurl * 0.035;
+      holographicHighlight *= smoothstep(0.0, 0.18, deformation);
+      return screenBlend(
+        holographicBase,
+        rainbow
+          * holographicHighlight
+          * amount
+          * uLightIntensity
+      );
     }
 
     // Glitter laminate.
@@ -399,10 +449,35 @@ export const stickerFragmentShader = /* glsl */ `
     }
 
     // Retroreflective film.
-    float retro = pow(facing, 22.0);
+    float retroAlignment = max(dot(lightDirection, viewDirection), 0.0);
+    float retroCone = pow(
+      retroAlignment,
+      mix(10.0, 3.0, clamp(uLightSoftness, 0.0, 1.0))
+    );
+    vec3 defaultLightDirection = normalize(vec3(-0.38, 0.52, 0.76));
+    float reflectivePhase =
+      previewGradientPhase()
+      + dot(
+        lightDirection.xy - defaultLightDirection.xy,
+        vec2(0.28, -0.22)
+      );
+    float reflectivePreview = previewReflectiveOpacity(
+      reflectivePhase
+    );
+    float lightStrength = clamp(
+      1.0 + (uLightIntensity - 0.8) * 0.5,
+      0.5,
+      1.4
+    );
+    float retro = reflectivePreview * lightStrength
+      + retroCone
+        * mix(0.42, 1.0, directLight)
+        * smoothstep(0.0, 0.18, deformation)
+        * 0.18;
     float beads = 0.78 + fineGrain * 0.28;
-    return screenBlend(base, vec3(retro * beads * amount * 0.9))
-      + edge * 0.025 * amount;
+    float reflectiveLift = retro * beads * amount;
+    return mix(base, vec3(1.0), clamp(reflectiveLift, 0.0, 0.78))
+      + edge * 0.025 * amount * materialLight;
   }
 
   float interactionHitArea(vec2 uv, float centerAlpha, float radius) {
@@ -559,7 +634,9 @@ export const stickerFragmentShader = /* glsl */ `
       preservedFront
     );
     vec3 normal = signedFacing < 0.0 ? -surfaceNormal : surfaceNormal;
-    vec3 lightDirection = normalize(uLightDirection);
+    vec3 lightDirection = length(uLightDirection) > 0.0001
+      ? normalize(uLightDirection)
+      : normalize(vec3(-0.38, 0.52, 0.76));
     vec3 halfDirection = normalize(lightDirection + viewDirection);
     float normalLight = max(dot(normal, lightDirection), 0.0);
     float lightLevel = clamp(
@@ -589,11 +666,19 @@ export const stickerFragmentShader = /* glsl */ `
       printSample.rgb,
       preservedFront
     );
+    float finishActivation = mix(
+      1.0,
+      smoothstep(0.0, 0.22, frontDeformation) * 0.35,
+      clamp(uMaterialBaked, 0.0, 1.0)
+    );
     vec3 frontColor = applyFrontMaterial(
       neutralFrontColor,
       normal,
       viewDirection,
-      halfDirection
+      lightDirection,
+      halfDirection,
+      finishActivation,
+      frontDeformation
     );
     frontColor = mix(
       frontColor,
@@ -601,12 +686,14 @@ export const stickerFragmentShader = /* glsl */ `
       edgeBand
         * edgeHighlight
         * clamp(uEdgeFinishStrength, 0.0, 1.0)
+        * finishActivation
         * 0.2
     );
     frontColor *= 1.0
       - edgeBand
         * edgeShade
         * clamp(uEdgeFinishStrength, 0.0, 1.0)
+        * finishActivation
         * 0.12;
 
     float exponent =

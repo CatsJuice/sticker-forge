@@ -58,6 +58,49 @@ function addHolographicStops(
   gradient.addColorStop(1, colors[((lastStop % 3) + 3) % 3]);
 }
 
+function applyHolographicFrost(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  amount: number,
+  scale: number,
+  seed: number,
+) {
+  const noiseCanvas = document.createElement("canvas");
+  const noiseSize = 96;
+  noiseCanvas.width = noiseSize;
+  noiseCanvas.height = noiseSize;
+  const noiseContext = noiseCanvas.getContext("2d", { alpha: true });
+  if (!noiseContext) return;
+
+  let state = Math.floor(seed * 2147483647) || 1;
+  const random = () => {
+    state = (state * 48271) % 2147483647;
+    return state / 2147483647;
+  };
+  const noise = noiseContext.createImageData(noiseSize, noiseSize);
+  for (let index = 0; index < noise.data.length; index += 4) {
+    const value = random();
+    const brightness = value > 0.48 ? 255 : 20;
+    noise.data[index] = brightness;
+    noise.data[index + 1] = brightness;
+    noise.data[index + 2] = brightness;
+    noise.data[index + 3] = Math.round(38 + random() * 74);
+  }
+  noiseContext.putImageData(noise, 0, 0);
+
+  const pattern = context.createPattern(noiseCanvas, "repeat");
+  if (!pattern) return;
+  pattern.setTransform(
+    new DOMMatrix().scaleSelf(1 / Math.sqrt(scale), 1 / Math.sqrt(scale)),
+  );
+  context.save();
+  context.globalAlpha = 0.16 * amount;
+  context.fillStyle = pattern;
+  context.fillRect(0, 0, width, height);
+  context.restore();
+}
+
 export function applyMaterialPreview(
   context: CanvasRenderingContext2D,
   width: number,
@@ -130,6 +173,14 @@ export function applyMaterialPreview(
       * amount
       * Math.min(1.3, Math.max(0.6, 1 + (intensity - 0.8) * 0.35));
     context.fillRect(0, 0, width, height);
+    applyHolographicFrost(
+      context,
+      width,
+      height,
+      amount,
+      scale,
+      resolved.seed,
+    );
   }
 
   if (resolved.type === "glitter") {

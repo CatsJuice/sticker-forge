@@ -105,6 +105,8 @@ test("binds material uniforms in editor and gallery renderers", async () => {
   assert.match(holographicBlock, /previewGradientPhase\(\)/);
   assert.match(holographicBlock, /uLightIntensity - 0\.8/);
   assert.match(holographicBlock, /float holographicMix =[\s\S]*0\.24/);
+  assert.match(holographicBlock, /float frostGrain =/);
+  assert.match(holographicBlock, /detailUv \* 1380\.0/);
   assert.ok(
     !holographicBlock.includes("sin(phase * 13.0)"),
     "live holographic color must not add bands absent from the baked preview",
@@ -174,6 +176,8 @@ test("offers all materials in the studio and shares one baked material source", 
   assert.match(materialPreview, /addReflectiveStops\(sheen, scale/);
   assert.match(materialPreview, /lightX - defaultLightX/);
   assert.match(materialPreview, /Math\.cos\(orientation - lightAngle\)/);
+  assert.match(materialPreview, /function applyHolographicFrost/);
+  assert.match(materialPreview, /pattern\.setTransform/);
   assert.match(renderer, /lighting\.direction\.x/);
   assert.match(renderer, /lighting\.intensity/);
   assert.match(

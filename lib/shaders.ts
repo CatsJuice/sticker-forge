@@ -431,6 +431,14 @@ export const stickerFragmentShader = /* glsl */ `
         rainbow,
         holographicMix
       );
+      float frostGrain =
+        hash21(detailUv * 1380.0 + uMaterialSeed * 113.0) - 0.5;
+      holographicBase *= 1.0 + frostGrain * 0.095 * amount;
+      holographicBase = mix(
+        holographicBase,
+        vec3(0.92 + frostGrain * 0.16),
+        abs(frostGrain) * 0.045 * amount
+      );
       float holographicHighlight =
         broadSpec * 0.1
         + sharpSpec * 0.16

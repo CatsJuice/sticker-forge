@@ -15835,7 +15835,7 @@ var yu = class {
     #include <shadowmap_vertex>
     gl_Position = projectionMatrix * viewPosition;
   }
-`, Df = `
+`, xf = `
   ${wA}
 
   uniform vec2 uShadowDirection;
@@ -16051,6 +16051,14 @@ var yu = class {
         base,
         rainbow,
         holographicMix
+      );
+      float frostGrain =
+        hash21(detailUv * 1380.0 + uMaterialSeed * 113.0) - 0.5;
+      holographicBase *= 1.0 + frostGrain * 0.095 * amount;
+      holographicBase = mix(
+        holographicBase,
+        vec3(0.92 + frostGrain * 0.16),
+        abs(frostGrain) * 0.045 * amount
       );
       float holographicHighlight =
         broadSpec * 0.1
@@ -17040,7 +17048,22 @@ function Ju(e, t, i, n) {
   }
   e.addColorStop(1, i[(a % 3 + 3) % 3]);
 }
-function Zu(e, t, i, n, r) {
+function Zu(e, t, i, n, r, A) {
+  const s = document.createElement("canvas"), a = 96;
+  s.width = a, s.height = a;
+  const o = s.getContext("2d", { alpha: !0 });
+  if (!o) return;
+  let l = Math.floor(A * 2147483647) || 1;
+  const c = () => (l = l * 48271 % 2147483647, l / 2147483647), u = o.createImageData(a, a);
+  for (let p = 0; p < u.data.length; p += 4) {
+    const v = c() > 0.48 ? 255 : 20;
+    u.data[p] = v, u.data[p + 1] = v, u.data[p + 2] = v, u.data[p + 3] = Math.round(38 + c() * 74);
+  }
+  o.putImageData(u, 0, 0);
+  const h = e.createPattern(s, "repeat");
+  h && (h.setTransform(new DOMMatrix().scaleSelf(1 / Math.sqrt(r), 1 / Math.sqrt(r))), e.save(), e.globalAlpha = 0.16 * n, e.fillStyle = h, e.fillRect(0, 0, t, i), e.restore());
+}
+function ju(e, t, i, n, r) {
   const A = {
     ..._n.material,
     ...n
@@ -17059,7 +17082,7 @@ function Zu(e, t, i, n, r) {
     Ku(f, a, s * Math.min(1.4, Math.max(0.5, 1 + (d - 0.8) * 0.5)), S), e.fillStyle = f, e.fillRect(0, 0, t, i);
   } else if (A.type === "holographic") {
     const f = e.createLinearGradient(0, i, t, 0), S = (c - v) * 0.32 + (u - M) * -0.26;
-    Ju(f, a, A.holographicColors, S), e.fillStyle = f, e.globalAlpha = 0.24 * s * Math.min(1.3, Math.max(0.6, 1 + (d - 0.8) * 0.35)), e.fillRect(0, 0, t, i);
+    Ju(f, a, A.holographicColors, S), e.fillStyle = f, e.globalAlpha = 0.24 * s * Math.min(1.3, Math.max(0.6, 1 + (d - 0.8) * 0.35)), e.fillRect(0, 0, t, i), Zu(e, t, i, s, a, A.seed);
   }
   if (A.type === "glitter") {
     const f = Math.atan2(u, c), S = Math.min(1.4, Math.max(0.45, 0.5 + d * 0.625));
@@ -17074,18 +17097,18 @@ function Zu(e, t, i, n, r) {
   }
   e.restore();
 }
-function ju(e, t, i, n, r) {
+function $u(e, t, i, n, r) {
   const A = document.createElement("canvas");
   A.width = t, A.height = i;
   const s = A.getContext("2d", { alpha: !0 });
   if (!s) throw new Error("Canvas 2D is unavailable.");
-  return s.clearRect(0, 0, t, i), s.imageSmoothingEnabled = !0, s.imageSmoothingQuality = "high", s.drawImage(e, 0, 0, t, i), Zu(s, t, i, n, r), A;
+  return s.clearRect(0, 0, t, i), s.imageSmoothingEnabled = !0, s.imageSmoothingQuality = "high", s.drawImage(e, 0, 0, t, i), ju(s, t, i, n, r), A;
 }
 var tn = 2048, li = 320, EA = 0.1 * 255;
 function gt(e, t, i) {
   return Math.min(i, Math.max(t, e));
 }
-function $u(e, t, i) {
+function ef(e, t, i) {
   const n = new Uint8Array(t * i), r = new Int32Array(t * i);
   let A = 0, s = 0;
   const a = (o, l) => {
@@ -17110,7 +17133,7 @@ function Fs(e) {
   const t = Number.parseFloat(e);
   return Number.isFinite(t) && t > 0 ? t : null;
 }
-function ef(e) {
+function tf(e) {
   if (e.length > 2e6) throw new Error("SVG markup must be smaller than 2 MB.");
   const t = new DOMParser().parseFromString(e, "image/svg+xml");
   if (t.querySelector("parsererror")) throw new Error("The SVG could not be parsed.");
@@ -17131,13 +17154,13 @@ function ef(e) {
   }
   return i.setAttribute("xmlns", "http://www.w3.org/2000/svg"), new XMLSerializer().serializeToString(i);
 }
-function tf(e) {
+function nf(e) {
   const t = new DOMParser().parseFromString(e, "image/svg+xml").documentElement, i = t.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
   if (i?.length === 4 && Number.isFinite(i[2]) && Number.isFinite(i[3]) && i[2] > 0 && i[3] > 0) return gt(i[2] / i[3], 0.15, 8);
   const n = Fs(t.getAttribute("width")), r = Fs(t.getAttribute("height"));
   return n && r ? gt(n / r, 0.15, 8) : 1;
 }
-async function nf(e) {
+async function rf(e) {
   const t = new Blob([e], { type: "image/svg+xml;charset=utf-8" }), i = URL.createObjectURL(t);
   try {
     const n = new Image();
@@ -17162,10 +17185,10 @@ function Fa(e) {
   for (let a = 3; a < s.length; a += 4) if (s[a] < 255) return !0;
   return !1;
 }
-async function xf(e) {
+async function Sf(e) {
   return Fa(await Na(e));
 }
-async function rf(e) {
+async function Af(e) {
   const t = e.fontFamily ?? "Arial Rounded MT Bold, Arial Black, sans-serif", i = e.fontWeight ?? 900, n = e.richText?.blocks.filter((f) => f.runs.length);
   if (n?.length) {
     const f = document.createElement("canvas").getContext("2d");
@@ -17247,15 +17270,15 @@ async function rf(e) {
   if (!d) throw new Error("Canvas 2D is unavailable.");
   return d.clearRect(0, 0, p, v), d.font = `${r} ${A}px ${t}`, d.textBaseline = "alphabetic", d.textAlign = "center", d.fillStyle = e.color ?? "#19191d", d.fillText(a, p / 2, (v + c - u) / 2), M;
 }
-async function Af(e) {
-  const t = ef(e.svg), i = tf(t), n = 1740, r = 144, A = i >= 1 ? n : n * i, s = i >= 1 ? n / i : n, a = gt(Math.ceil(A + r * 2), li, tn), o = gt(Math.ceil(s + r * 2), li, tn), l = document.createElement("canvas");
+async function sf(e) {
+  const t = tf(e.svg), i = nf(t), n = 1740, r = 144, A = i >= 1 ? n : n * i, s = i >= 1 ? n / i : n, a = gt(Math.ceil(A + r * 2), li, tn), o = gt(Math.ceil(s + r * 2), li, tn), l = document.createElement("canvas");
   l.width = a, l.height = o;
   const c = l.getContext("2d", { willReadFrequently: !0 });
   if (!c) throw new Error("Canvas 2D is unavailable.");
-  const u = await nf(t);
+  const u = await rf(t);
   return c.drawImage(u, r, r, a - r * 2, o - r * 2), l;
 }
-async function sf(e) {
+async function af(e) {
   const t = await Na(e.src), i = Fa(t), n = gt(t.naturalWidth / t.naturalHeight, 0.15, 8), r = gt(e.padding ?? 144, 0, 512), A = gt(e.textureMaxEdge ?? tn, li, 8192), s = Math.max(1, A - r * 2), a = n >= 1 ? s : s * n, o = n >= 1 ? s / n : s, l = gt(Math.ceil(a + r * 2), li, A), c = gt(Math.ceil(o + r * 2), li, A), u = document.createElement("canvas");
   u.width = l, u.height = c;
   const h = u.getContext("2d", { willReadFrequently: !0 });
@@ -17265,14 +17288,14 @@ async function sf(e) {
     hasTransparency: i
   };
 }
-function af(e, t) {
+function of(e, t) {
   const i = document.createElement("canvas");
   i.width = e.width, i.height = e.height;
   const n = i.getContext("2d");
   if (!n) throw new Error("Canvas 2D is unavailable.");
   return n.fillStyle = t, n.fillRect(0, 0, i.width, i.height), n.globalCompositeOperation = "destination-in", n.drawImage(e, 0, 0), i;
 }
-var of = 1e12;
+var lf = 1e12;
 function Qs(e, t, i, n, r, A, s, a, o) {
   let l = 0;
   a[0] = 0, o[0] = Number.NEGATIVE_INFINITY, o[1] = Number.POSITIVE_INFINITY;
@@ -17289,14 +17312,14 @@ function Qs(e, t, i, n, r, A, s, a, o) {
     n[r + c * A] = h * h + e[t + u * i];
   }
 }
-function lf(e, t) {
+function cf(e, t) {
   const i = e.width, n = e.height, r = e.getContext("2d", { willReadFrequently: !0 });
   if (!r) throw new Error("Canvas 2D is unavailable.");
   const A = r.getImageData(0, 0, i, n).data, s = i * n, a = new Float32Array(s), o = new Float32Array(s);
   let l = !1;
   for (let d = 0; d < s; d += 1) {
     const f = A[d * 4 + 3] >= EA;
-    a[d] = f ? 0 : of, l || (l = f);
+    a[d] = f ? 0 : lf, l || (l = f);
   }
   const c = Math.max(i, n), u = new Int32Array(c), h = new Float64Array(c + 1);
   if (l) {
@@ -17314,23 +17337,23 @@ function lf(e, t) {
   }
   return v.putImageData(M, 0, 0), p;
 }
-function cf(e, t) {
+function hf(e, t) {
   const i = document.createElement("canvas");
   i.width = e.width, i.height = e.height;
   const n = i.getContext("2d", { willReadFrequently: !0 });
   if (!n) throw new Error("Canvas 2D is unavailable.");
   const r = gt(t.width * 2.35, 0, 112);
   if (r > 0.25) {
-    const A = lf(e, r);
-    n.drawImage(af(A, t.color), 0, 0);
+    const A = cf(e, r);
+    n.drawImage(of(A, t.color), 0, 0);
   }
   return n.drawImage(e, 0, 0), i;
 }
 async function Os(e, t) {
-  const i = e.type === "image" ? await sf(e) : {
-    canvas: e.type === "text" ? await rf(e) : await Af(e),
+  const i = e.type === "image" ? await af(e) : {
+    canvas: e.type === "text" ? await Af(e) : await sf(e),
     hasTransparency: !0
-  }, n = i.canvas, r = cf(n, t), A = r.getContext("2d", { willReadFrequently: !0 });
+  }, n = i.canvas, r = hf(n, t), A = r.getContext("2d", { willReadFrequently: !0 });
   if (!A) throw new Error("Canvas 2D is unavailable.");
   const s = A.getImageData(0, 0, r.width, r.height), a = new Uint8ClampedArray(r.width * r.height);
   for (let l = 3, c = 0; l < s.data.length; l += 4)
@@ -17351,7 +17374,7 @@ async function Os(e, t) {
     height: r.height,
     aspect: r.width / r.height,
     alpha: a,
-    exteriorAlpha: $u(a, r.width, r.height),
+    exteriorAlpha: ef(a, r.width, r.height),
     support: new Float32Array(o),
     hasTransparency: i.hasTransparency
   };
@@ -17387,7 +17410,7 @@ var Ti = {
       fontWeight: 500
     }]
   }] }
-}, Vs = 2.55, hf = Math.PI, uf = 1.28, zs = 4e-3, Hs = -0.22, ff = 0.035, nA = 0.74, df = 760, pf = 520, Sf = 720, ks = 720 / 1e3, Gs = 0.06, mf = 0.42, gf = 0.32, vf = 0.9, wf = "rgb(36, 126, 245)";
+}, Vs = 2.55, uf = Math.PI, ff = 1.28, zs = 4e-3, Hs = -0.22, df = 0.035, nA = 0.74, pf = 760, mf = 520, Cf = 720, ks = 720 / 1e3, Gs = 0.06, gf = 0.42, vf = 0.32, wf = 0.9, Ef = "rgb(36, 126, 245)";
 function Ne(e, t, i) {
   return Math.min(i, Math.max(t, e));
 }
@@ -17445,7 +17468,7 @@ function Ws(e, t) {
     }
   };
 }
-var Ef = class {
+var Mf = class {
   constructor(e, t = {}) {
     this.camera = new vr(-1, 1, 1, -1, 0.01, 10), this.scene = new El(), this.peelAudio = new Gu(), this.groundShadowGeometry = new Sn(1, 1), this.peelShadowLight = new ec(16777215, 1), this.peelShadowTarget = new Rt(), this.geometry = new Sn(1, 1, 2, 2), this.texture = null, this.artwork = null, this.source = Ti, this.requestedSource = Ti, this.sourceRevision = 0, this.sourceRebuildTimer = null, this.destroyed = !1, this.resizeObserver = null, this.viewWidth = 2, this.viewHeight = 2, this.viewportHeightPx = 420, this.renderScale = 1, this.meshWidth = 1.6, this.meshHeight = 0.62, this.pointerId = null, this.grabOrigin = new Re(-0.8, 0), this.grabStart = new Re(), this.grabDirection = new Re(1, 0), this.activeDirection = new Re(1, 0), this.grabExtent = 1.6, this.creaseDepth = 0, this.basePeelRadius = 0.08, this.effectivePeelRadius = 0.08, this.grabProjection = 0, this.springVelocity = 0, this.springActive = !1, this.springTargetDepth = 0, this.dragDetached = !1, this.detachedTension = 0, this.detachedExitActive = !1, this.detachedExitElapsed = 0, this.detachedExitSpin = 0, this.entranceActive = !1, this.entranceElapsed = 0, this.preparedEntrance = null, this.backgroundRemovalEffectActive = !1, this.backgroundRemovalEffectElapsed = 0, this.interactionHintActive = !1, this.interactionHintElapsed = 0, this.entranceAxis = new Re(1, 0), this.frameRequest = 0, this.lastFrameTime = 0, this.state = {
       ready: !1,
@@ -17507,7 +17530,7 @@ var Ef = class {
           this.springActive || (this.springActive = !0, this.springVelocity = 0), this.springTargetDepth = 0;
         else {
           const c = this.peelModelForDepth(this.grabExtent).projection, u = this.solveCreaseDepth(o);
-          this.creaseDepth - u > this.grabExtent * ff || this.springActive && u < this.creaseDepth ? (this.springActive || (this.springActive = !0, this.springVelocity = 0), this.springTargetDepth = u) : (this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = u, this.setCreaseDepth(u));
+          this.creaseDepth - u > this.grabExtent * df || this.springActive && u < this.creaseDepth ? (this.springActive || (this.springActive = !0, this.springVelocity = 0), this.springTargetDepth = u) : (this.springActive = !1, this.springVelocity = 0, this.springTargetDepth = u, this.setCreaseDepth(u));
           const h = Math.max(0, o - c);
           this.setDetachedDragOffset(this.activeDirection.x * h, this.activeDirection.y * h), this.state.progress >= 1 - Number.EPSILON && (this.dragDetached = !0);
         }
@@ -17594,7 +17617,7 @@ var Ef = class {
       }
       if (this.preparedEntrance) {
         this.preparedEntrance.elapsed += A;
-        const o = Ne(this.preparedEntrance.elapsed / gf, 0, 1), l = rA(0, 1, o);
+        const o = Ne(this.preparedEntrance.elapsed / vf, 0, 1), l = rA(0, 1, o);
         if (this.uniforms.uPreparedMix.value = l, this.uniforms.uPreEntranceProgress.value = l, o >= 1) {
           const c = this.preparedEntrance;
           this.preparedEntrance = null, this.sourceRevision += 1, this.requestedSource = c.source, this.source = c.source, this.options = En(this.options, {
@@ -17606,7 +17629,7 @@ var Ef = class {
       }
       if (this.entranceActive && (this.entranceElapsed += A, this.applyEntranceElapsed(this.entranceElapsed) && (this.entranceActive = !1, this.clearEntrancePose(), this.emit("cyclecomplete", { progress: 0 }))), this.interactionHintActive) {
         this.interactionHintElapsed += A;
-        const o = Ne(this.interactionHintElapsed / vf, 0, 1);
+        const o = Ne(this.interactionHintElapsed / wf, 0, 1);
         if (s) this.uniforms.uInteractionHint.value = o < 0.72 ? 1 : 0;
         else {
           const l = rA(0, 0.12, o), c = 1 - rA(0.58, 1, o), u = 0.9 + Math.sin(o * Math.PI * 2) * 0.1;
@@ -17687,7 +17710,7 @@ var Ef = class {
       uRemovalRippleSpeed: { value: 4.2 },
       uInteractionHint: { value: 0 },
       uInteractionHintRadius: { value: 3 },
-      uInteractionHintColor: { value: Bt(wf, "rgb(36, 126, 245)") },
+      uInteractionHintColor: { value: Bt(Ef, "rgb(36, 126, 245)") },
       uPreserveFrontColor: { value: 1 },
       uOpacity: { value: 1 }
     };
@@ -17893,7 +17916,7 @@ var Ef = class {
     ]);
   }
   createArtworkTexture(e, t = this.options.material, i = this.options.lighting) {
-    const n = ju(e.canvas, e.width, e.height, t, i), r = new bl(n);
+    const n = $u(e.canvas, e.width, e.height, t, i), r = new bl(n);
     return r.colorSpace = bt, r.minFilter = mr, r.magFilter = St, r.generateMipmaps = !0, r.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy()), r.needsUpdate = !0, r;
   }
   refreshMaterialTexture() {
@@ -17920,7 +17943,7 @@ var Ef = class {
     if (this.options.display.width > 0 && this.options.display.height > 0)
       i = this.options.display.width * t, n = this.options.display.height * t;
     else {
-      const l = Math.min(this.viewWidth * 0.78, df * t), c = Math.min(this.viewHeight * 0.58, pf * t);
+      const l = Math.min(this.viewWidth * 0.78, pf * t), c = Math.min(this.viewHeight * 0.58, mf * t);
       i = l, n = i / e, n > c && (n = c, i = n * e);
     }
     this.meshWidth = this.options.display.width > 0 ? Math.max(1e-3, i) : Math.max(0.34, i), this.meshHeight = this.options.display.height > 0 ? Math.max(1e-3, n) : Math.max(0.25, n);
@@ -17942,7 +17965,7 @@ var Ef = class {
       useBuiltInProfile: !A
     });
     const s = this.options.peel.maxAngle, a = s > Math.PI * 2 ? zt.degToRad(s) : s;
-    this.uniforms.uMaxAngle.value = Ne(a, Vs, hf);
+    this.uniforms.uMaxAngle.value = Ne(a, Vs, uf);
     const o = this.options.peel.radius, l = this.container.getBoundingClientRect(), c = o <= 1 ? Math.max(8e-3, Math.min(this.meshWidth, this.meshHeight) * o) : Math.max(8e-3, o / Math.max(l.height, 1) * this.viewHeight);
     this.basePeelRadius = c * zt.lerp(0.82, 1.16, Ne(this.options.peel.stiffness, 0, 1)), this.residueMesh.visible = this.options.peel.residue, this.uniforms.uSurfaceShadowEnabled.value = this.options.peel.surfaceShadow ? 1 : 0, this.setCreaseDepth(this.creaseDepth), this.uniforms.uShadowColor.value = Bt(this.options.shadow.color, "#191823");
     const u = (0.45 + i * 0.75) * (1 - n * 0.35), h = Ne(this.options.shadow.opacity * u, 0, 0.9);
@@ -17981,7 +18004,7 @@ var Ef = class {
       projection: 0
     };
     const i = this.projectedGrabDistance(t, this.basePeelRadius);
-    if (i >= t / uf) return {
+    if (i >= t / ff) return {
       depth: t,
       radius: this.basePeelRadius,
       projection: i
@@ -18094,7 +18117,7 @@ var Ef = class {
   applyEntranceElapsed(e) {
     const t = Ne(e / ks, 0, 1);
     this.uniforms.uEntranceScaleProgress.value = t;
-    const i = Ne((e - Gs) / mf, 0, 1);
+    const i = Ne((e - Gs) / gf, 0, 1);
     return this.uniforms.uEntranceSweep.value = e < Gs ? -1 : i, t >= 1 && i >= 1;
   }
   clearEntrancePose() {
@@ -18111,15 +18134,15 @@ var Ef = class {
     this.container.dispatchEvent(new CustomEvent(e, { detail: t }));
   }
 };
-async function Mf(e, t = {}) {
+async function Pf(e, t = {}) {
   if (typeof document > "u") throw new Error("Sticker Forge can only be created in a browser.");
   const i = typeof e == "string" ? document.querySelector(e) : e;
   if (!i) throw new Error("Sticker Forge could not find its target element.");
-  const n = new Ef(i, t);
+  const n = new Mf(i, t);
   return await n.setSource(t.source ?? Ti), n;
 }
-var Pf = typeof HTMLElement > "u" ? class {
-} : HTMLElement, Xs = class extends Pf {
+var _f = typeof HTMLElement > "u" ? class {
+} : HTMLElement, Xs = class extends _f {
   constructor(...e) {
     super(...e), this.instance = null, this.instancePromise = null, this.mountElement = null, this.pendingOptions = {}, this.pendingSource = null, this.lifecycleRevision = 0;
   }
@@ -18249,7 +18272,7 @@ var Pf = typeof HTMLElement > "u" ? class {
     if (this.instance) return Promise.resolve(this.instance);
     if (this.instancePromise) return this.instancePromise;
     if (!this.mountElement) return Promise.reject(/* @__PURE__ */ new Error("The sticker element is not connected."));
-    const e = Ws(this.pendingOptions, { source: this.pendingSource ?? Ti }), t = this.lifecycleRevision, i = Mf(this.mountElement, e);
+    const e = Ws(this.pendingOptions, { source: this.pendingSource ?? Ti }), t = this.lifecycleRevision, i = Pf(this.mountElement, e);
     return this.instancePromise = i, i.then((n) => {
       if (this.instancePromise === i && (this.instancePromise = null), t !== this.lifecycleRevision || !this.isConnected) {
         n.destroy();
@@ -18270,21 +18293,21 @@ var Pf = typeof HTMLElement > "u" ? class {
     }), i;
   }
 };
-function _f(e = "sticker-forge") {
+function Df(e = "sticker-forge") {
   if (!(typeof customElements > "u") && !customElements.get(e)) {
     const t = e === "sticker-forge" ? Xs : class extends Xs {
     };
     customElements.define(e, t);
   }
 }
-_f();
+Df();
 export {
-  Sf as STICKER_ENTRANCE_DURATION_MS,
+  Cf as STICKER_ENTRANCE_DURATION_MS,
   Xs as StickerForgeElement,
-  Mf as createSticker,
-  _f as defineStickerForge,
-  xf as imageSourceHasTransparency,
-  ef as sanitizeSvgMarkup
+  Pf as createSticker,
+  Df as defineStickerForge,
+  Sf as imageSourceHasTransparency,
+  tf as sanitizeSvgMarkup
 };
 
 //# sourceMappingURL=sticker-forge.es.js.map

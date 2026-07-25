@@ -32,6 +32,8 @@ export type {
   StickerInstance,
   PreparedStickerSource,
   StickerImageSource,
+  StickerLightingOptions,
+  StickerLightDirection,
   StickerOptions,
   StickerOutlineOptions,
   StickerPeelOptions,
@@ -159,6 +161,12 @@ function mergePublicOptions(
     outline: { ...current.outline, ...patch.outline },
     edge: { ...current.edge, ...patch.edge },
     shadow: { ...current.shadow, ...patch.shadow },
+    lighting: {
+      ...current.lighting,
+      ...patch.lighting,
+      direction:
+        patch.lighting?.direction ?? current.lighting?.direction,
+    },
     peel: { ...current.peel, ...patch.peel },
     back: { ...current.back, ...patch.back },
     sound: { ...current.sound, ...patch.sound },
@@ -294,6 +302,16 @@ class StickerRenderer implements StickerInstance {
       uBackColor: { value: colorFrom(this.options.back.color, "#f7f5f2") },
       uGloss: { value: this.options.back.gloss },
       uRoughness: { value: this.options.back.roughness },
+      uLightDirection: {
+        value: new THREE.Vector3(
+          this.options.lighting.direction.x,
+          this.options.lighting.direction.y,
+          this.options.lighting.direction.z,
+        ).normalize(),
+      },
+      uLightIntensity: { value: this.options.lighting.intensity },
+      uAmbientLight: { value: this.options.lighting.ambient },
+      uLightSoftness: { value: this.options.lighting.softness },
       uShadowColor: {
         value: colorFrom(this.options.shadow.color, "#191823"),
       },
@@ -915,6 +933,23 @@ class StickerRenderer implements StickerInstance {
     this.uniforms.uGloss.value = clamp(this.options.back.gloss, 0, 1);
     this.uniforms.uRoughness.value = clamp(this.options.back.roughness, 0, 1);
     this.uniforms.uWind.value = Math.max(0, this.options.wind);
+    const lightDirection = this.uniforms.uLightDirection.value as THREE.Vector3;
+    lightDirection.set(
+      this.options.lighting.direction.x,
+      this.options.lighting.direction.y,
+      Math.max(0.001, this.options.lighting.direction.z),
+    );
+    if (lightDirection.lengthSq() < 0.0001) {
+      lightDirection.set(-0.38, 0.52, 0.76);
+    } else {
+      lightDirection.normalize();
+    }
+    const lightIntensity = clamp(this.options.lighting.intensity, 0, 1.5);
+    const ambientLight = clamp(this.options.lighting.ambient, 0, 1);
+    const lightSoftness = clamp(this.options.lighting.softness, 0, 1);
+    this.uniforms.uLightIntensity.value = lightIntensity;
+    this.uniforms.uAmbientLight.value = ambientLight;
+    this.uniforms.uLightSoftness.value = lightSoftness;
 
     const customSoundSource = this.options.sound.src.trim();
     this.peelAudio.configure({
@@ -951,19 +986,18 @@ class StickerRenderer implements StickerInstance {
       this.options.shadow.color,
       "#191823",
     );
-    this.uniforms.uShadowOpacity.value = clamp(
-      this.options.shadow.opacity,
+    const shadowContrast =
+      (0.45 + lightIntensity * 0.75) * (1 - ambientLight * 0.35);
+    const effectiveShadowOpacity = clamp(
+      this.options.shadow.opacity * shadowContrast,
       0,
       0.9,
     );
+    this.uniforms.uShadowOpacity.value = effectiveShadowOpacity;
     this.groundShadowMaterial.color.copy(
       colorFrom(this.options.shadow.color, "#191823"),
     );
-    this.groundShadowMaterial.opacity = clamp(
-      this.options.shadow.opacity,
-      0,
-      0.9,
-    );
+    this.groundShadowMaterial.opacity = effectiveShadowOpacity;
     const unscaledDisplayWidth =
       (this.meshWidth / Math.max(this.viewWidth, 0.001)) *
       Math.max(this.renderer.domElement.clientWidth, 1);
@@ -978,29 +1012,38 @@ class StickerRenderer implements StickerInstance {
           Math.min(this.artwork.width, this.artwork.height) * 0.13,
         )
       : 3;
+    const softnessScale = THREE.MathUtils.lerp(0.55, 1.3, lightSoftness);
     this.uniforms.uShadowBlur.value =
-      Math.max(0, this.options.shadow.blur) * textureScale * 0.34;
+      Math.max(0, this.options.shadow.blur) *
+      textureScale *
+      0.34 *
+      softnessScale;
     this.uniforms.uShadowDistance.value =
       (Math.max(0, this.options.shadow.distance) /
         Math.max(rect.width || 1, 1)) *
       this.viewWidth;
-    const shadowAngle = THREE.MathUtils.degToRad(this.options.shadow.angle);
     const shadowDirection = this.uniforms.uShadowDirection.value as THREE.Vector2;
-    shadowDirection
-      .set(Math.cos(shadowAngle), -Math.sin(shadowAngle))
-      .normalize();
+    shadowDirection.set(-lightDirection.x, -lightDirection.y);
+    if (shadowDirection.lengthSq() < 0.0001) {
+      const fallbackAngle = THREE.MathUtils.degToRad(this.options.shadow.angle);
+      shadowDirection.set(
+        Math.cos(fallbackAngle),
+        -Math.sin(fallbackAngle),
+      );
+    }
+    shadowDirection.normalize();
     const shadowDistance = this.uniforms.uShadowDistance.value as number;
     const lightOffset = 1.6 + shadowDistance * 34;
     this.peelShadowLight.position.set(
-      -shadowDirection.x * lightOffset,
-      -shadowDirection.y * lightOffset,
-      4.8,
+      lightDirection.x * lightOffset,
+      lightDirection.y * lightOffset,
+      Math.max(0.8, lightDirection.z * lightOffset),
     );
     this.peelShadowTarget.position.set(0, 0, 0);
-    this.peelShadowLight.shadow.radius = clamp(
-      this.options.shadow.blur * 0.18,
+    this.peelShadowLight.shadow.radius = THREE.MathUtils.lerp(
       1,
       7,
+      lightSoftness,
     );
     const shadowMapSize = this.options.quality === "high" ? 2048 : 1024;
     this.peelShadowLight.shadow.mapSize.set(shadowMapSize, shadowMapSize);

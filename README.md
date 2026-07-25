@@ -67,6 +67,12 @@ exported and returns immediately (`void`).
   sticker.setOptions({
     outline: { width: 18, color: "#ffffff" },
     shadow: { opacity: 0.22, blur: 22, distance: 16, angle: 42 },
+    lighting: {
+      direction: { x: -0.38, y: 0.52, z: 0.76 },
+      intensity: 0.8,
+      ambient: 0.35,
+      softness: 0.6,
+    },
     peel: {
       radius: 0.12,
       stiffness: 0.72,
@@ -185,9 +191,13 @@ and error events bubble across the shadow boundary.
 coordinates.
 
 `peel.radius` is normalized to the sticker's short side (`0.12` means 12%),
-while `peel.maxAngle` is expressed in radians. Shadow direction and `tilt` are
-expressed in degrees; shadow blur/distance use CSS pixels, while
-`peel.grabWidth` uses CSS pixels at 100% scale and scales with the sticker.
+while `peel.maxAngle` is expressed in radians. `lighting.direction` is a
+normalized view-space vector pointing from the sticker toward the incoming
+directional light; it drives surface shading and projected-shadow direction
+together. `lighting.intensity` supports `0..1.5`, while
+`lighting.ambient` and `lighting.softness` use `0..1`. Shadow blur/distance use
+CSS pixels, `tilt` is expressed in degrees, and `peel.grabWidth` uses CSS pixels
+at 100% scale and scales with the sticker.
 
 The bundled recording is treated as an audio sprite rather than a timeline.
 Sticker Forge separates its lift, light crackle, strong tear, and release

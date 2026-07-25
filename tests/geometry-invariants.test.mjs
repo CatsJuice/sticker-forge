@@ -1103,7 +1103,15 @@ test("projects shadows in the sticker material without a receiver seam", async (
   assert.match(shader, /curved\.xy \+= tangent \* windDisplacement \* 0\.04/);
   assert.match(shader, /curved\.xy \+= direction \* windDisplacement \* 0\.01/);
   assert.match(shader, /float projectedShadow = \(1\.0 - getShadowMask\(\)\) \* vAdhered/);
-  assert.match(shader, /float frontDiffuse = mix\(1\.0, 0\.76 \+ 0\.24 \* normalLight, frontDeformation\)/);
+  assert.match(shader, /vec3 lightDirection = normalize\(uLightDirection\)/);
+  assert.match(
+    shader,
+    /uAmbientLight \+ normalLight \* uLightIntensity/,
+  );
+  assert.match(
+    shader,
+    /float frontDiffuse = mix\(\s+1\.0,\s+lightLevel,\s+0\.18 \+ frontDeformation \* 0\.82/,
+  );
   assert.match(shader, /#include <colorspace_fragment>/);
   assert.match(renderer, /renderer\.shadowMap\.enabled = true/);
   assert.match(renderer, /stickerMesh\.castShadow = true/);

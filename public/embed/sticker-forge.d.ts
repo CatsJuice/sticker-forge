@@ -62,8 +62,28 @@ export interface StickerShadowOptions {
   opacity?: number;
   blur?: number;
   distance?: number;
-  /** Shadow direction in degrees. */
+  /** Legacy shadow angle used only when the lighting direction is head-on. */
   angle?: number;
+}
+
+export interface StickerLightDirection {
+  /** Horizontal direction toward the light in view space (-1..1). */
+  x: number;
+  /** Vertical direction toward the light in view space (-1..1). */
+  y: number;
+  /** Depth direction toward the viewer-facing light hemisphere (0..1). */
+  z: number;
+}
+
+export interface StickerLightingOptions {
+  /** Normalized view-space direction from the sticker toward the light. */
+  direction?: StickerLightDirection;
+  /** Direct-light intensity from 0 to 1.5. */
+  intensity?: number;
+  /** Fill light applied to every surface from 0 to 1. */
+  ambient?: number;
+  /** Apparent light-source size from 0 (crisp) to 1 (soft). */
+  softness?: number;
 }
 
 export interface StickerBackOptions {
@@ -98,6 +118,7 @@ export interface StickerOptions {
   outline?: StickerOutlineOptions;
   edge?: StickerEdgeOptions;
   shadow?: StickerShadowOptions;
+  lighting?: StickerLightingOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
   sound?: StickerSoundOptions;

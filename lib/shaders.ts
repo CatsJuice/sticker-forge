@@ -234,6 +234,10 @@ export const stickerFragmentShader = /* glsl */ `
   uniform vec3 uBackColor;
   uniform float uGloss;
   uniform float uRoughness;
+  uniform vec3 uLightDirection;
+  uniform float uLightIntensity;
+  uniform float uAmbientLight;
+  uniform float uLightSoftness;
   uniform vec3 uShadowColor;
   uniform float uShadowOpacity;
   uniform float uEntranceSweep;
@@ -411,7 +415,9 @@ export const stickerFragmentShader = /* glsl */ `
     );
     vec2 outwardNormal = -inwardGradient
       / max(length(inwardGradient), 0.0001);
-    vec2 edgeLightDirection = normalize(vec2(-0.65, 0.76));
+    vec2 edgeLightDirection = length(uLightDirection.xy) > 0.001
+      ? normalize(uLightDirection.xy)
+      : normalize(vec2(-0.65, 0.76));
     float directionalEdgeLight =
       dot(outwardNormal, edgeLightDirection);
     float edgeHighlight = pow(
@@ -439,15 +445,29 @@ export const stickerFragmentShader = /* glsl */ `
       preservedFront
     );
     vec3 normal = signedFacing < 0.0 ? -surfaceNormal : surfaceNormal;
-    vec3 lightDirection = normalize(vec3(-0.38, 0.52, 0.76));
+    vec3 lightDirection = normalize(uLightDirection);
     vec3 halfDirection = normalize(lightDirection + viewDirection);
     float normalLight = max(dot(normal, lightDirection), 0.0);
+    float lightLevel = clamp(
+      uAmbientLight + normalLight * uLightIntensity,
+      0.0,
+      1.65
+    );
     float facing = max(dot(normal, viewDirection), 0.0);
     float fresnel = pow(1.0 - facing, 3.0);
     float micro = (hash21(vUv * 970.0) - 0.5) * 0.018;
 
-    float printHighlight = pow(max(dot(normal, halfDirection), 0.0), 42.0) * 0.055;
-    float frontDiffuse = mix(1.0, 0.76 + 0.24 * normalLight, frontDeformation);
+    float highlightExponent = mix(52.0, 18.0, uLightSoftness);
+    float printHighlight =
+      pow(max(dot(normal, halfDirection), 0.0), highlightExponent)
+      * 0.068
+      * uLightIntensity
+      * mix(1.0, 0.68, uLightSoftness);
+    float frontDiffuse = mix(
+      1.0,
+      lightLevel,
+      0.18 + frontDeformation * 0.82
+    );
     vec3 litFrontColor = printSample.rgb * frontDiffuse + printHighlight;
     litFrontColor += fresnel * 0.025;
     vec3 frontColor = mix(
@@ -469,11 +489,17 @@ export const stickerFragmentShader = /* glsl */ `
         * clamp(uEdgeFinishStrength, 0.0, 1.0)
         * 0.12;
 
-    float exponent = mix(17.0, 86.0, clamp(uGloss, 0.0, 1.0));
+    float exponent =
+      mix(17.0, 86.0, clamp(uGloss, 0.0, 1.0))
+      * mix(1.2, 0.42, uLightSoftness);
     float specular = pow(max(dot(normal, halfDirection), 0.0), exponent);
-    specular *= mix(0.06, 0.3, uGloss) * (1.0 - uRoughness * 0.58);
+    specular *=
+      mix(0.06, 0.3, uGloss)
+      * (1.0 - uRoughness * 0.58)
+      * uLightIntensity
+      * mix(1.0, 0.72, uLightSoftness);
     float satinBand = pow(max(vCurl, 0.0), 1.7) * (0.045 + uGloss * 0.1);
-    vec3 backColor = uBackColor * (0.82 + 0.18 * max(dot(normal, lightDirection), 0.0));
+    vec3 backColor = uBackColor * mix(0.76, 1.0, lightLevel);
     backColor += specular + fresnel * (0.055 + 0.085 * uGloss) + satinBand + micro;
 
     vec3 color = mix(backColor, frontColor, frontMix);

@@ -31,12 +31,14 @@ import {
   faWandMagicSparkles,
   faPlus,
   faRotateLeft,
+  faSun,
   faTextHeight,
   faUnderline,
 } from "@fortawesome/free-solid-svg-icons";
 import type {
   PreparedStickerSource,
   StickerInstance,
+  StickerLightDirection,
   StickerOptions,
   StickerRichTextBlock,
   StickerRichTextDocument,
@@ -118,6 +120,12 @@ type StudioSettings = {
     distance: number;
     angle: number;
     color: string;
+  };
+  lighting: {
+    direction: StickerLightDirection;
+    intensity: number;
+    ambient: number;
+    softness: number;
   };
   peel: {
     radius: number;
@@ -266,6 +274,16 @@ const UI = {
     wind: "风动",
     volume: "撕开音量",
     material: "材质与阴影",
+    lighting: "光照与材质",
+    lightDirection: "来光方向",
+    resetLightDirection: "恢复默认来光方向",
+    presetSoft: "柔和",
+    presetStudio: "棚拍",
+    presetDramatic: "戏剧",
+    presetCustom: "自定义",
+    lightIntensity: "光照强度",
+    ambientLight: "环境光",
+    lightSoftness: "光源柔和度",
     shadowOpacity: "阴影强度",
     shadowBlur: "阴影柔度",
     backGloss: "背面光泽",
@@ -347,6 +365,16 @@ const UI = {
     wind: "Wind",
     volume: "Peel volume",
     material: "Material & shadow",
+    lighting: "Lighting & material",
+    lightDirection: "Incoming light",
+    resetLightDirection: "Reset incoming light direction",
+    presetSoft: "Soft",
+    presetStudio: "Studio",
+    presetDramatic: "Dramatic",
+    presetCustom: "Custom",
+    lightIntensity: "Light intensity",
+    ambientLight: "Ambient light",
+    lightSoftness: "Light softness",
     shadowOpacity: "Shadow opacity",
     shadowBlur: "Shadow softness",
     backGloss: "Back gloss",
@@ -373,6 +401,12 @@ const DEFAULT_SETTINGS: StudioSettings = {
     angle: 42,
     color: "#191823",
   },
+  lighting: {
+    direction: { x: -0.38, y: 0.52, z: 0.76 },
+    intensity: 0.8,
+    ambient: 0.35,
+    softness: 0.6,
+  },
   peel: {
     radius: 0.12,
     stiffness: 0.72,
@@ -386,6 +420,63 @@ const DEFAULT_SETTINGS: StudioSettings = {
   wind: 0.25,
   quality: "high",
 };
+
+type LightingPresetId = "soft" | "studio" | "dramatic";
+
+const LIGHTING_PRESETS = {
+  soft: {
+    direction: { x: -0.38, y: 0.52, z: 0.76 },
+    intensity: 0.8,
+    ambient: 0.35,
+    softness: 0.6,
+  },
+  studio: {
+    direction: { x: -0.24, y: 0.32, z: 0.92 },
+    intensity: 1,
+    ambient: 0.28,
+    softness: 0.5,
+  },
+  dramatic: {
+    direction: { x: -0.72, y: 0.35, z: 0.6 },
+    intensity: 1.25,
+    ambient: 0.12,
+    softness: 0.2,
+  },
+} satisfies Record<LightingPresetId, StudioSettings["lighting"]>;
+
+function normalizeLightDirection(
+  direction: StickerLightDirection,
+): StickerLightDirection {
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  if (length < 0.0001) return { ...DEFAULT_SETTINGS.lighting.direction };
+  return {
+    x: direction.x / length,
+    y: direction.y / length,
+    z: Math.max(0.001, direction.z / length),
+  };
+}
+
+function lightingPresetFor(
+  lighting: StudioSettings["lighting"],
+): LightingPresetId | "custom" {
+  for (const presetId of Object.keys(LIGHTING_PRESETS) as LightingPresetId[]) {
+    const preset = LIGHTING_PRESETS[presetId];
+    const directionDelta = Math.hypot(
+      lighting.direction.x - preset.direction.x,
+      lighting.direction.y - preset.direction.y,
+      lighting.direction.z - preset.direction.z,
+    );
+    if (
+      directionDelta < 0.025 &&
+      Math.abs(lighting.intensity - preset.intensity) < 0.015 &&
+      Math.abs(lighting.ambient - preset.ambient) < 0.015 &&
+      Math.abs(lighting.softness - preset.softness) < 0.015
+    ) {
+      return presetId;
+    }
+  }
+  return "custom";
+}
 
 function makeTextSource(
   text: string,
@@ -577,6 +668,14 @@ function studioSettingsFrom(options: StickerOptions): StudioSettings {
     outline: { ...DEFAULT_SETTINGS.outline, ...options.outline },
     edge: { ...DEFAULT_SETTINGS.edge, ...options.edge },
     shadow: { ...DEFAULT_SETTINGS.shadow, ...options.shadow },
+    lighting: {
+      ...DEFAULT_SETTINGS.lighting,
+      ...options.lighting,
+      direction: {
+        ...DEFAULT_SETTINGS.lighting.direction,
+        ...options.lighting?.direction,
+      },
+    },
     peel: {
       ...DEFAULT_SETTINGS.peel,
       ...options.peel,
@@ -859,14 +958,219 @@ function RangeRow({
   );
 }
 
+function LightDirectionControl({
+  direction,
+  label,
+  resetLabel,
+  onChange,
+}: {
+  direction: StickerLightDirection;
+  label: string;
+  resetLabel: string;
+  onChange: (direction: StickerLightDirection) => void;
+}) {
+  const pointerIdRef = useRef<number | null>(null);
+  const directionPadRef = useRef<HTMLDivElement>(null);
+  const normalizedDirection = normalizeLightDirection(direction);
+  const handleX = 50 + normalizedDirection.x * 42;
+  const handleY = 50 - normalizedDirection.y * 42;
+  const azimuth = Math.round(
+    (Math.atan2(normalizedDirection.y, normalizedDirection.x) * 180) /
+      Math.PI,
+  );
+  const elevation = Math.round(
+    (Math.asin(normalizedDirection.z) * 180) / Math.PI,
+  );
+
+  useEffect(() => {
+    const finishGlobalPointerGesture = (event: PointerEvent) => {
+      if (
+        pointerIdRef.current !== null &&
+        pointerIdRef.current === event.pointerId
+      ) {
+        pointerIdRef.current = null;
+        directionPadRef.current?.removeAttribute("data-dragging");
+      }
+    };
+    const finishOnWindowBlur = () => {
+      pointerIdRef.current = null;
+      directionPadRef.current?.removeAttribute("data-dragging");
+    };
+    const finishOnMouseUp = () => {
+      pointerIdRef.current = null;
+      directionPadRef.current?.removeAttribute("data-dragging");
+    };
+
+    window.addEventListener("pointerup", finishGlobalPointerGesture, true);
+    window.addEventListener("pointercancel", finishGlobalPointerGesture, true);
+    window.addEventListener("mouseup", finishOnMouseUp, true);
+    window.addEventListener("blur", finishOnWindowBlur);
+    return () => {
+      window.removeEventListener("pointerup", finishGlobalPointerGesture, true);
+      window.removeEventListener(
+        "pointercancel",
+        finishGlobalPointerGesture,
+        true,
+      );
+      window.removeEventListener("mouseup", finishOnMouseUp, true);
+      window.removeEventListener("blur", finishOnWindowBlur);
+    };
+  }, []);
+
+  const updateFromPoint = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const radius = Math.max(1, Math.min(rect.width, rect.height) * 0.42);
+    let x = (event.clientX - (rect.left + rect.width / 2)) / radius;
+    let y = -(
+      (event.clientY - (rect.top + rect.height / 2)) /
+      radius
+    );
+    const planarLength = Math.hypot(x, y);
+    if (planarLength > 0.98) {
+      x = (x / planarLength) * 0.98;
+      y = (y / planarLength) * 0.98;
+    }
+    onChange(
+      normalizeLightDirection({
+        x,
+        y,
+        z: Math.sqrt(Math.max(0.04, 1 - x * x - y * y)),
+      }),
+    );
+  };
+
+  const adjustWithKeyboard = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    const step = event.shiftKey ? 0.16 : 0.06;
+    let x = normalizedDirection.x;
+    let y = normalizedDirection.y;
+    if (event.key === "ArrowLeft") x -= step;
+    else if (event.key === "ArrowRight") x += step;
+    else if (event.key === "ArrowUp") y += step;
+    else if (event.key === "ArrowDown") y -= step;
+    else if (event.key === "Home") {
+      event.preventDefault();
+      onChange({ ...DEFAULT_SETTINGS.lighting.direction });
+      return;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    const planarLength = Math.hypot(x, y);
+    if (planarLength > 0.98) {
+      x = (x / planarLength) * 0.98;
+      y = (y / planarLength) * 0.98;
+    }
+    onChange(
+      normalizeLightDirection({
+        x,
+        y,
+        z: Math.sqrt(Math.max(0.04, 1 - x * x - y * y)),
+      }),
+    );
+  };
+
+  return (
+    <div className="lighting-direction-control">
+      <div className="lighting-direction-meta">
+        <div>
+          <span className="lighting-direction-label">{label}</span>
+        </div>
+        <button
+          className="lighting-direction-reset"
+          type="button"
+          aria-label={resetLabel}
+          title={resetLabel}
+          onClick={() =>
+            onChange({ ...DEFAULT_SETTINGS.lighting.direction })
+          }
+        >
+          <FontAwesomeIcon icon={faRotateLeft} />
+        </button>
+      </div>
+      <div
+        ref={directionPadRef}
+        className="lighting-direction-pad"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={-180}
+        aria-valuemax={180}
+        aria-valuenow={azimuth}
+        aria-valuetext={`${azimuth}°, ${elevation}°`}
+        style={
+          {
+            "--light-handle-x": `${handleX}%`,
+            "--light-handle-y": `${handleY}%`,
+            "--light-direction-x": normalizedDirection.x,
+            "--light-direction-y": normalizedDirection.y,
+            "--light-direction-z": normalizedDirection.z,
+            "--light-shadow-x": `${normalizedDirection.x * -7}px`,
+            "--light-shadow-y": `${normalizedDirection.y * 7}px`,
+            "--light-shadow-blur": `${5 + normalizedDirection.z * 7}px`,
+          } as CSSProperties
+        }
+        onKeyDown={adjustWithKeyboard}
+        onPointerDown={(event) => {
+          pointerIdRef.current = event.pointerId;
+          event.currentTarget.setAttribute("data-dragging", "true");
+          event.currentTarget.setPointerCapture(event.pointerId);
+          updateFromPoint(event);
+        }}
+        onPointerMove={(event) => {
+          if (pointerIdRef.current !== event.pointerId) return;
+          updateFromPoint(event);
+        }}
+        onPointerUp={(event) => {
+          if (pointerIdRef.current !== event.pointerId) return;
+          pointerIdRef.current = null;
+          event.currentTarget.removeAttribute("data-dragging");
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={() => {
+          pointerIdRef.current = null;
+          directionPadRef.current?.removeAttribute("data-dragging");
+        }}
+        onLostPointerCapture={(event) => {
+          if (pointerIdRef.current === event.pointerId) {
+            pointerIdRef.current = null;
+          }
+          event.currentTarget.removeAttribute("data-dragging");
+        }}
+      >
+        <svg
+          className="lighting-direction-rays"
+          viewBox="0 0 100 100"
+          aria-hidden="true"
+        >
+          <line x1={handleX} y1={handleY} x2={50} y2={50} />
+        </svg>
+        <span className="lighting-sticker-preview" aria-hidden="true">
+          PEEL
+        </span>
+        <span className="lighting-sun-handle" aria-hidden="true">
+          <FontAwesomeIcon icon={faSun} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function ControlSection({
   title,
   children,
+  defaultOpen = false,
 }: {
   title: string;
   children: ReactNode;
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const contentId = useId();
 
   return (
@@ -3188,30 +3492,101 @@ export function StickerForgeStudio() {
                 </div>
             </ControlSection>
 
-            <ControlSection title={t.material}>
+            <ControlSection title={t.lighting} defaultOpen>
+                <div
+                  className="lighting-presets"
+                  role="group"
+                  aria-label={t.lighting}
+                >
+                  {([
+                    ["soft", t.presetSoft],
+                    ["studio", t.presetStudio],
+                    ["dramatic", t.presetDramatic],
+                  ] as const).map(([presetId, label]) => (
+                    <button
+                      key={presetId}
+                      type="button"
+                      data-active={
+                        lightingPresetFor(settings.lighting) === presetId
+                      }
+                      aria-pressed={
+                        lightingPresetFor(settings.lighting) === presetId
+                      }
+                      onClick={() =>
+                        updateSetting("lighting", {
+                          ...LIGHTING_PRESETS[presetId],
+                          direction: {
+                            ...LIGHTING_PRESETS[presetId].direction,
+                          },
+                        })
+                      }
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  <span
+                    data-active={
+                      lightingPresetFor(settings.lighting) === "custom"
+                    }
+                  >
+                    {t.presetCustom}
+                  </span>
+                </div>
+                <LightDirectionControl
+                  direction={settings.lighting.direction}
+                  label={t.lightDirection}
+                  resetLabel={t.resetLightDirection}
+                  onChange={(direction) =>
+                    updateSetting("lighting", {
+                      ...settings.lighting,
+                      direction,
+                    })
+                  }
+                />
                 <div className="range-stack">
                   <RangeRow
-                    id="shadow-opacity"
-                    label={t.shadowOpacity}
+                    id="light-intensity"
+                    label={t.lightIntensity}
                     min={0}
-                    max={0.5}
+                    max={1.5}
                     step={0.01}
-                    value={settings.shadow.opacity}
-                    display={settings.shadow.opacity.toFixed(2)}
-                    onChange={(opacity) =>
-                      updateSetting("shadow", { ...settings.shadow, opacity })
+                    value={settings.lighting.intensity}
+                    display={`${Math.round(settings.lighting.intensity * 100)}%`}
+                    onChange={(intensity) =>
+                      updateSetting("lighting", {
+                        ...settings.lighting,
+                        intensity,
+                      })
                     }
                   />
                   <RangeRow
-                    id="shadow-blur"
-                    label={t.shadowBlur}
-                    min={4}
-                    max={42}
-                    step={1}
-                    value={settings.shadow.blur}
-                    display={`${settings.shadow.blur}px`}
-                    onChange={(blur) =>
-                      updateSetting("shadow", { ...settings.shadow, blur })
+                    id="ambient-light"
+                    label={t.ambientLight}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.lighting.ambient}
+                    display={`${Math.round(settings.lighting.ambient * 100)}%`}
+                    onChange={(ambient) =>
+                      updateSetting("lighting", {
+                        ...settings.lighting,
+                        ambient,
+                      })
+                    }
+                  />
+                  <RangeRow
+                    id="light-softness"
+                    label={t.lightSoftness}
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={settings.lighting.softness}
+                    display={`${Math.round(settings.lighting.softness * 100)}%`}
+                    onChange={(softness) =>
+                      updateSetting("lighting", {
+                        ...settings.lighting,
+                        softness,
+                      })
                     }
                   />
                   <RangeRow

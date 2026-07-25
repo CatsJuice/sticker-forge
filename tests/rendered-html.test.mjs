@@ -69,9 +69,12 @@ test("ships both standalone bundles and a copyable embed example", async () => {
   assert.match(example, /StickerForge\.createSticker/);
   assert.match(declarations, /interface StickerInstance/);
   assert.match(declarations, /interface StickerSoundOptions/);
+  assert.match(declarations, /interface StickerLightingOptions/);
+  assert.match(declarations, /interface StickerLightDirection/);
   assert.match(declarations, /interface StickerRichTextDocument/);
   assert.match(declarations, /richText\?: StickerRichTextDocument/);
   assert.match(declarations, /sound\?: StickerSoundOptions/);
+  assert.match(declarations, /lighting\?: StickerLightingOptions/);
   assert.match(declarations, /setSource\(source: StickerSource\): Promise<void>/);
   assert.match(declarations, /setPeelProgress\(progress: number/);
   assert.match(declarations, /setEntranceProgress\(progress: number\): void/);

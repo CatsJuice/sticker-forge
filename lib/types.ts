@@ -59,6 +59,26 @@ export interface StickerShadowOptions {
   angle?: number;
 }
 
+export interface StickerLightDirection {
+  /** Horizontal direction toward the light in view space (-1..1). */
+  x: number;
+  /** Vertical direction toward the light in view space (-1..1). */
+  y: number;
+  /** Depth direction toward the viewer-facing light hemisphere (0..1). */
+  z: number;
+}
+
+export interface StickerLightingOptions {
+  /** Normalized view-space direction from the sticker toward the light. */
+  direction?: StickerLightDirection;
+  /** Direct-light intensity from 0 to 1.5. */
+  intensity?: number;
+  /** Fill light applied to every surface from 0 to 1. */
+  ambient?: number;
+  /** Apparent light-source size from 0 (crisp) to 1 (soft). */
+  softness?: number;
+}
+
 export interface StickerBackOptions {
   color?: string;
   gloss?: number;
@@ -90,6 +110,7 @@ export interface StickerOptions {
   outline?: StickerOutlineOptions;
   edge?: StickerEdgeOptions;
   shadow?: StickerShadowOptions;
+  lighting?: StickerLightingOptions;
   peel?: StickerPeelOptions;
   back?: StickerBackOptions;
   sound?: StickerSoundOptions;
@@ -164,6 +185,12 @@ export const DEFAULT_STICKER_OPTIONS = {
     distance: 16,
     angle: 42,
   },
+  lighting: {
+    direction: { x: -0.38, y: 0.52, z: 0.76 },
+    intensity: 0.8,
+    ambient: 0.35,
+    softness: 0.6,
+  },
   peel: {
     radius: 0.12,
     stiffness: 0.72,
@@ -183,6 +210,12 @@ export type ResolvedStickerOptions = {
   outline: Required<StickerOutlineOptions>;
   edge: Required<StickerEdgeOptions>;
   shadow: Required<StickerShadowOptions>;
+  lighting: {
+    direction: StickerLightDirection;
+    intensity: number;
+    ambient: number;
+    softness: number;
+  };
   peel: Required<StickerPeelOptions>;
   back: Required<StickerBackOptions>;
   sound: Required<StickerSoundOptions>;
@@ -201,6 +234,14 @@ export function resolveStickerOptions(
     outline: { ...base.outline, ...patch.outline },
     edge: { ...base.edge, ...patch.edge },
     shadow: { ...base.shadow, ...patch.shadow },
+    lighting: {
+      ...base.lighting,
+      ...patch.lighting,
+      direction: {
+        ...base.lighting.direction,
+        ...patch.lighting?.direction,
+      },
+    },
     peel: { ...base.peel, ...patch.peel },
     back: { ...base.back, ...patch.back },
     sound: { ...base.sound, ...patch.sound },

@@ -207,7 +207,7 @@ at 100% scale and scales with the sticker.
 
 The bundled recording is treated as an audio sprite rather than a timeline.
 Sticker Forge separates its lift, light crackle, strong tear, and release
-material, compensates their different levels, and drives randomized grains from
+material, compensates for their different levels, and drives randomized grains from
 the drag velocity and acceleration. A slow peel is sparse, a fast peel is denser
 and brighter, holding still is silent, and reattaching uses a quieter low-passed
 texture instead of reversed audio. `progress` is used only for the initial lift

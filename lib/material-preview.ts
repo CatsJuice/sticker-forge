@@ -4,6 +4,118 @@ import {
   type StickerMaterialOptions,
 } from "./types";
 
+const SEEDED_RANDOM_MODULUS = 2147483647;
+const SEEDED_RANDOM_MULTIPLIER = 48271;
+const HOLOGRAPHIC_NOISE_SIZE = 96;
+const MATERIAL_PREVIEW_CACHE_LIMIT = 6;
+const GLITTER_RANDOM_VALUES_PER_FLAKE = 5;
+
+interface HolographicNoiseCacheEntry {
+  pixels: Uint8ClampedArray;
+  canvas?: HTMLCanvasElement;
+}
+
+interface GlitterRandomCacheEntry {
+  state: number;
+  values: Float64Array;
+}
+
+const holographicNoiseCache = new Map<
+  number,
+  HolographicNoiseCacheEntry
+>();
+const glitterRandomCache = new Map<number, GlitterRandomCacheEntry>();
+
+function seededRandomInitialState(seed: number) {
+  return Math.floor(seed * SEEDED_RANDOM_MODULUS) || 1;
+}
+
+function readSeededLru<Value>(
+  cache: Map<number, Value>,
+  key: number,
+  create: () => Value,
+) {
+  const existing = cache.get(key);
+  if (existing !== undefined) {
+    cache.delete(key);
+    cache.set(key, existing);
+    return existing;
+  }
+
+  const value = create();
+  cache.set(key, value);
+  if (cache.size > MATERIAL_PREVIEW_CACHE_LIMIT) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
+  return value;
+}
+
+function getHolographicNoise(seed: number) {
+  const initialState = seededRandomInitialState(seed);
+  return readSeededLru(holographicNoiseCache, initialState, () => {
+    let state = initialState;
+    const pixels = new Uint8ClampedArray(
+      HOLOGRAPHIC_NOISE_SIZE * HOLOGRAPHIC_NOISE_SIZE * 4,
+    );
+    for (let index = 0; index < pixels.length; index += 4) {
+      state =
+        (state * SEEDED_RANDOM_MULTIPLIER) % SEEDED_RANDOM_MODULUS;
+      const value = state / SEEDED_RANDOM_MODULUS;
+      const brightness = value > 0.48 ? 255 : 20;
+      pixels[index] = brightness;
+      pixels[index + 1] = brightness;
+      pixels[index + 2] = brightness;
+      state =
+        (state * SEEDED_RANDOM_MULTIPLIER) % SEEDED_RANDOM_MODULUS;
+      pixels[index + 3] = Math.round(
+        38 + (state / SEEDED_RANDOM_MODULUS) * 74,
+      );
+    }
+    return { pixels };
+  });
+}
+
+function getHolographicNoiseCanvas(seed: number) {
+  const entry = getHolographicNoise(seed);
+  if (entry.canvas) return entry.canvas;
+
+  const canvas = document.createElement("canvas");
+  canvas.width = HOLOGRAPHIC_NOISE_SIZE;
+  canvas.height = HOLOGRAPHIC_NOISE_SIZE;
+  const context = canvas.getContext("2d", { alpha: true });
+  if (!context) return null;
+  const noise = context.createImageData(
+    HOLOGRAPHIC_NOISE_SIZE,
+    HOLOGRAPHIC_NOISE_SIZE,
+  );
+  noise.data.set(entry.pixels);
+  context.putImageData(noise, 0, 0);
+  entry.canvas = canvas;
+  return canvas;
+}
+
+function getGlitterRandomValues(seed: number, count: number) {
+  const initialState = seededRandomInitialState(seed);
+  const entry = readSeededLru(glitterRandomCache, initialState, () => ({
+    state: initialState,
+    values: new Float64Array(0),
+  }));
+  const requiredLength = count * GLITTER_RANDOM_VALUES_PER_FLAKE;
+  if (entry.values.length >= requiredLength) return entry.values;
+
+  const values = new Float64Array(requiredLength);
+  values.set(entry.values);
+  let state = entry.state;
+  for (let index = entry.values.length; index < requiredLength; index += 1) {
+    state = (state * SEEDED_RANDOM_MULTIPLIER) % SEEDED_RANDOM_MODULUS;
+    values[index] = state / SEEDED_RANDOM_MODULUS;
+  }
+  entry.state = state;
+  entry.values = values;
+  return values;
+}
+
 function scaledPhase(position: number, scale: number) {
   return (position - 0.5) * scale + 0.5;
 }
@@ -67,29 +179,8 @@ function applyHolographicFrost(
   scale: number,
   seed: number,
 ) {
-  const noiseCanvas = document.createElement("canvas");
-  const noiseSize = 96;
-  noiseCanvas.width = noiseSize;
-  noiseCanvas.height = noiseSize;
-  const noiseContext = noiseCanvas.getContext("2d", { alpha: true });
-  if (!noiseContext) return;
-
-  let state = Math.floor(seed * 2147483647) || 1;
-  const random = () => {
-    state = (state * 48271) % 2147483647;
-    return state / 2147483647;
-  };
-  const noise = noiseContext.createImageData(noiseSize, noiseSize);
-  for (let index = 0; index < noise.data.length; index += 4) {
-    const value = random();
-    const brightness = value > 0.48 ? 255 : 20;
-    noise.data[index] = brightness;
-    noise.data[index + 1] = brightness;
-    noise.data[index + 2] = brightness;
-    noise.data[index + 3] = Math.round(38 + random() * 74);
-  }
-  noiseContext.putImageData(noise, 0, 0);
-
+  const noiseCanvas = getHolographicNoiseCanvas(seed);
+  if (!noiseCanvas) return;
   const pattern = context.createPattern(noiseCanvas, "repeat");
   if (!pattern) return;
   pattern.setTransform(
@@ -191,20 +282,17 @@ export function applyMaterialPreview(
       1.4,
       Math.max(0.45, 0.5 + intensity * 0.625),
     );
-    let state = Math.floor(resolved.seed * 2147483647) || 1;
-    const random = () => {
-      state = (state * 48271) % 2147483647;
-      return state / 2147483647;
-    };
     const count = Math.min(
       8000,
       Math.round(((width * height) / 520) * scale * scale),
     );
+    const randomValues = getGlitterRandomValues(resolved.seed, count);
     for (let index = 0; index < count; index += 1) {
-      const x = random() * width;
-      const y = random() * height;
-      const bright = random() > 0.5;
-      const opacity = random();
+      const randomOffset = index * GLITTER_RANDOM_VALUES_PER_FLAKE;
+      const x = randomValues[randomOffset] * width;
+      const y = randomValues[randomOffset + 1] * height;
+      const bright = randomValues[randomOffset + 2] > 0.5;
+      const opacity = randomValues[randomOffset + 3];
       const orientation =
         ((x * 0.013 + y * 0.017 + resolved.seed * 7) % 1) * Math.PI * 2;
       const twinkle =
@@ -213,7 +301,8 @@ export function applyMaterialPreview(
       context.globalAlpha =
         0.38 * amount * opacity * twinkle * lightStrength;
       context.fillStyle = bright ? "#ffffff" : "#34281f";
-      const size = (0.7 + random() * 1.8) / Math.sqrt(scale);
+      const size =
+        (0.7 + randomValues[randomOffset + 4] * 1.8) / Math.sqrt(scale);
       context.fillRect(x, y, size, size);
     }
   }

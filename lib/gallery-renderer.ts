@@ -1,6 +1,9 @@
 import * as THREE from "three";
 import type { GalleryAsset, GalleryItem, GalleryLayout } from "./gallery-types";
-import { getGalleryPreviewUrl } from "./gallery-storage";
+import {
+  acquireGalleryPreviewUrl,
+  type GalleryPreviewUrlLease,
+} from "./gallery-storage";
 import { PeelAudioEngine, DEFAULT_PEEL_SOUND_URL } from "./peel-audio";
 import { prepareArtwork, type PreparedArtwork } from "./source";
 import {
@@ -1309,9 +1312,11 @@ export class GalleryRenderer {
       this.records.get(record.item.id) !== record ||
       record.preview
     ) return;
+    let lease: GalleryPreviewUrlLease | null = null;
     try {
-      const url = await getGalleryPreviewUrl(record.item.id);
-      const texture = await new THREE.TextureLoader().loadAsync(url);
+      lease = await acquireGalleryPreviewUrl(record.item.id);
+      if (this.destroyed || this.records.get(record.item.id) !== record) return;
+      const texture = await new THREE.TextureLoader().loadAsync(lease.url);
       if (this.destroyed || this.records.get(record.item.id) !== record) {
         texture.dispose();
         return;
@@ -1337,6 +1342,8 @@ export class GalleryRenderer {
       record.previewLoading = false;
       this.emitPreviewIds();
       // The asset queue may still upgrade this record to its full renderer.
+    } finally {
+      lease?.release();
     }
   }
 

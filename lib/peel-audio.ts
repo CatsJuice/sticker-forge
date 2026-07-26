@@ -73,8 +73,40 @@ export type PeelAudioConfig = {
   useBuiltInProfile?: boolean;
 };
 
+type AudioBufferLoadState = {
+  controller: AbortController;
+  invalidated: boolean;
+  settled: boolean;
+};
+
+type AudioDecodeJob = {
+  context: AudioContext;
+  encoded: ArrayBuffer | null;
+  load: AudioBufferLoadState;
+  resolve: (buffer: AudioBuffer) => void;
+  reject: (error: unknown) => void;
+};
+
+type DecodedAudioBufferEntry = {
+  promise: Promise<AudioBuffer>;
+  references: number;
+  pinned: boolean;
+  load: AudioBufferLoadState;
+};
+
+type DecodedAudioBufferLease = {
+  src: string;
+  promise: Promise<AudioBuffer>;
+  release: () => void;
+};
+
 let sharedAudioContext: AudioContext | null = null;
-const decodedBuffers = new Map<string, Promise<AudioBuffer>>();
+const MAX_ZERO_REFERENCE_CUSTOM_AUDIO_BUFFERS = 8;
+const MAX_CONCURRENT_AUDIO_DECODES = 2;
+const decodedBuffers = new Map<string, DecodedAudioBufferEntry>();
+const zeroReferenceDecodedBuffers = new Map<string, true>();
+const pendingAudioDecodes: AudioDecodeJob[] = [];
+let activeAudioDecodes = 0;
 const PROCESSED_SOURCE_START = 0.16;
 
 function processedSlice(
@@ -174,23 +206,165 @@ function getSharedAudioContext() {
   return sharedAudioContext;
 }
 
-function loadAudioBuffer(src: string, context: AudioContext) {
-  const cached = decodedBuffers.get(src);
-  if (cached) return cached;
+function audioDecodeAbortError() {
+  return new DOMException("Audio load was evicted.", "AbortError");
+}
 
-  const pending = fetch(src)
-    .then((response) => {
-      if (!response.ok) {
-        throw new Error(`Peel audio request failed with ${response.status}.`);
-      }
-      return response.arrayBuffer();
-    })
-    .then((encoded) => context.decodeAudioData(encoded));
-  decodedBuffers.set(src, pending);
-  void pending.catch(() => {
-    if (decodedBuffers.get(src) === pending) decodedBuffers.delete(src);
+function drainAudioDecodeQueue() {
+  for (let index = pendingAudioDecodes.length - 1; index >= 0; index -= 1) {
+    const job = pendingAudioDecodes[index];
+    if (!job.load.invalidated) continue;
+    pendingAudioDecodes.splice(index, 1);
+    job.encoded = null;
+    job.reject(audioDecodeAbortError());
+  }
+
+  while (
+    activeAudioDecodes < MAX_CONCURRENT_AUDIO_DECODES &&
+    pendingAudioDecodes.length > 0
+  ) {
+    const job = pendingAudioDecodes.shift();
+    if (!job) return;
+    if (job.load.invalidated) {
+      job.encoded = null;
+      job.reject(audioDecodeAbortError());
+      continue;
+    }
+    const encoded = job.encoded;
+    job.encoded = null;
+    if (!encoded) {
+      job.reject(audioDecodeAbortError());
+      continue;
+    }
+
+    activeAudioDecodes += 1;
+    let decoding: Promise<AudioBuffer>;
+    try {
+      decoding = job.context.decodeAudioData(encoded);
+    } catch (error) {
+      activeAudioDecodes -= 1;
+      job.reject(error);
+      continue;
+    }
+    void decoding
+      .then(
+        (buffer) => {
+          if (job.load.invalidated) {
+            job.reject(audioDecodeAbortError());
+            return;
+          }
+          job.resolve(buffer);
+        },
+        (error) => job.reject(error),
+      )
+      .finally(() => {
+        activeAudioDecodes -= 1;
+        drainAudioDecodeQueue();
+      });
+  }
+}
+
+function queueAudioBufferDecode(
+  context: AudioContext,
+  encoded: ArrayBuffer,
+  load: AudioBufferLoadState,
+) {
+  if (load.invalidated) return Promise.reject(audioDecodeAbortError());
+  return new Promise<AudioBuffer>((resolve, reject) => {
+    pendingAudioDecodes.push({
+      context,
+      encoded,
+      load,
+      resolve,
+      reject,
+    });
+    drainAudioDecodeQueue();
   });
-  return pending;
+}
+
+function invalidateAudioBufferLoad(load: AudioBufferLoadState) {
+  if (load.invalidated) return;
+  load.invalidated = true;
+  if (!load.settled) load.controller.abort();
+  drainAudioDecodeQueue();
+}
+
+function trimZeroReferenceDecodedBuffers() {
+  while (
+    zeroReferenceDecodedBuffers.size >
+    MAX_ZERO_REFERENCE_CUSTOM_AUDIO_BUFFERS
+  ) {
+    const oldestSource = zeroReferenceDecodedBuffers.keys().next().value;
+    if (typeof oldestSource !== "string") return;
+    zeroReferenceDecodedBuffers.delete(oldestSource);
+    const entry = decodedBuffers.get(oldestSource);
+    if (!entry || entry.pinned || entry.references > 0) continue;
+    decodedBuffers.delete(oldestSource);
+    invalidateAudioBufferLoad(entry.load);
+  }
+}
+
+function acquireAudioBuffer(
+  src: string,
+  context: AudioContext,
+): DecodedAudioBufferLease {
+  let entry = decodedBuffers.get(src);
+  if (!entry) {
+    const load = {
+      controller: new AbortController(),
+      invalidated: false,
+      settled: false,
+    };
+    const promise = fetch(src, { signal: load.controller.signal })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Peel audio request failed with ${response.status}.`);
+        }
+        return response.arrayBuffer();
+      })
+      .then((encoded) => {
+        if (load.invalidated) {
+          throw audioDecodeAbortError();
+        }
+        return queueAudioBufferDecode(context, encoded, load);
+      })
+      .finally(() => {
+        load.settled = true;
+      });
+    entry = {
+      promise,
+      references: 0,
+      pinned:
+        src === DEFAULT_PEEL_SOUND_URL || src === DEFAULT_REAPPEAR_SOUND_URL,
+      load,
+    };
+    decodedBuffers.set(src, entry);
+    const createdEntry = entry;
+    void promise.catch(() => {
+      if (decodedBuffers.get(src) !== createdEntry) return;
+      decodedBuffers.delete(src);
+      zeroReferenceDecodedBuffers.delete(src);
+    });
+  }
+
+  entry.references += 1;
+  zeroReferenceDecodedBuffers.delete(src);
+  const retainedEntry = entry;
+  let released = false;
+  return {
+    src,
+    promise: retainedEntry.promise,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (decodedBuffers.get(src) !== retainedEntry) return;
+      retainedEntry.references = Math.max(0, retainedEntry.references - 1);
+      if (retainedEntry.references > 0 || retainedEntry.pinned) return;
+      zeroReferenceDecodedBuffers.delete(src);
+      zeroReferenceDecodedBuffers.set(src, true);
+      trimZeroReferenceDecodedBuffers();
+    },
+  };
 }
 
 function relativeSlice(
@@ -236,7 +410,9 @@ export class PeelAudioEngine {
   private volume = 0.7;
   private useBuiltInProfile = false;
   private buffer: AudioBuffer | null = null;
+  private bufferLease: DecodedAudioBufferLease | null = null;
   private reappearBuffer: AudioBuffer | null = null;
+  private reappearBufferLease: DecodedAudioBufferLease | null = null;
   private profile: SampleProfile | null = null;
   private loadRevision = 0;
   private masterGain: GainNode | null = null;
@@ -272,6 +448,10 @@ export class PeelAudioEngine {
     const sourceChanged = nextSource !== this.src;
     const profileChanged = nextBuiltInProfile !== this.useBuiltInProfile;
 
+    if (sourceChanged) {
+      this.bufferLease?.release();
+      this.bufferLease = null;
+    }
     this.enabled = config.enabled && Boolean(nextSource);
     this.src = nextSource;
     this.volume = clamp(config.volume, 0, 1);
@@ -582,15 +762,25 @@ export class PeelAudioEngine {
     this.masterGain = null;
     this.compressor = null;
     this.buffer = null;
+    this.bufferLease?.release();
+    this.bufferLease = null;
     this.reappearBuffer = null;
+    this.reappearBufferLease?.release();
+    this.reappearBufferLease = null;
+    this.src = "";
     this.profile = null;
   }
 
   private preload() {
     const context = getSharedAudioContext();
     if (!context || !this.enabled || !this.src || this.destroyed) return;
+    if (!this.bufferLease || this.bufferLease.src !== this.src) {
+      this.bufferLease?.release();
+      this.bufferLease = acquireAudioBuffer(this.src, context);
+    }
+    const lease = this.bufferLease;
     const revision = ++this.loadRevision;
-    void loadAudioBuffer(this.src, context)
+    void lease.promise
       .then((buffer) => {
         if (this.destroyed || revision !== this.loadRevision) return;
         this.buffer = buffer;
@@ -600,6 +790,10 @@ export class PeelAudioEngine {
         this.sliceBags = { micro: [], body: [], accent: [] };
       })
       .catch(() => {
+        if (this.bufferLease === lease) {
+          lease.release();
+          this.bufferLease = null;
+        }
         // Sound is progressive enhancement and never blocks sticker rendering.
       });
   }
@@ -607,12 +801,18 @@ export class PeelAudioEngine {
   private preloadReappear() {
     const context = getSharedAudioContext();
     if (!context || !this.enabled || this.destroyed) return;
-    void loadAudioBuffer(reappearSoundUrl, context)
+    this.reappearBufferLease ??= acquireAudioBuffer(reappearSoundUrl, context);
+    const lease = this.reappearBufferLease;
+    void lease.promise
       .then((buffer) => {
         if (this.destroyed) return;
         this.reappearBuffer = buffer;
       })
       .catch(() => {
+        if (this.reappearBufferLease === lease) {
+          lease.release();
+          this.reappearBufferLease = null;
+        }
         // Sound is progressive enhancement and never blocks sticker rendering.
       });
   }

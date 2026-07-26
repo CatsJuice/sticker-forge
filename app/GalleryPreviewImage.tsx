@@ -8,7 +8,10 @@ import {
   useState,
   type ComponentPropsWithoutRef,
 } from "react";
-import { getGalleryPreviewUrl } from "@/lib/gallery-storage";
+import {
+  acquireGalleryPreviewUrl,
+  type GalleryPreviewUrlLease,
+} from "@/lib/gallery-storage";
 
 type GalleryPreviewImageProps = Omit<
   ComponentPropsWithoutRef<"img">,
@@ -26,16 +29,24 @@ export const GalleryPreviewImage = forwardRef<
 
   useEffect(() => {
     let cancelled = false;
+    let lease: GalleryPreviewUrlLease | null = null;
     setSrc(undefined);
-    void getGalleryPreviewUrl(itemId)
-      .then((url) => {
-        if (!cancelled) setSrc(url);
+    void acquireGalleryPreviewUrl(itemId)
+      .then((acquiredLease) => {
+        if (cancelled) {
+          acquiredLease.release();
+          return;
+        }
+        lease = acquiredLease;
+        setSrc(acquiredLease.url);
       })
       .catch(() => {
         if (!cancelled) setSrc(undefined);
       });
     return () => {
       cancelled = true;
+      lease?.release();
+      lease = null;
     };
   }, [itemId]);
 

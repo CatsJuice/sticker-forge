@@ -2,6 +2,49 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
+
+import {
+  createParticleFixture,
+  drawBaselineFrame,
+  PARITY_TIMESTAMPS_MS,
+  prepareBaselineParticles,
+  verifyParticleParity,
+} from "./performance/background-removal-particles.mjs";
+
+async function loadBackgroundRemovalEffectModule(source) {
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      target: ts.ScriptTarget.ES2022,
+      module: ts.ModuleKind.ESNext,
+      jsx: ts.JsxEmit.ReactJSX,
+    },
+  }).outputText;
+  const executable = compiled
+    .replace(
+      /import \{ jsx as _jsx \} from "react\/jsx-runtime";/,
+      "const _jsx = () => null;",
+    )
+    .replace(
+      /import \{ useEffect, useRef \} from "react";/,
+      "const useEffect = () => {}; const useRef = (current) => ({ current });",
+    )
+    .replace(
+      /import \{ getParticleEffectSettings,\s*\} from "@\/lib\/particle-debug";/,
+      "const getParticleEffectSettings = () => ({});",
+    );
+  return import(
+    `data:text/javascript;base64,${Buffer.from(executable).toString("base64")}`
+  );
+}
+
+function typedArrayBytes(state) {
+  return Object.values(state).reduce(
+    (total, value) =>
+      ArrayBuffer.isView(value) ? total + value.byteLength : total,
+    0,
+  );
+}
 
 test("ships a local, permissively licensed background-removal path", async () => {
   const [
@@ -76,7 +119,7 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.match(worker, /device:\s*"wasm"/);
   assert.match(worker, /type:\s*"progress"/);
   assert.match(client, /request\.retries < 1/);
-  assert.match(client, /postWorkerRequest\(restartedWorker, id, request\)/);
+  assert.match(client, /tryPostWorkerRequest\(restartedWorker, id, request\)/);
   assert.match(client, /workerFailureMessage\(event\)/);
   assert.match(client, /window\.setTimeout\(\(\) =>/);
   assert.match(
@@ -119,12 +162,15 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.match(effect, /particleSettings\.shrinkDuration/);
   assert.match(effect, /shoulderAlpha/);
   assert.match(effect, /const direction/);
-  assert.match(effect, /const baseDirection = -Math\.PI \* 0\.22/);
-  assert.match(effect, /const PARTICLE_LAUNCH_WINDOW_MS = 1_000/);
   assert.match(
     effect,
-    /delays\[index\] \* PARTICLE_LAUNCH_WINDOW_MS/,
+    /const BASE_PARTICLE_DIRECTION = -Math\.PI \* 0\.22/,
   );
+  assert.match(effect, /const PARTICLE_LAUNCH_WINDOW_MS = 1_000/);
+  assert.match(effect, /countRemovedPixels\(original, retained\)/);
+  assert.match(effect, /new Float32Array\(pixelCount\)/);
+  assert.doesNotMatch(effect, /new Float64Array\(pixelCount\)/);
+  assert.doesNotMatch(effect, /new Float32Array\(maximumPixels\)/);
   assert.match(effect, /lifetime \* 0\.35/);
   assert.match(effect, /Math\.exp\(-8 \* movementProgress \* movementProgress\)/);
   assert.match(effect, /const terminalDrift = 0\.08/);
@@ -133,8 +179,12 @@ test("ships a local, permissively licensed background-removal path", async () =>
     /movementProgress\s*\*\s*movementProgress\s*\*\s*movementProgress\s*\*\s*terminalDrift/,
   );
   assert.match(effect, /lifetime - particleShrinkDuration/);
-  assert.match(effect, /particleSpeeds\[pixelCount\]/);
-  assert.match(effect, /particleLifetimes\[pixelCount\]/);
+  assert.match(effect, /delays\[index\] \* PARTICLE_LAUNCH_WINDOW_MS/);
+  assert.match(effect, /Math\.max\(1, lifetime - launchDelay\)/);
+  assert.equal(effect.match(/Math\.cos\(direction\)/g)?.length, 1);
+  assert.equal(effect.match(/Math\.sin\(direction\)/g)?.length, 1);
+  assert.match(effect, /const tangentX = -directionSine/);
+  assert.match(effect, /const tangentY = directionCosine/);
   assert.match(effect, /swayFrequencies\[index\]/);
   assert.match(effect, /particleSize \* \(1 - easedShrink\)/);
   assert.match(
@@ -170,7 +220,10 @@ test("ships a local, permissively licensed background-removal path", async () =>
   );
   assert.match(renderer, /async prepareSource\(/);
   assert.match(renderer, /this\.renderer\.initTexture\(texture\)/);
-  assert.match(renderer, /this\.applyArtwork\(artwork, texture\)/);
+  assert.match(
+    renderer,
+    /this\.applyArtwork\(prepared\.artwork, prepared\.texture\)/,
+  );
   assert.match(renderer, /const PRE_ENTRANCE_DURATION = 0\.32/);
   assert.match(renderer, /uPreparedMix\.value = easedProgress/);
   assert.match(renderer, /uPreEntranceProgress\.value = easedProgress/);
@@ -198,4 +251,122 @@ test("ships a local, permissively licensed background-removal path", async () =>
     modelSource,
     /7112208dbac3a3642496c8d54e2f0f9bb3dc1dc8/,
   );
+});
+
+test("background-removal particle optimization preserves every rendered pixel", async () => {
+  const fixture = createParticleFixture({
+    drawWidth: 96,
+    drawHeight: 72,
+    canvasWidth: 144,
+    canvasHeight: 108,
+    removalRatio: 0.47,
+    tiltDegrees: -11,
+  });
+  const { baseline, optimized, pixelCount, checksums } =
+    verifyParticleParity(fixture);
+  const effectSource = await readFile(
+    new URL("../app/BackgroundRemovalEffect.tsx", import.meta.url),
+    "utf8",
+  );
+  const effectModule = await loadBackgroundRemovalEffectModule(effectSource);
+  const actualParticles =
+    effectModule.prepareBackgroundRemovalParticles(fixture);
+  const actualOutput = new Uint8ClampedArray(
+    fixture.canvasWidth * fixture.canvasHeight * 4,
+  );
+  const baselineOutput = new Uint8ClampedArray(actualOutput.length);
+  const renderActualFrame =
+    effectModule.createBackgroundRemovalParticleFrameRenderer({
+      particles: actualParticles,
+      particleSettings: fixture.particleSettings,
+      canvasWidth: fixture.canvasWidth,
+      canvasHeight: fixture.canvasHeight,
+      outputPixels: actualOutput,
+    });
+  const directBaseline = prepareBaselineParticles(fixture);
+
+  assert.ok(pixelCount > 0);
+  assert.equal(checksums.length, 10);
+  for (let index = 0; index < PARITY_TIMESTAMPS_MS.length; index += 1) {
+    const elapsed = PARITY_TIMESTAMPS_MS[index];
+    const { before, after } = checksums[index];
+    assert.equal(after, before);
+    drawBaselineFrame(directBaseline, fixture, elapsed, baselineOutput);
+    renderActualFrame(elapsed);
+    assert.deepEqual(actualOutput, baselineOutput);
+    assert.equal(
+      createHash("sha256").update(actualOutput).digest("hex"),
+      before,
+    );
+  }
+
+  assert.equal(baseline.sourceX.length, fixture.drawWidth * fixture.drawHeight);
+  for (const [name, value] of Object.entries(actualParticles)) {
+    if (!ArrayBuffer.isView(value)) continue;
+    assert.equal(
+      value.length,
+      name === "colors" ? pixelCount * 4 : pixelCount,
+      `${name} must be allocated for the exact removed-pixel count`,
+    );
+  }
+  assert.equal(optimized.pixelCount, actualParticles.pixelCount);
+
+  for (const removalRatio of [0.1, 0.5, 0.9, 1]) {
+    const densityFixture = createParticleFixture({
+      drawWidth: 48,
+      drawHeight: 36,
+      canvasWidth: 72,
+      canvasHeight: 54,
+      removalRatio,
+      tiltDegrees: 13,
+    });
+    const densityParity = verifyParticleParity(densityFixture);
+    const densityBaseline = prepareBaselineParticles(densityFixture);
+    const densityActual =
+      effectModule.prepareBackgroundRemovalParticles(densityFixture);
+    const expectedPixelCount = Math.round(
+      densityFixture.drawWidth
+        * densityFixture.drawHeight
+        * removalRatio,
+    );
+    const baselineBytes = typedArrayBytes(densityBaseline);
+    const actualBytes = typedArrayBytes(densityActual);
+
+    assert.equal(densityParity.pixelCount, expectedPixelCount);
+    assert.equal(densityActual.pixelCount, expectedPixelCount);
+    assert.equal(actualBytes, expectedPixelCount * 44);
+    assert.ok(
+      actualBytes <= baselineBytes,
+      `particle state regressed at ${removalRatio * 100}% removal`,
+    );
+
+    const densityBaselineOutput = new Uint8ClampedArray(
+      densityFixture.canvasWidth * densityFixture.canvasHeight * 4,
+    );
+    const densityActualOutput =
+      new Uint8ClampedArray(densityBaselineOutput.length);
+    const renderDensityActualFrame =
+      effectModule.createBackgroundRemovalParticleFrameRenderer({
+        particles: densityActual,
+        particleSettings: densityFixture.particleSettings,
+        canvasWidth: densityFixture.canvasWidth,
+        canvasHeight: densityFixture.canvasHeight,
+        outputPixels: densityActualOutput,
+      });
+
+    for (const elapsed of PARITY_TIMESTAMPS_MS) {
+      drawBaselineFrame(
+        densityBaseline,
+        densityFixture,
+        elapsed,
+        densityBaselineOutput,
+      );
+      renderDensityActualFrame(elapsed);
+      assert.deepEqual(
+        densityActualOutput,
+        densityBaselineOutput,
+        `rendered pixels differ at ${removalRatio * 100}% and ${elapsed}ms`,
+      );
+    }
+  }
 });

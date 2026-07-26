@@ -1317,7 +1317,7 @@ test("locks export canvas ratios and scales every export format", async () => {
   assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
   assert.match(
     exportDialog,
-    /getImageData\(0, 0, exportSize\.width, exportSize\.height\)/,
+    /getImageData\(\s*0,\s*0,\s*exportSize\.width,\s*exportSize\.height,\s*\)/,
   );
   assert.match(exportDialog, /outputScale: 1,/);
   assert.match(exportWorker, /if \(outputScale === 1\)/);

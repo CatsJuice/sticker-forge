@@ -51,11 +51,17 @@ export function startStickerExportWorker(
       cleanup();
       reject(new Error(event.message || "Export worker crashed."));
     };
-    const transfer: Transferable[] = request.frames
-      .filter((frame) => frame.rgba.byteLength > 0)
-      .map((frame) => frame.rgba.buffer);
-    if (request.audio) transfer.push(request.audio.pcm.buffer);
-    worker.postMessage(request, transfer);
+    try {
+      const transfer: Transferable[] = request.frames
+        .filter((frame) => frame.rgba.byteLength > 0)
+        .map((frame) => frame.rgba.buffer);
+      if (request.audio) transfer.push(request.audio.pcm.buffer);
+      worker.postMessage(request, transfer);
+    } catch (error) {
+      settled = true;
+      cleanup();
+      reject(error);
+    }
   });
 
   return {

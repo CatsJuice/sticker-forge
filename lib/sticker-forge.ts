@@ -136,6 +136,54 @@ type PreparedEntrance = {
   elapsed: number;
 };
 
+type PreparedSourcePayload = {
+  artwork: PreparedArtwork;
+  texture: THREE.CanvasTexture;
+  source: StickerSource;
+  options: Partial<StickerOptions>;
+};
+
+type PreparedSourceAction = "commit" | "entrance" | "dispose";
+
+type PreparedSourceHandleState = {
+  payload: PreparedSourcePayload | null;
+  consume:
+    | ((action: PreparedSourceAction, payload: PreparedSourcePayload) => void)
+    | null;
+};
+
+function takePreparedSourceState(state: PreparedSourceHandleState) {
+  const payload = state.payload;
+  const consume = state.consume;
+  state.payload = null;
+  state.consume = null;
+  return { payload, consume };
+}
+
+function consumePreparedSourceState(
+  state: PreparedSourceHandleState,
+  action: PreparedSourceAction,
+) {
+  const { payload, consume } = takePreparedSourceState(state);
+  if (payload && consume) consume(action, payload);
+}
+
+function createPreparedSourceHandle(
+  state: PreparedSourceHandleState,
+): PreparedStickerSource {
+  return {
+    commit() {
+      consumePreparedSourceState(state, "commit");
+    },
+    commitWithEntrance() {
+      consumePreparedSourceState(state, "entrance");
+    },
+    dispose() {
+      consumePreparedSourceState(state, "dispose");
+    },
+  };
+}
+
 type EdgeHit = {
   local: THREE.Vector2;
   inward: THREE.Vector2;
@@ -210,8 +258,20 @@ class StickerRenderer implements StickerInstance {
   private requestedSource: StickerSource = DEFAULT_SOURCE;
   private sourceRevision = 0;
   private sourceRebuildTimer: number | null = null;
+  private readonly preparedSourceStates =
+    new Set<PreparedSourceHandleState>();
   private destroyed = false;
   private resizeObserver: ResizeObserver | null = null;
+  private resizeFrameRequest = 0;
+  private renderedWidth = 0;
+  private renderedHeight = 0;
+  private renderedPixelRatio = 0;
+  private measuredClientWidth = -1;
+  private measuredClientHeight = -1;
+  private geometryWidth = 1;
+  private geometryHeight = 1;
+  private geometrySegmentsX = 2;
+  private geometrySegmentsY = 2;
   private viewWidth = 2;
   private viewHeight = 2;
   private viewportHeightPx = 420;
@@ -244,6 +304,12 @@ class StickerRenderer implements StickerInstance {
   private interactionHintActive = false;
   private interactionHintElapsed = 0;
   private readonly entranceAxis = new THREE.Vector2(1, 0);
+  private readonly reducedMotionQuery = window.matchMedia(
+    "(prefers-reduced-motion: reduce)",
+  );
+  private hoverFrameRequest = 0;
+  private hoverClientX = 0;
+  private hoverClientY = 0;
   private frameRequest = 0;
   private lastFrameTime = 0;
   private state: MutableStickerState = {
@@ -288,7 +354,6 @@ class StickerRenderer implements StickerInstance {
       "aria-keyshortcuts",
       "ArrowUp ArrowRight ArrowDown ArrowLeft Space",
     );
-    container.appendChild(this.renderer.domElement);
 
     this.uniforms = {
       uMap: { value: null },
@@ -457,7 +522,17 @@ class StickerRenderer implements StickerInstance {
     this.scene.add(this.residueMesh);
     this.scene.add(this.stickerMesh);
 
+    try {
+      this.attach();
+    } catch (error) {
+      this.destroy();
+      throw error;
+    }
+  }
+
+  private attach() {
     const canvas = this.renderer.domElement;
+    this.container.appendChild(canvas);
     canvas.addEventListener("pointerdown", this.onPointerDown);
     canvas.addEventListener("pointermove", this.onPointerMove);
     canvas.addEventListener("pointerup", this.onPointerUp);
@@ -472,14 +547,13 @@ class StickerRenderer implements StickerInstance {
     document.addEventListener("visibilitychange", this.onVisibilityChange);
 
     if (typeof ResizeObserver !== "undefined") {
-      this.resizeObserver = new ResizeObserver(() => this.resize());
-      this.resizeObserver.observe(container);
+      this.resizeObserver = new ResizeObserver(this.resizeObserved);
+      this.resizeObserver.observe(this.container);
     } else {
-      window.addEventListener("resize", this.resize);
+      window.addEventListener("resize", this.scheduleResize);
     }
 
     this.resize();
-    this.applyOptionsToRenderer();
   }
 
   async setSource(source: StickerSource): Promise<void> {
@@ -522,50 +596,52 @@ class StickerRenderer implements StickerInstance {
       preparedOptions.material,
       preparedOptions.lighting,
     );
-    this.renderer.initTexture(texture);
-    let pending = true;
-    const commitPrepared = () => {
-      this.sourceRevision += 1;
-      this.requestedSource = source;
-      this.source = source;
-      this.options = resolveStickerOptions(this.options, {
-        ...options,
-        source,
-      });
-      this.applyOptionsToRenderer();
-      this.applyArtwork(artwork, texture);
+    try {
+      this.renderer.initTexture(texture);
+    } catch (error) {
+      texture.dispose();
+      throw error;
+    }
+    const state: PreparedSourceHandleState = {
+      payload: { artwork, texture, source, options },
+      consume: null,
     };
-
-    return {
-      commit: () => {
-        if (!pending || this.destroyed) return;
-        pending = false;
-        commitPrepared();
-      },
-      commitWithEntrance: () => {
-        if (!pending || this.destroyed) return;
-        pending = false;
+    state.consume = (action, prepared) => {
+      this.preparedSourceStates.delete(state);
+      if (action === "dispose" || this.destroyed) {
+        prepared.texture.dispose();
+        return;
+      }
+      if (action === "commit") {
+        this.sourceRevision += 1;
+        this.requestedSource = prepared.source;
+        this.source = prepared.source;
+        this.options = resolveStickerOptions(this.options, {
+          ...prepared.options,
+          source: prepared.source,
+        });
+        this.applyArtwork(prepared.artwork, prepared.texture);
+        return;
+      }
+      if (action === "entrance") {
         this.cancelPreparedEntrance();
         this.entranceActive = false;
         this.clearEntrancePose();
         this.preparedEntrance = {
-          artwork,
-          texture,
-          source,
-          options,
+          artwork: prepared.artwork,
+          texture: prepared.texture,
+          source: prepared.source,
+          options: prepared.options,
           elapsed: 0,
         };
-        this.uniforms.uPreparedMap.value = texture;
+        this.uniforms.uPreparedMap.value = prepared.texture;
         this.uniforms.uPreparedMix.value = 0;
         this.uniforms.uPreEntranceProgress.value = 0;
         this.requestRender();
-      },
-      dispose: () => {
-        if (!pending) return;
-        pending = false;
-        texture.dispose();
-      },
+      }
     };
+    this.preparedSourceStates.add(state);
+    return createPreparedSourceHandle(state);
   }
 
   setOptions(patch: Partial<StickerOptions>): void {
@@ -575,7 +651,6 @@ class StickerRenderer implements StickerInstance {
     const previousDisplay = this.options.display;
     const previousMaterialKey = this.materialKey();
     this.options = resolveStickerOptions(this.options, patch);
-    this.applyOptionsToRenderer();
     if (
       this.artwork &&
       this.materialKey() !== previousMaterialKey &&
@@ -612,6 +687,7 @@ class StickerRenderer implements StickerInstance {
     ) {
       this.updateMeshGeometry(this.artwork.aspect);
     }
+    this.applyOptionsToRenderer();
     this.requestRender();
   }
 
@@ -834,47 +910,89 @@ class StickerRenderer implements StickerInstance {
   }
 
   resize = (): void => {
+    this.resizeInternal(true);
+  };
+
+  private resizeObserved = () => {
+    this.resizeInternal(false);
+  };
+
+  private resizeInternal(forcePublicResize: boolean): void {
     if (this.destroyed) return;
     // CSS transforms are presentation-only. Keeping layout dimensions separate
     // lets export previews supersample without changing the sticker geometry.
-    const width = Math.max(2, Math.round(this.container.clientWidth || 640));
-    const height = Math.max(2, Math.round(this.container.clientHeight || 420));
+    const clientWidth = this.container.clientWidth;
+    const clientHeight = this.container.clientHeight;
+    const layoutChanged =
+      clientWidth !== this.measuredClientWidth ||
+      clientHeight !== this.measuredClientHeight;
+    this.measuredClientWidth = clientWidth;
+    this.measuredClientHeight = clientHeight;
+    const width = Math.max(2, Math.round(clientWidth || 640));
+    const height = Math.max(2, Math.round(clientHeight || 420));
     const qualityRatio = this.options.quality === "low" ? 1.25 : 2;
-    this.renderer.setPixelRatio(
-      Math.min(
-        Math.min(window.devicePixelRatio || 1, qualityRatio) * this.renderScale,
-        6,
-      ),
+    const pixelRatio = Math.min(
+      Math.min(window.devicePixelRatio || 1, qualityRatio) * this.renderScale,
+      6,
     );
-    this.renderer.setSize(width, height, false);
-    this.viewportHeightPx = height;
-    this.viewHeight = 2;
-    this.viewWidth = (width / height) * this.viewHeight;
-    this.groundShadowMesh.scale.set(
-      this.viewWidth * 1.2,
-      this.viewHeight * 1.2,
-      1,
-    );
-    this.camera.left = -this.viewWidth / 2;
-    this.camera.right = this.viewWidth / 2;
-    this.camera.top = this.viewHeight / 2;
-    this.camera.bottom = -this.viewHeight / 2;
-    this.camera.updateProjectionMatrix();
-    const shadowCamera = this.peelShadowLight.shadow
-      .camera as THREE.OrthographicCamera;
-    const shadowExtent = Math.max(this.viewWidth, this.viewHeight) * 0.9;
-    shadowCamera.left = -shadowExtent;
-    shadowCamera.right = shadowExtent;
-    shadowCamera.top = shadowExtent;
-    shadowCamera.bottom = -shadowExtent;
-    shadowCamera.near = 0.1;
-    shadowCamera.far = 16;
-    shadowCamera.updateProjectionMatrix();
-    if (this.artwork) this.updateMeshGeometry(this.artwork.aspect);
+    const surfaceChanged =
+      width !== this.renderedWidth ||
+      height !== this.renderedHeight ||
+      pixelRatio !== this.renderedPixelRatio;
+    if (surfaceChanged) {
+      this.renderedWidth = width;
+      this.renderedHeight = height;
+      this.renderedPixelRatio = pixelRatio;
+      this.renderer.setPixelRatio(pixelRatio);
+      this.renderer.setSize(width, height, false);
+      this.viewportHeightPx = height;
+      this.viewHeight = 2;
+      this.viewWidth = (width / height) * this.viewHeight;
+      this.groundShadowMesh.scale.set(
+        this.viewWidth * 1.2,
+        this.viewHeight * 1.2,
+        1,
+      );
+      this.camera.left = -this.viewWidth / 2;
+      this.camera.right = this.viewWidth / 2;
+      this.camera.top = this.viewHeight / 2;
+      this.camera.bottom = -this.viewHeight / 2;
+      this.camera.updateProjectionMatrix();
+      const shadowCamera = this.peelShadowLight.shadow
+        .camera as THREE.OrthographicCamera;
+      const shadowExtent = Math.max(this.viewWidth, this.viewHeight) * 0.9;
+      shadowCamera.left = -shadowExtent;
+      shadowCamera.right = shadowExtent;
+      shadowCamera.top = shadowExtent;
+      shadowCamera.bottom = -shadowExtent;
+      shadowCamera.near = 0.1;
+      shadowCamera.far = 16;
+      shadowCamera.updateProjectionMatrix();
+    }
+    const geometryChanged = this.artwork
+      ? this.updateMeshGeometry(
+          this.artwork.aspect,
+          forcePublicResize || surfaceChanged || layoutChanged,
+        )
+      : false;
+    if (
+      !surfaceChanged &&
+      !geometryChanged &&
+      !layoutChanged &&
+      !forcePublicResize
+    ) return;
     this.applyOptionsToRenderer();
     // setSize clears the backing buffer. Draw synchronously so the browser
     // never gets a chance to present an empty frame after a resize.
     this.renderer.render(this.scene, this.camera);
+  }
+
+  private scheduleResize = () => {
+    if (this.destroyed || this.resizeFrameRequest) return;
+    this.resizeFrameRequest = requestAnimationFrame(() => {
+      this.resizeFrameRequest = 0;
+      this.resizeObserved();
+    });
   };
 
   getState(): Readonly<StickerState> {
@@ -891,13 +1009,24 @@ class StickerRenderer implements StickerInstance {
     if (this.destroyed) return;
     this.destroyed = true;
     cancelAnimationFrame(this.frameRequest);
+    cancelAnimationFrame(this.resizeFrameRequest);
+    cancelAnimationFrame(this.hoverFrameRequest);
+    this.frameRequest = 0;
+    this.resizeFrameRequest = 0;
+    this.hoverFrameRequest = 0;
+    for (const state of this.preparedSourceStates) {
+      const { payload } = takePreparedSourceState(state);
+      payload?.texture.dispose();
+    }
+    this.preparedSourceStates.clear();
     this.cancelPreparedEntrance();
     if (this.sourceRebuildTimer !== null) {
       window.clearTimeout(this.sourceRebuildTimer);
       this.sourceRebuildTimer = null;
     }
     this.resizeObserver?.disconnect();
-    window.removeEventListener("resize", this.resize);
+    this.resizeObserver = null;
+    window.removeEventListener("resize", this.scheduleResize);
 
     const canvas = this.renderer.domElement;
     canvas.removeEventListener("pointerdown", this.onPointerDown);
@@ -914,7 +1043,18 @@ class StickerRenderer implements StickerInstance {
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
 
     this.texture?.dispose();
+    this.texture = null;
+    this.artwork = null;
+    this.source = DEFAULT_SOURCE;
+    this.requestedSource = DEFAULT_SOURCE;
+    this.options = resolveStickerOptions(undefined, {});
+    this.uniforms.uMap.value = null;
+    this.uniforms.uPreparedMap.value = null;
     this.geometry.dispose();
+    for (const name of Object.keys(this.geometry.attributes)) {
+      this.geometry.deleteAttribute(name);
+    }
+    this.geometry.setIndex(null);
     this.groundShadowGeometry.dispose();
     this.stickerMaterial.dispose();
     this.residueMaterial.dispose();
@@ -923,6 +1063,8 @@ class StickerRenderer implements StickerInstance {
     this.peelAudio.destroy();
     this.renderer.dispose();
     this.renderer.forceContextLoss();
+    canvas.width = 1;
+    canvas.height = 1;
     canvas.remove();
   }
 
@@ -1007,6 +1149,7 @@ class StickerRenderer implements StickerInstance {
       1 / artwork.height,
     );
     this.updateMeshGeometry(artwork.aspect);
+    this.applyOptionsToRenderer();
     this.reset();
     this.state.ready = true;
     previousTexture?.dispose();
@@ -1017,7 +1160,10 @@ class StickerRenderer implements StickerInstance {
     });
   }
 
-  private updateMeshGeometry(aspect: number) {
+  private updateMeshGeometry(
+    aspect: number,
+    resetUnchangedPeel = false,
+  ) {
     const worldUnitsPerPixel =
       this.viewHeight / Math.max(1, this.viewportHeightPx);
     let width: number;
@@ -1041,11 +1187,11 @@ class StickerRenderer implements StickerInstance {
         width = height * aspect;
       }
     }
-    this.meshWidth =
+    const nextMeshWidth =
       this.options.display.width > 0
         ? Math.max(0.001, width)
         : Math.max(0.34, width);
-    this.meshHeight =
+    const nextMeshHeight =
       this.options.display.height > 0 ? Math.max(0.001, height) : Math.max(0.25, height);
 
     const longSegments =
@@ -1060,17 +1206,55 @@ class StickerRenderer implements StickerInstance {
       56,
       192,
     );
-    const nextGeometry = new THREE.PlaneGeometry(
-      this.meshWidth,
-      this.meshHeight,
-      segmentsX,
-      segmentsY,
-    );
-    const previousGeometry = this.geometry;
-    this.geometry = nextGeometry;
-    this.stickerMesh.geometry = nextGeometry;
-    this.residueMesh.geometry = nextGeometry;
-    previousGeometry.dispose();
+    const topologyChanged =
+      segmentsX !== this.geometrySegmentsX ||
+      segmentsY !== this.geometrySegmentsY;
+    const dimensionsChanged =
+      Math.abs(nextMeshWidth - this.geometryWidth) > 0.000001 ||
+      Math.abs(nextMeshHeight - this.geometryHeight) > 0.000001;
+    if (!topologyChanged && !dimensionsChanged) {
+      if (resetUnchangedPeel) this.resetGeometryPeelState();
+      return false;
+    }
+
+    this.meshWidth = nextMeshWidth;
+    this.meshHeight = nextMeshHeight;
+    if (topologyChanged) {
+      const nextGeometry = new THREE.PlaneGeometry(
+        this.meshWidth,
+        this.meshHeight,
+        segmentsX,
+        segmentsY,
+      );
+      const previousGeometry = this.geometry;
+      this.geometry = nextGeometry;
+      this.stickerMesh.geometry = nextGeometry;
+      this.residueMesh.geometry = nextGeometry;
+      previousGeometry.dispose();
+      this.geometrySegmentsX = segmentsX;
+      this.geometrySegmentsY = segmentsY;
+    } else {
+      const positions = this.geometry.attributes.position;
+      let vertex = 0;
+      for (let row = 0; row <= segmentsY; row += 1) {
+        const y = (0.5 - row / segmentsY) * this.meshHeight;
+        for (let column = 0; column <= segmentsX; column += 1) {
+          const x = (column / segmentsX - 0.5) * this.meshWidth;
+          positions.setXYZ(vertex, x, y, 0);
+          vertex += 1;
+        }
+      }
+      positions.needsUpdate = true;
+      this.geometry.computeBoundingBox();
+      this.geometry.computeBoundingSphere();
+    }
+    this.geometryWidth = this.meshWidth;
+    this.geometryHeight = this.meshHeight;
+    this.resetGeometryPeelState();
+    return true;
+  }
+
+  private resetGeometryPeelState() {
     (this.uniforms.uMeshSize.value as THREE.Vector2).set(
       this.meshWidth,
       this.meshHeight,
@@ -1080,7 +1264,6 @@ class StickerRenderer implements StickerInstance {
     this.activeDirection.copy(this.grabDirection);
     this.grabExtent = this.meshWidth;
     this.setCreaseDepth(0);
-    this.applyOptionsToRenderer();
     this.updatePeelUniforms();
   }
 
@@ -1504,6 +1687,10 @@ class StickerRenderer implements StickerInstance {
       this.entranceActive ||
       event.button !== 0
     ) return;
+    if (this.hoverFrameRequest) {
+      cancelAnimationFrame(this.hoverFrameRequest);
+      this.hoverFrameRequest = 0;
+    }
     const local = this.screenToLocal(event.clientX, event.clientY);
     const hit = this.hitEdge(local);
     if (!hit) {
@@ -1555,15 +1742,19 @@ class StickerRenderer implements StickerInstance {
       this.finishPointerDrag(event.timeStamp);
       return;
     }
-    const local = this.screenToLocal(event.clientX, event.clientY);
     if (!this.state.dragging || event.pointerId !== this.pointerId) {
-      this.renderer.domElement.style.cursor = this.hitEdge(local)
-        ? "grab"
-        : "default";
+      this.hoverClientX = event.clientX;
+      this.hoverClientY = event.clientY;
+      if (!this.hoverFrameRequest) {
+        this.hoverFrameRequest = requestAnimationFrame(
+          this.updateHoverCursor,
+        );
+      }
       return;
     }
 
     event.preventDefault();
+    const local = this.screenToLocal(event.clientX, event.clientY);
     const drag = local.clone().sub(this.grabStart);
     const distance = drag.length();
     let pointerDistance = 0;
@@ -1755,9 +1946,7 @@ class StickerRenderer implements StickerInstance {
     this.peelAudio.end(this.state.progress);
     const shouldReset =
       release === "reset" || (release === "snap" && !shouldDetach);
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const reducedMotion = this.reducedMotionQuery.matches;
     if (!shouldReset) {
       this.springActive = false;
       this.springVelocity = 0;
@@ -1792,7 +1981,27 @@ class StickerRenderer implements StickerInstance {
   }
 
   private onPointerLeave = () => {
-    if (!this.state.dragging) this.renderer.domElement.style.cursor = "default";
+    if (this.state.dragging) return;
+    if (this.hoverFrameRequest) {
+      cancelAnimationFrame(this.hoverFrameRequest);
+      this.hoverFrameRequest = 0;
+    }
+    if (this.renderer.domElement.style.cursor !== "default") {
+      this.renderer.domElement.style.cursor = "default";
+    }
+  };
+
+  private updateHoverCursor = () => {
+    this.hoverFrameRequest = 0;
+    if (this.destroyed || this.state.dragging) return;
+    const cursor = this.hitEdge(
+      this.screenToLocal(this.hoverClientX, this.hoverClientY),
+    )
+      ? "grab"
+      : "default";
+    if (this.renderer.domElement.style.cursor !== cursor) {
+      this.renderer.domElement.style.cursor = cursor;
+    }
   };
 
   private onKeyDown = (event: KeyboardEvent) => {
@@ -1917,9 +2126,7 @@ class StickerRenderer implements StickerInstance {
       : 1 / 60;
     this.lastFrameTime = time;
 
-    const reducedMotion = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
+    const reducedMotion = this.reducedMotionQuery.matches;
     if (this.springActive && reducedMotion) {
       if (this.state.dragging) {
         this.setCreaseDepth(this.springTargetDepth);
@@ -2019,7 +2226,6 @@ class StickerRenderer implements StickerInstance {
           ...prepared.options,
           source: prepared.source,
         });
-        this.applyOptionsToRenderer();
         this.applyArtwork(prepared.artwork, prepared.texture);
         this.startEntranceAnimation();
         return;
@@ -2095,6 +2301,129 @@ class StickerRenderer implements StickerInstance {
   }
 }
 
+function copyStickerState(state: Readonly<StickerState>): StickerState {
+  return {
+    ready: state.ready,
+    dragging: state.dragging,
+    progress: state.progress,
+    grabPoint: state.grabPoint ? { ...state.grabPoint } : null,
+    pointer: state.pointer ? { ...state.pointer } : null,
+  };
+}
+
+function copyRenderSnapshot(
+  snapshot: StickerRenderSnapshot,
+): StickerRenderSnapshot {
+  return {
+    ...snapshot,
+    origin: { ...snapshot.origin },
+    direction: { ...snapshot.direction },
+    position: { ...snapshot.position },
+    scale: { ...snapshot.scale },
+  };
+}
+
+class StickerInstanceHandle implements StickerInstance {
+  private renderer: StickerRenderer | null;
+  private lastState: Readonly<StickerState>;
+  private lastSnapshot: StickerRenderSnapshot;
+
+  constructor(renderer: StickerRenderer) {
+    this.renderer = renderer;
+    this.lastState = renderer.getState();
+    this.lastSnapshot = renderer.getRenderSnapshot();
+  }
+
+  async setSource(source: StickerSource): Promise<void> {
+    await this.renderer?.setSource(source);
+  }
+
+  async prepareSource(
+    source: StickerSource,
+    options?: Partial<StickerOptions>,
+  ): Promise<PreparedStickerSource> {
+    if (!this.renderer) {
+      throw new Error("The sticker renderer has been destroyed.");
+    }
+    return this.renderer.prepareSource(source, options);
+  }
+
+  setOptions(options: Partial<StickerOptions>): void {
+    this.renderer?.setOptions(options);
+  }
+
+  reset(): void {
+    this.renderer?.reset();
+  }
+
+  setPeelProgress(
+    progress: number,
+    motion?: StickerPlaybackMotion,
+  ): void {
+    this.renderer?.setPeelProgress(progress, motion);
+  }
+
+  setEntranceProgress(progress: number): void {
+    this.renderer?.setEntranceProgress(progress);
+  }
+
+  setBackgroundRemovalEffect(active: boolean): void {
+    this.renderer?.setBackgroundRemovalEffect(active);
+  }
+
+  reappear(): void {
+    this.renderer?.reappear();
+  }
+
+  setRenderScale(scale: number): void {
+    this.renderer?.setRenderScale(scale);
+  }
+
+  getRenderSnapshot(): StickerRenderSnapshot {
+    if (this.renderer) {
+      this.lastSnapshot = this.renderer.getRenderSnapshot();
+      return this.lastSnapshot;
+    }
+    return copyRenderSnapshot(this.lastSnapshot);
+  }
+
+  setRenderSnapshot(snapshot: StickerRenderSnapshot): void {
+    this.renderer?.setRenderSnapshot(snapshot);
+  }
+
+  resize = (): void => {
+    this.renderer?.resize();
+  };
+
+  getState(): Readonly<StickerState> {
+    if (this.renderer) {
+      this.lastState = this.renderer.getState();
+      return this.lastState;
+    }
+    return copyStickerState(this.lastState);
+  }
+
+  destroy(): void {
+    const current = this.renderer;
+    if (!current) return;
+    this.lastState = current.getState();
+    this.lastSnapshot = current.getRenderSnapshot();
+    try {
+      current.destroy();
+    } finally {
+      // The public handle can outlive destroy(), but it must not keep the
+      // renderer, its detached canvas, or Three.js object graph reachable.
+      this.renderer = null;
+    }
+  }
+}
+
+function createStickerInstanceHandle(
+  renderer: StickerRenderer,
+): StickerInstance {
+  return new StickerInstanceHandle(renderer);
+}
+
 export async function createSticker(
   target: HTMLElement | string,
   options: StickerOptions = {},
@@ -2106,8 +2435,13 @@ export async function createSticker(
     typeof target === "string" ? document.querySelector<HTMLElement>(target) : target;
   if (!container) throw new Error("Sticker Forge could not find its target element.");
   const renderer = new StickerRenderer(container, options);
-  await renderer.setSource(options.source ?? DEFAULT_SOURCE);
-  return renderer;
+  try {
+    await renderer.setSource(options.source ?? DEFAULT_SOURCE);
+    return createStickerInstanceHandle(renderer);
+  } catch (error) {
+    renderer.destroy();
+    throw error;
+  }
 }
 
 const HTMLElementBase =

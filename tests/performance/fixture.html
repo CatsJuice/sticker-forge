@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sticker Forge deterministic performance fixture</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #eceaf2;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="/performance/page-runtime.js"></script>
+    <script type="module">
+      import * as StickerForge from "/embed/sticker-forge.es.js";
+
+      window.__stickerForgePerformanceReady =
+        window.installStickerForgePerformanceHarness(StickerForge);
+    </script>
+  </body>
+</html>

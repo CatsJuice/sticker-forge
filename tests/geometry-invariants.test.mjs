@@ -682,7 +682,7 @@ test("uses the bundled image artwork before a user uploads a replacement", async
 
   assert.match(studio, /const DEFAULT_IMAGE_SRC = "\/default-image\.svg"/);
   assert.match(studio, /useState\(DEFAULT_IMAGE_SRC\)/);
-  assert.match(studio, /setImageDataUrl\(DEFAULT_IMAGE_SRC\)/);
+  assert.match(studio, /updateCurrentImage\(DEFAULT_IMAGE_SRC, ""\)/);
   assert.ok(asset.size > 1_000);
 });
 
@@ -1317,7 +1317,7 @@ test("locks export canvas ratios and scales every export format", async () => {
   assert.match(exportDialog, /composeCurrent\(EMPTY_MOTION, exportScale\)/);
   assert.match(
     exportDialog,
-    /getImageData\(0, 0, exportSize\.width, exportSize\.height\)/,
+    /getImageData\(\s*0,\s*0,\s*exportSize\.width,\s*exportSize\.height,\s*\)/,
   );
   assert.match(exportDialog, /outputScale: 1,/);
   assert.match(exportWorker, /if \(outputScale === 1\)/);

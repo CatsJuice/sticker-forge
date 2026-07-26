@@ -39,6 +39,16 @@ let worker: Worker | null = null;
 let requestId = 0;
 const pending = new Map<number, PendingRequest>();
 
+function requestError(error: unknown, fallback: string) {
+  return error instanceof Error ? error : new Error(fallback);
+}
+
+function terminateIdleWorker(target: Worker | null) {
+  if (!target || target !== worker || pending.size > 0) return;
+  worker = null;
+  target.terminate();
+}
+
 function postWorkerRequest(
   target: Worker,
   id: number,
@@ -56,6 +66,22 @@ function postWorkerRequest(
   );
 }
 
+function tryPostWorkerRequest(
+  target: Worker,
+  id: number,
+  request: PendingRequest,
+) {
+  try {
+    postWorkerRequest(target, id, request);
+    return true;
+  } catch (error) {
+    pending.delete(id);
+    terminateIdleWorker(target);
+    request.reject(requestError(error, "Could not start background removal"));
+    return false;
+  }
+}
+
 function workerFailureMessage(event: ErrorEvent) {
   const detail =
     event.error instanceof Error ? event.error.message : event.message;
@@ -71,7 +97,7 @@ function workerFailureMessage(event: ErrorEvent) {
 }
 
 function pixelsToDataUrl(
-  pixels: Uint8ClampedArray,
+  pixels: Uint8ClampedArray<ArrayBuffer>,
   width: number,
   height: number,
 ) {
@@ -80,21 +106,19 @@ function pixelsToDataUrl(
   canvas.height = height;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas is unavailable");
-  const imageDataPixels: Uint8ClampedArray<ArrayBuffer> = new Uint8ClampedArray(
-    pixels.length,
-  );
-  imageDataPixels.set(pixels);
-  context.putImageData(new ImageData(imageDataPixels, width, height), 0, 0);
+  context.putImageData(new ImageData(pixels, width, height), 0, 0);
   return canvas.toDataURL("image/png");
 }
 
 function getWorker() {
   if (worker) return worker;
-  worker = new Worker(
+  const createdWorker = new Worker(
     new URL("../workers/background-removal.worker.ts", import.meta.url),
     { type: "module", name: "sticker-background-removal" },
   );
-  worker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
+  worker = createdWorker;
+  createdWorker.addEventListener("message", (event: MessageEvent<WorkerResponse>) => {
+    if (worker !== createdWorker) return;
     const response = event.data;
     const request = pending.get(response.id);
     if (!request) return;
@@ -124,10 +148,13 @@ function getWorker() {
       );
     }
   });
-  worker.addEventListener("error", (event) => {
-    const failedWorker = worker;
+  createdWorker.addEventListener("error", (event) => {
+    if (worker !== createdWorker) {
+      createdWorker.terminate();
+      return;
+    }
     worker = null;
-    failedWorker?.terminate();
+    createdWorker.terminate();
     const retryable: Array<[number, PendingRequest]> = [];
     const error = new Error(workerFailureMessage(event));
     for (const entry of pending.entries()) {
@@ -142,21 +169,28 @@ function getWorker() {
     }
     if (!retryable.length) return;
     window.setTimeout(() => {
+      const currentRequests = retryable.filter(
+        ([id, request]) => pending.get(id) === request,
+      );
+      if (!currentRequests.length) return;
       let restartedWorker: Worker;
       try {
         restartedWorker = getWorker();
       } catch (restartError) {
         const failure =
           restartError instanceof Error ? restartError : error;
-        for (const [id, request] of retryable) {
+        for (const [id, request] of currentRequests) {
+          if (pending.get(id) !== request) continue;
           pending.delete(id);
           request.reject(failure);
         }
+        terminateIdleWorker(worker);
         return;
       }
-      for (const [id, request] of retryable) {
+      for (const [id, request] of currentRequests) {
+        if (pending.get(id) !== request) continue;
         request.onProgress?.({ phase: "loading", progress: 0 });
-        postWorkerRequest(restartedWorker, id, request);
+        tryPostWorkerRequest(restartedWorker, id, request);
       }
     }, 120);
   });
@@ -212,6 +246,15 @@ export async function removeImageBackground(
       retries: 0,
     };
     pending.set(id, request);
-    postWorkerRequest(getWorker(), id, request);
+    let target: Worker;
+    try {
+      target = getWorker();
+    } catch (error) {
+      pending.delete(id);
+      terminateIdleWorker(worker);
+      reject(requestError(error, "Background removal worker is unavailable"));
+      return;
+    }
+    tryPostWorkerRequest(target, id, request);
   });
 }

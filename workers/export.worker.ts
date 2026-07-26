@@ -20,6 +20,14 @@ function postWorkerMessage(
   self.postMessage(message, { transfer });
 }
 
+function asImageDataArray(
+  rgba: Uint8ClampedArray,
+): Uint8ClampedArray<ArrayBuffer> {
+  return rgba.buffer instanceof ArrayBuffer
+    ? (rgba as Uint8ClampedArray<ArrayBuffer>)
+    : new Uint8ClampedArray(rgba);
+}
+
 function scaledFrameSize(frame: ExportFrame, outputScale: number) {
   return {
     width: Math.max(2, Math.round((frame.width * outputScale) / 2) * 2),
@@ -33,10 +41,7 @@ function createFrameScaler(outputScale: number) {
 
   return (frame: ExportFrame): ExportFrame => {
     if (outputScale === 1) {
-      return {
-        ...frame,
-        rgba: new Uint8ClampedArray(frame.rgba),
-      };
+      return frame;
     }
     const outputSize = scaledFrameSize(frame, outputScale);
     source ??= new OffscreenCanvas(frame.width, frame.height);
@@ -52,10 +57,12 @@ function createFrameScaler(outputScale: number) {
     if (!sourceContext || !destinationContext) {
       throw new Error("Offscreen canvas is unavailable.");
     }
-    const sourcePixels = new Uint8ClampedArray(frame.rgba.byteLength);
-    sourcePixels.set(frame.rgba);
     sourceContext.putImageData(
-      new ImageData(sourcePixels, frame.width, frame.height),
+      new ImageData(
+        asImageDataArray(frame.rgba),
+        frame.width,
+        frame.height,
+      ),
       0,
       0,
     );
@@ -70,14 +77,12 @@ function createFrameScaler(outputScale: number) {
       outputSize.height,
     );
     return {
-      rgba: new Uint8ClampedArray(
-        destinationContext.getImageData(
-          0,
-          0,
-          outputSize.width,
-          outputSize.height,
-        ).data,
-      ),
+      rgba: destinationContext.getImageData(
+        0,
+        0,
+        outputSize.width,
+        outputSize.height,
+      ).data,
       width: outputSize.width,
       height: outputSize.height,
       durationMs: frame.durationMs,
@@ -102,9 +107,12 @@ function createEncodedFrameDecoder(encodedFrames: Blob[]) {
       context.drawImage(bitmap, 0, 0, frame.width, frame.height);
       return {
         ...frame,
-        rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, frame.width, frame.height).data,
-        ),
+        rgba: context.getImageData(
+          0,
+          0,
+          frame.width,
+          frame.height,
+        ).data,
       };
     } finally {
       bitmap.close();
@@ -154,10 +162,12 @@ self.onmessage = async (
       const canvas = new OffscreenCanvas(frame.width, frame.height);
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Offscreen canvas is unavailable.");
-      const pixels = new Uint8ClampedArray(frame.rgba.byteLength);
-      pixels.set(frame.rgba);
       context.putImageData(
-        new ImageData(pixels, frame.width, frame.height),
+        new ImageData(
+          asImageDataArray(frame.rgba),
+          frame.width,
+          frame.height,
+        ),
         0,
         0,
       );

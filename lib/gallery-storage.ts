@@ -23,6 +23,21 @@ const FOLDER_STORE = "gallery-folders";
 
 type StoredGalleryAsset = GalleryAsset & { id: string };
 type StoredGalleryPreview = { id: string; blob: Blob };
+type GalleryPreviewUrlCacheEntry = {
+  url: string;
+  references: number;
+  invalidated: boolean;
+  revoked: boolean;
+};
+type GalleryPreviewUrlLoad = {
+  invalidated: boolean;
+  promise: Promise<GalleryPreviewUrlCacheEntry>;
+};
+
+export type GalleryPreviewUrlLease = {
+  url: string;
+  release: () => void;
+};
 
 type GalleryArchive = {
   format: "sticker-forge-gallery";
@@ -39,8 +54,69 @@ type GalleryArchive = {
 };
 
 let databasePromise: Promise<IDBDatabase> | null = null;
-const previewUrlCache = new Map<string, string>();
-const previewLoadCache = new Map<string, Promise<string>>();
+const MAX_ZERO_REFERENCE_PREVIEW_URLS = 24;
+const previewUrlCache = new Map<string, GalleryPreviewUrlCacheEntry>();
+const previewLoadCache = new Map<string, GalleryPreviewUrlLoad>();
+const zeroReferencePreviewUrls = new Map<string, true>();
+
+function revokePreviewUrlEntry(entry: GalleryPreviewUrlCacheEntry) {
+  if (entry.revoked) return;
+  entry.revoked = true;
+  URL.revokeObjectURL(entry.url);
+}
+
+function trimZeroReferencePreviewUrls() {
+  while (zeroReferencePreviewUrls.size > MAX_ZERO_REFERENCE_PREVIEW_URLS) {
+    const oldestId = zeroReferencePreviewUrls.keys().next().value;
+    if (typeof oldestId !== "string") return;
+    zeroReferencePreviewUrls.delete(oldestId);
+    const entry = previewUrlCache.get(oldestId);
+    if (!entry || entry.references > 0) continue;
+    previewUrlCache.delete(oldestId);
+    revokePreviewUrlEntry(entry);
+  }
+}
+
+function revokeCachedPreviewUrl(id: string) {
+  zeroReferencePreviewUrls.delete(id);
+  const load = previewLoadCache.get(id);
+  if (load) load.invalidated = true;
+  previewLoadCache.delete(id);
+  const entry = previewUrlCache.get(id);
+  previewUrlCache.delete(id);
+  if (!entry) return;
+  entry.invalidated = true;
+  if (entry.references === 0) revokePreviewUrlEntry(entry);
+}
+
+function retainPreviewUrl(
+  id: string,
+  entry: GalleryPreviewUrlCacheEntry,
+): GalleryPreviewUrlLease {
+  if (entry.invalidated || entry.revoked) {
+    throw new Error("Gallery preview is no longer available.");
+  }
+  entry.references += 1;
+  zeroReferencePreviewUrls.delete(id);
+  let released = false;
+  return {
+    url: entry.url,
+    release: () => {
+      if (released) return;
+      released = true;
+      if (entry.references <= 0) return;
+      entry.references -= 1;
+      if (entry.references > 0) return;
+      if (entry.invalidated || previewUrlCache.get(id) !== entry) {
+        revokePreviewUrlEntry(entry);
+        return;
+      }
+      zeroReferencePreviewUrls.delete(id);
+      zeroReferencePreviewUrls.set(id, true);
+      trimZeroReferencePreviewUrls();
+    },
+  };
+}
 
 function openGalleryDatabase(): Promise<IDBDatabase> {
   if (typeof indexedDB === "undefined") {
@@ -332,18 +408,17 @@ export async function deleteGalleryFolder(id: string): Promise<void> {
   const done = transactionDone(transaction);
   const itemStore = transaction.objectStore(ITEM_STORE);
   const items = await requestResult(itemStore.getAll() as IDBRequest<GalleryItem[]>);
+  const deletedItemIds: string[] = [];
   for (const item of items) {
     if ((item.folderId || DEFAULT_GALLERY_FOLDER_ID) !== id) continue;
     itemStore.delete(item.id);
     transaction.objectStore(ASSET_STORE).delete(item.id);
     transaction.objectStore(PREVIEW_STORE).delete(item.id);
-    const previewUrl = previewUrlCache.get(item.id);
-    if (previewUrl) URL.revokeObjectURL(previewUrl);
-    previewUrlCache.delete(item.id);
-    previewLoadCache.delete(item.id);
+    deletedItemIds.push(item.id);
   }
   transaction.objectStore(FOLDER_STORE).delete(id);
   await done;
+  for (const itemId of deletedItemIds) revokeCachedPreviewUrl(itemId);
 }
 
 export async function listGalleryItems(): Promise<GalleryItem[]> {
@@ -417,13 +492,16 @@ export async function getGalleryAsset(id: string): Promise<GalleryAsset> {
   return { source: stored.source, options: stored.options };
 }
 
-export async function getGalleryPreviewUrl(id: string): Promise<string> {
+export async function acquireGalleryPreviewUrl(
+  id: string,
+): Promise<GalleryPreviewUrlLease> {
   const cached = previewUrlCache.get(id);
-  if (cached) return cached;
+  if (cached) return retainPreviewUrl(id, cached);
   const pending = previewLoadCache.get(id);
-  if (pending) return pending;
+  if (pending) return retainPreviewUrl(id, await pending.promise);
 
-  const load = (async () => {
+  const load = { invalidated: false } as GalleryPreviewUrlLoad;
+  load.promise = (async () => {
     const database = await openGalleryDatabase();
     const transaction = database.transaction(PREVIEW_STORE, "readonly");
     const done = transactionDone(transaction);
@@ -434,15 +512,24 @@ export async function getGalleryPreviewUrl(id: string): Promise<string> {
     );
     await done;
     if (!stored) throw new Error("Gallery preview not found.");
-    const url = URL.createObjectURL(stored.blob);
-    previewUrlCache.set(id, url);
-    return url;
+    const entry: GalleryPreviewUrlCacheEntry = {
+      url: URL.createObjectURL(stored.blob),
+      references: 0,
+      invalidated: load.invalidated,
+      revoked: false,
+    };
+    if (load.invalidated) {
+      revokePreviewUrlEntry(entry);
+      throw new Error("Gallery preview is no longer available.");
+    }
+    previewUrlCache.set(id, entry);
+    return entry;
   })();
   previewLoadCache.set(id, load);
   try {
-    return await load;
+    return retainPreviewUrl(id, await load.promise);
   } finally {
-    previewLoadCache.delete(id);
+    if (previewLoadCache.get(id) === load) previewLoadCache.delete(id);
   }
 }
 
@@ -600,8 +687,5 @@ export async function deleteGalleryItem(id: string): Promise<void> {
   transaction.objectStore(ASSET_STORE).delete(id);
   transaction.objectStore(PREVIEW_STORE).delete(id);
   await done;
-  const previewUrl = previewUrlCache.get(id);
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  previewUrlCache.delete(id);
-  previewLoadCache.delete(id);
+  revokeCachedPreviewUrl(id);
 }

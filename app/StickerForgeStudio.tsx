@@ -1461,6 +1461,10 @@ export function StickerForgeStudio() {
     source: PreparedStickerSource;
   } | null>(null);
   const laserPreviewTimerRef = useRef<number | null>(null);
+  const currentImageRef = useRef({
+    src: DEFAULT_IMAGE_SRC,
+    name: "",
+  });
   const sourceRef = useRef<StickerSource>(initialSource);
   const settingsRef = useRef<StudioSettings>(DEFAULT_SETTINGS);
   const [sourceMode, setSourceMode] = useState<SourceMode>("text");
@@ -1498,6 +1502,14 @@ export function StickerForgeStudio() {
   }, [syncControlsScrollEdges]);
   const [imageDataUrl, setImageDataUrl] = useState(DEFAULT_IMAGE_SRC);
   const [imageName, setImageName] = useState("");
+  const updateCurrentImage = useCallback((src: string, name: string) => {
+    // Keep the background-removal input synchronous with sourceRef. React
+    // state can still belong to the previous render when a gallery handoff is
+    // followed immediately by a click.
+    currentImageRef.current = { src, name };
+    setImageDataUrl(src);
+    setImageName(name);
+  }, []);
   const [settings, setSettings] =
     useState<StudioSettings>(DEFAULT_SETTINGS);
   const [locale, setLocale] = useState<Locale>("zh");
@@ -2134,6 +2146,16 @@ export function StickerForgeStudio() {
 
   const applyGalleryAssetToEditor = useCallback(
     async (asset: GalleryAsset) => {
+      // A gallery flight can visually reach the editor before its source is
+      // installed. Invalidate any work tied to the previous source before the
+      // handoff so a late worker result cannot replace the selected asset.
+      backgroundRemovalRevisionRef.current += 1;
+      preparedBackgroundOutlineRef.current?.source.dispose();
+      preparedBackgroundOutlineRef.current = null;
+      setBackgroundParticles(null);
+      setBackgroundRemoval({ phase: "idle" });
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+
       const nextSettings = studioSettingsFrom(asset.options);
       settingsRef.current = nextSettings;
       setSettings(nextSettings);
@@ -2175,14 +2197,13 @@ export function StickerForgeStudio() {
         }
       } else if (source.type === "image") {
         setSourceMode("image");
-        setImageDataUrl(source.src);
-        setImageName(source.name ?? "");
+        updateCurrentImage(source.src, source.name ?? "");
       } else {
         setSourceMode("image");
-        setImageDataUrl(
+        updateCurrentImage(
           `data:image/svg+xml;charset=utf-8,${encodeURIComponent(source.svg)}`,
+          "SVG Sticker",
         );
-        setImageName("SVG Sticker");
       }
 
       await applySource(source);
@@ -2196,7 +2217,7 @@ export function StickerForgeStudio() {
       // GalleryCanvas owns the short Spring cross-fade and unmounts afterward.
       setGalleryEditorReady(true);
     },
-    [applySource],
+    [applySource, updateCurrentImage],
   );
 
   const updateTextSource = useCallback(
@@ -2501,8 +2522,7 @@ export function StickerForgeStudio() {
             setShowBackgroundRemovalTip(true);
           }
         }
-        setImageDataUrl(dataUrl);
-        setImageName(file.name);
+        updateCurrentImage(dataUrl, file.name);
         setSourceMode("image");
         await applySource(
           { type: "image", src: dataUrl, name: file.name },
@@ -2524,7 +2544,7 @@ export function StickerForgeStudio() {
         }
       }
     },
-    [applySource, clearPendingText, t],
+    [applySource, clearPendingText, t, updateCurrentImage],
   );
 
   const handleBackgroundParticlesStart = useCallback(
@@ -2594,7 +2614,12 @@ export function StickerForgeStudio() {
         });
         if (revision !== backgroundRemovalRevisionRef.current) return;
 
-        setImageDataUrl(resultDataUrl);
+        updateCurrentImage(
+          resultDataUrl,
+          nextSource.type === "image"
+            ? nextSource.name ?? ""
+            : currentImageRef.current.name,
+        );
         setBackgroundRemoval({ phase: "dissolving" });
         setBackgroundParticles((current) =>
           current?.revision === revision
@@ -2611,7 +2636,7 @@ export function StickerForgeStudio() {
         setSourceMessage(t.backgroundRemovalFailed);
       }
     },
-    [clearPendingText, t.backgroundRemovalFailed],
+    [clearPendingText, t.backgroundRemovalFailed, updateCurrentImage],
   );
 
   const handleBackgroundParticlesComplete = useCallback(() => {
@@ -2623,9 +2648,11 @@ export function StickerForgeStudio() {
   }, [t.backgroundRemoved]);
 
   const removeCurrentImageBackground = useCallback(async () => {
+    const currentImage = currentImageRef.current;
     if (
-      !imageDataUrl ||
+      !currentImage.src ||
       imageImportBusy ||
+      galleryEditing ||
       !["idle", "error"].includes(backgroundRemoval.phase)
     ) {
       return;
@@ -2634,7 +2661,8 @@ export function StickerForgeStudio() {
     const revision = ++backgroundRemovalRevisionRef.current;
     preparedBackgroundOutlineRef.current?.source.dispose();
     preparedBackgroundOutlineRef.current = null;
-    const originalSource = imageDataUrl;
+    const originalSource = currentImage.src;
+    const originalName = currentImage.name;
     const outline = settingsRef.current.outline;
     setSourceMessage("");
     setBackgroundParticles(null);
@@ -2659,7 +2687,7 @@ export function StickerForgeStudio() {
       const nextSource: StickerSource = {
         type: "image",
         src: result.dataUrl,
-        name: imageName,
+        name: originalName,
       };
       setBackgroundParticles({
         source: originalSource,
@@ -2678,9 +2706,8 @@ export function StickerForgeStudio() {
     }
   }, [
     backgroundRemoval.phase,
+    galleryEditing,
     imageImportBusy,
-    imageDataUrl,
-    imageName,
     t.backgroundRemovalFailed,
   ]);
 
@@ -2732,8 +2759,11 @@ export function StickerForgeStudio() {
     setSourceMode(mode);
     if (mode === "text") {
       void applySource(makeTextSource(text, inkColor, richText ?? undefined));
-    } else if (imageDataUrl) {
-      void applySource({ type: "image", src: imageDataUrl, name: imageName });
+    } else {
+      const currentImage = currentImageRef.current;
+      if (currentImage.src) {
+        void applySource({ type: "image", ...currentImage });
+      }
     }
   };
 
@@ -2749,8 +2779,7 @@ export function StickerForgeStudio() {
     setText(DEFAULT_TEXT);
     setInkColor(DEFAULT_INK);
     setSourceMode("text");
-    setImageDataUrl(DEFAULT_IMAGE_SRC);
-    setImageName("");
+    updateCurrentImage(DEFAULT_IMAGE_SRC, "");
     setRichText(DEFAULT_RICH_TEXT);
     setEditorFontSize("28");
     setEditorLineHeightValue("1.2");
@@ -3436,7 +3465,11 @@ export function StickerForgeStudio() {
                         className="background-removal-button"
                         type="button"
                         data-phase={backgroundRemoval.phase}
-                        disabled={backgroundRemovalBusy || imageImportBusy}
+                        disabled={
+                          backgroundRemovalBusy
+                          || imageImportBusy
+                          || galleryEditing
+                        }
                         aria-busy={backgroundRemovalBusy || imageImportBusy}
                         aria-describedby={
                           showBackgroundRemovalTip

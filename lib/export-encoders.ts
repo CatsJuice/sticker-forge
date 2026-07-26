@@ -147,7 +147,7 @@ export function repairTransparentEdgeColors(
   if (rgba.byteLength !== width * height * 4) {
     throw new Error("The RGBA data does not match its frame dimensions.");
   }
-  const source = new Uint8ClampedArray(rgba);
+  const source = rgba;
   const output = new Uint8ClampedArray(rgba);
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {

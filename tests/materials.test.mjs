@@ -1,11 +1,93 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import ts from "typescript";
 
 const ROOT = new URL("../", import.meta.url);
 
 async function source(path) {
   return readFile(new URL(path, ROOT), "utf8");
+}
+
+let materialPreviewInternalsPromise;
+
+function transpile(sourceText, fileName) {
+  return ts.transpileModule(sourceText, {
+    fileName,
+    compilerOptions: {
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText;
+}
+
+async function materialPreviewInternals() {
+  materialPreviewInternalsPromise ??= (async () => {
+    const [typesSource, previewSource] = await Promise.all([
+      source("lib/types.ts"),
+      source("lib/material-preview.ts"),
+    ]);
+    const typesUrl = `data:text/javascript;base64,${Buffer.from(
+      transpile(typesSource, "types.ts"),
+    ).toString("base64")}`;
+    const instrumented = `${previewSource}
+export {
+  MATERIAL_PREVIEW_CACHE_LIMIT,
+  getHolographicNoise,
+  getGlitterRandomValues,
+  holographicNoiseCache,
+  glitterRandomCache,
+  seededRandomInitialState,
+};`;
+    const previewJavaScript = transpile(
+      instrumented,
+      "material-preview.ts",
+    ).replaceAll('"./types"', JSON.stringify(typesUrl));
+    return import(
+      `data:text/javascript;base64,${Buffer.from(previewJavaScript).toString(
+        "base64",
+      )}`
+    );
+  })();
+  return materialPreviewInternalsPromise;
+}
+
+function referenceRandomValues(seed, count) {
+  let state = Math.floor(seed * 2147483647) || 1;
+  const values = new Float64Array(count);
+  for (let index = 0; index < count; index += 1) {
+    state = (state * 48271) % 2147483647;
+    values[index] = state / 2147483647;
+  }
+  return values;
+}
+
+function referenceHolographicNoise(seed) {
+  const randomValues = referenceRandomValues(seed, 96 * 96 * 2);
+  const pixels = new Uint8ClampedArray(96 * 96 * 4);
+  for (
+    let pixelOffset = 0, randomOffset = 0;
+    pixelOffset < pixels.length;
+    pixelOffset += 4, randomOffset += 2
+  ) {
+    const brightness = randomValues[randomOffset] > 0.48 ? 255 : 20;
+    pixels[pixelOffset] = brightness;
+    pixels[pixelOffset + 1] = brightness;
+    pixels[pixelOffset + 2] = brightness;
+    pixels[pixelOffset + 3] = Math.round(
+      38 + randomValues[randomOffset + 1] * 74,
+    );
+  }
+  return pixels;
+}
+
+function arrayBytes(array) {
+  return Buffer.from(array.buffer, array.byteOffset, array.byteLength);
+}
+
+function arraySha256(array) {
+  return createHash("sha256").update(arrayBytes(array)).digest("hex");
 }
 
 const MATERIALS = [
@@ -197,4 +279,65 @@ test("offers all materials in the studio and shares one baked material source", 
     /preparedOptions\.material,\s+preparedOptions\.lighting/,
   );
   assert.match(preview, /options\.lighting/);
+});
+
+test("reuses bounded seeded material invariants without changing any values", async () => {
+  const internals = await materialPreviewInternals();
+  internals.holographicNoiseCache.clear();
+  internals.glitterRandomCache.clear();
+
+  for (const seed of [-0.731, 0, 0.37, 1.271, 4.25]) {
+    const expectedNoise = referenceHolographicNoise(seed);
+    const actualNoise = internals.getHolographicNoise(seed).pixels;
+    assert.equal(actualNoise.byteLength, expectedNoise.byteLength);
+    assert.ok(arrayBytes(actualNoise).equals(arrayBytes(expectedNoise)));
+    assert.equal(arraySha256(actualNoise), arraySha256(expectedNoise));
+
+    for (const flakeCount of [0, 1, 37, 8000]) {
+      const valueCount = flakeCount * 5;
+      const expectedValues = referenceRandomValues(seed, valueCount);
+      const actualValues = internals
+        .getGlitterRandomValues(seed, flakeCount)
+        .subarray(0, valueCount);
+      assert.ok(arrayBytes(actualValues).equals(arrayBytes(expectedValues)));
+      assert.equal(arraySha256(actualValues), arraySha256(expectedValues));
+    }
+  }
+
+  const repeatedNoise = internals.getHolographicNoise(0.37);
+  assert.strictEqual(
+    internals.getHolographicNoise(0.37),
+    repeatedNoise,
+    "the same seeded noise entry should be reused",
+  );
+  const repeatedGlitter = internals.getGlitterRandomValues(0.37, 8000);
+  assert.strictEqual(
+    internals.getGlitterRandomValues(0.37, 4000),
+    repeatedGlitter,
+    "a smaller glitter request should reuse the already-grown sequence",
+  );
+
+  internals.holographicNoiseCache.clear();
+  internals.glitterRandomCache.clear();
+  const firstSeed = 10.125;
+  const firstState = internals.seededRandomInitialState(firstSeed);
+  for (
+    let index = 0;
+    index < internals.MATERIAL_PREVIEW_CACHE_LIMIT + 12;
+    index += 1
+  ) {
+    const seed = firstSeed + index;
+    internals.getHolographicNoise(seed);
+    internals.getGlitterRandomValues(seed, 8000);
+  }
+  assert.equal(
+    internals.holographicNoiseCache.size,
+    internals.MATERIAL_PREVIEW_CACHE_LIMIT,
+  );
+  assert.equal(
+    internals.glitterRandomCache.size,
+    internals.MATERIAL_PREVIEW_CACHE_LIMIT,
+  );
+  assert.ok(!internals.holographicNoiseCache.has(firstState));
+  assert.ok(!internals.glitterRandomCache.has(firstState));
 });

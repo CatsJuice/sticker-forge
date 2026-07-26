@@ -85,6 +85,14 @@ type PreparedAnimationFrames = {
   encodedFrames: Blob[];
 };
 
+function asImageDataArray(
+  rgba: Uint8ClampedArray,
+): Uint8ClampedArray<ArrayBuffer> {
+  return rgba.buffer instanceof ArrayBuffer
+    ? (rgba as Uint8ClampedArray<ArrayBuffer>)
+    : new Uint8ClampedArray(rgba);
+}
+
 type ExportDialogProps = {
   source: StickerSource;
   options: StickerOptions;
@@ -1379,6 +1387,7 @@ export function ExportDialog({
     let previousTime = performance.now();
     let phase: AutomaticPreviewPhase = "peel";
     let phaseElapsed = 0;
+    let intervalPoseRendered = false;
     const phaseDuration = () =>
       phase === "peel"
         ? AUTO_PEEL_DURATION_MS
@@ -1422,11 +1431,15 @@ export function ExportDialog({
       previousTime = time;
       const currentMotion = motionRef.current;
       if (phase === "interval") {
-        controllerRef.current?.setPeelProgress(0, currentMotion);
-        setVisualMotion(EMPTY_MOTION);
+        if (!intervalPoseRendered) {
+          controllerRef.current?.setPeelProgress(0, currentMotion);
+          setVisualMotion(EMPTY_MOTION);
+          intervalPoseRendered = true;
+        }
         frame = requestAnimationFrame(render);
         return;
       }
+      intervalPoseRendered = false;
       const state = autoFrameAt(
         phase,
         phaseElapsed / phaseDuration(),
@@ -1462,10 +1475,14 @@ export function ExportDialog({
       size.height,
       transformRef.current,
     );
+    const imageData = context.getImageData(
+      0,
+      0,
+      size.width,
+      size.height,
+    );
     return {
-      rgba: new Uint8ClampedArray(
-        context.getImageData(0, 0, size.width, size.height).data,
-      ),
+      rgba: imageData.data,
       width: size.width,
       height: size.height,
       durationMs: CAPTURE_FRAME_DURATION,
@@ -1603,34 +1620,53 @@ export function ExportDialog({
     ) return;
     const playback = playbackRef.current;
     if (!playback) return;
+    const context = playback.getContext("2d");
+    if (!context) return;
     let animationFrame = 0;
+    let displayedFrameIndex = -1;
     const startedAt = performance.now();
-    const animationDuration = recordedFrames.reduce(
-      (total, frame) => total + frame.durationMs,
-      0,
-    );
+    let animationDuration = 0;
+    const preparedFrames = recordedFrames.map((frame) => {
+      animationDuration += frame.durationMs;
+      return {
+        frame,
+        imageData: new ImageData(
+          asImageDataArray(frame.rgba),
+          frame.width,
+          frame.height,
+        ),
+      };
+    });
     const totalDuration =
       animationDuration + playbackInterval * 1000;
     const render = (time: number) => {
       let cursor = (time - startedAt) % Math.max(totalDuration, 1);
-      let frame = recordedFrames[recordedFrames.length - 1];
+      let frameIndex = preparedFrames.length - 1;
       if (cursor < animationDuration) {
-        frame = recordedFrames[0];
-        for (const candidate of recordedFrames) {
-          if (cursor <= candidate.durationMs) {
-            frame = candidate;
+        frameIndex = 0;
+        for (
+          let candidateIndex = 0;
+          candidateIndex < preparedFrames.length;
+          candidateIndex += 1
+        ) {
+          if (cursor <= preparedFrames[candidateIndex].frame.durationMs) {
+            frameIndex = candidateIndex;
             break;
           }
-          cursor -= candidate.durationMs;
+          cursor -= preparedFrames[candidateIndex].frame.durationMs;
         }
       }
-      if (playback.width !== frame.width) playback.width = frame.width;
-      if (playback.height !== frame.height) playback.height = frame.height;
-      playback.getContext("2d")?.putImageData(
-        new ImageData(new Uint8ClampedArray(frame.rgba), frame.width, frame.height),
-        0,
-        0,
-      );
+      if (frameIndex !== displayedFrameIndex) {
+        const prepared = preparedFrames[frameIndex];
+        if (playback.width !== prepared.frame.width) {
+          playback.width = prepared.frame.width;
+        }
+        if (playback.height !== prepared.frame.height) {
+          playback.height = prepared.frame.height;
+        }
+        context.putImageData(prepared.imageData, 0, 0);
+        displayedFrameIndex = frameIndex;
+      }
       animationFrame = requestAnimationFrame(render);
     };
     animationFrame = requestAnimationFrame(render);
@@ -2079,9 +2115,12 @@ export function ExportDialog({
       const frame: ExportFrame = {
         durationMs: 0,
         height: exportSize.height,
-        rgba: new Uint8ClampedArray(
-          context.getImageData(0, 0, exportSize.width, exportSize.height).data,
-        ),
+        rgba: context.getImageData(
+          0,
+          0,
+          exportSize.width,
+          exportSize.height,
+        ).data,
         width: exportSize.width,
       };
       updateExportProgress(0.34, "preparing");

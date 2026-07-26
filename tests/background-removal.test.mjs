@@ -46,6 +46,14 @@ function typedArrayBytes(state) {
   );
 }
 
+function sourceSection(source, startMarker, endMarker) {
+  const start = source.indexOf(startMarker);
+  assert.notEqual(start, -1, `missing source marker: ${startMarker}`);
+  const end = source.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `missing source marker: ${endMarker}`);
+  return source.slice(start, end);
+}
+
 test("ships a local, permissively licensed background-removal path", async () => {
   const [
     packageJson,
@@ -250,6 +258,153 @@ test("ships a local, permissively licensed background-removal path", async () =>
   assert.match(
     modelSource,
     /7112208dbac3a3642496c8d54e2f0f9bb3dc1dc8/,
+  );
+});
+
+test("background removal snapshots the latest gallery image synchronously", async () => {
+  const studio = await readFile(
+    new URL("../app/StickerForgeStudio.tsx", import.meta.url),
+    "utf8",
+  );
+  const updateCurrentImage = sourceSection(
+    studio,
+    "const updateCurrentImage = useCallback",
+    "const [settings, setSettings]",
+  );
+  const applyGalleryAsset = sourceSection(
+    studio,
+    "const applyGalleryAssetToEditor = useCallback",
+    "const updateTextSource = useCallback",
+  );
+  const removeBackground = sourceSection(
+    studio,
+    "const removeCurrentImageBackground = useCallback",
+    "const previewLaser = () =>",
+  );
+
+  assert.match(
+    updateCurrentImage,
+    /currentImageRef\.current = \{ src, name \};[\s\S]*?setImageDataUrl\(src\);[\s\S]*?setImageName\(name\)/,
+  );
+  assert.match(
+    applyGalleryAsset,
+    /updateCurrentImage\(source\.src, source\.name \?\? ""\)/,
+  );
+  assert.ok(
+    applyGalleryAsset.indexOf(
+      'updateCurrentImage(source.src, source.name ?? "")',
+    ) < applyGalleryAsset.indexOf("await applySource(source)"),
+  );
+  assert.match(
+    removeBackground,
+    /const currentImage = currentImageRef\.current/,
+  );
+  assert.match(
+    removeBackground,
+    /const originalSource = currentImage\.src/,
+  );
+  assert.match(
+    removeBackground,
+    /const originalName = currentImage\.name/,
+  );
+  assert.match(
+    removeBackground,
+    /removeImageBackground\(originalSource/,
+  );
+  assert.match(removeBackground, /name: originalName/);
+  assert.match(removeBackground, /source: originalSource/);
+  assert.doesNotMatch(
+    removeBackground,
+    /const originalSource = imageDataUrl|name: imageName/,
+  );
+});
+
+test("gallery handoff blocks and invalidates removal work for the previous image", async () => {
+  const studio = await readFile(
+    new URL("../app/StickerForgeStudio.tsx", import.meta.url),
+    "utf8",
+  );
+  const applyGalleryAsset = sourceSection(
+    studio,
+    "const applyGalleryAssetToEditor = useCallback",
+    "const updateTextSource = useCallback",
+  );
+  const removeBackground = sourceSection(
+    studio,
+    "const removeCurrentImageBackground = useCallback",
+    "const previewLaser = () =>",
+  );
+  const removalButton = sourceSection(
+    studio,
+    'className="background-removal-button"',
+    "aria-describedby=",
+  );
+  const quickEditStart = sourceSection(
+    studio,
+    "onPreviewEdit={(item, origin) => {",
+    "{galleryQuickEdit ? (",
+  );
+  const quickEditFlight = sourceSection(
+    studio,
+    "{galleryQuickEdit ? (",
+    '<span className="sr-only"',
+  );
+
+  assert.match(
+    applyGalleryAsset,
+    /backgroundRemovalRevisionRef\.current \+= 1/,
+  );
+  assert.match(
+    applyGalleryAsset,
+    /setBackgroundParticles\(null\)/,
+  );
+  assert.match(
+    applyGalleryAsset,
+    /setBackgroundRemoval\(\{ phase: "idle" \}\)/,
+  );
+  assert.match(
+    applyGalleryAsset,
+    /setBackgroundRemovalEffect\(false\)/,
+  );
+  assert.ok(
+    applyGalleryAsset.indexOf("backgroundRemovalRevisionRef.current += 1")
+      < applyGalleryAsset.indexOf("await applySource(source)"),
+  );
+  const workerCompletion = removeBackground.indexOf(
+    "const result = await removeImageBackground",
+  );
+  const progressRevisionGuard = removeBackground.indexOf(
+    "if (revision !== backgroundRemovalRevisionRef.current) return;",
+    workerCompletion,
+  );
+  const resultRevisionGuard = removeBackground.indexOf(
+    "if (revision !== backgroundRemovalRevisionRef.current) return;",
+    progressRevisionGuard
+      + "if (revision !== backgroundRemovalRevisionRef.current) return;".length,
+  );
+  const particleCommit = removeBackground.indexOf(
+    "setBackgroundParticles({",
+    resultRevisionGuard,
+  );
+  assert.ok(workerCompletion >= 0);
+  assert.ok(progressRevisionGuard > workerCompletion);
+  assert.ok(resultRevisionGuard > progressRevisionGuard);
+  assert.ok(particleCommit > resultRevisionGuard);
+  assert.match(
+    removeBackground,
+    /imageImportBusy \|\|[\s\S]*?galleryEditing \|\|/,
+  );
+  assert.match(
+    removalButton,
+    /disabled=\{(?=[^}]*backgroundRemovalBusy)(?=[^}]*imageImportBusy)(?=[^}]*galleryEditing)[^}]*\}/,
+  );
+  const galleryEditingStart = quickEditStart.indexOf("setGalleryEditing(true)");
+  const quickEditCreation = quickEditStart.indexOf("setGalleryQuickEdit({");
+  assert.ok(galleryEditingStart >= 0);
+  assert.ok(quickEditCreation > galleryEditingStart);
+  assert.match(
+    quickEditFlight,
+    /onComplete=\{\(\) => \{[\s\S]*?setGalleryQuickEdit\(null\);[\s\S]*?setGalleryEditing\(false\)/,
   );
 });
 

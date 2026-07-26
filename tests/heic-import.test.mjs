@@ -25,7 +25,7 @@ test("decodes HEIC images locally before loading sticker artwork", async () => {
   assert.match(studio, /setImageImportBusy\(true\)/);
   assert.match(
     studio,
-    /disabled=\{backgroundRemovalBusy \|\| imageImportBusy\}/,
+    /disabled=\{(?=[^}]*backgroundRemovalBusy)(?=[^}]*imageImportBusy)[^}]*\}/,
   );
   assert.match(studio, /importRevision === imageImportRevisionRef\.current/);
   assert.match(notices, /heic-decode/);

@@ -682,7 +682,7 @@ test("uses the bundled image artwork before a user uploads a replacement", async
 
   assert.match(studio, /const DEFAULT_IMAGE_SRC = "\/default-image\.svg"/);
   assert.match(studio, /useState\(DEFAULT_IMAGE_SRC\)/);
-  assert.match(studio, /setImageDataUrl\(DEFAULT_IMAGE_SRC\)/);
+  assert.match(studio, /updateCurrentImage\(DEFAULT_IMAGE_SRC, ""\)/);
   assert.ok(asset.size > 1_000);
 });
 

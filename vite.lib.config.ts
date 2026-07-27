@@ -6,6 +6,10 @@ const standaloneEntry = fileURLToPath(
 );
 
 export default defineConfig({
+  define: {
+    __BUILD_TARGET__: JSON.stringify("web"),
+    __XHS_BUILD__: "false",
+  },
   // The embed bundle is independent from the Sites application build.
   publicDir: false,
   build: {

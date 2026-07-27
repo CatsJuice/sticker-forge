@@ -156,8 +156,10 @@ async function loadSvgImage(markup: string): Promise<HTMLImageElement> {
 }
 
 async function loadImage(src: string): Promise<HTMLImageElement> {
-  if (!/^(data:|blob:|https?:|\/)/i.test(src)) {
-    throw new Error("The image URL must use data, blob, HTTP, or HTTPS.");
+  if (!/^(data:|blob:|https?:|\/|\.\.?\/)/i.test(src)) {
+    throw new Error(
+      "The image URL must be relative or use data, blob, HTTP, or HTTPS.",
+    );
   }
   const image = new Image();
   image.decoding = "async";

@@ -7,9 +7,11 @@
   },
   "scripts": {
     "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev --hostname 0.0.0.0",
+    "dev:xhs": "vite --config vite.xhs.config.ts --host 0.0.0.0",
     "typecheck": "tsc --noEmit --incremental false",
     "build:lib": "vite build --config vite.lib.config.ts",
     "build:pages": "GITHUB_PAGES=true NEXT_PUBLIC_SITE_URL=https://sticker.oooo.so next build --webpack",
+    "build:xhs": "npm run typecheck && vite build --config vite.xhs.config.ts && node scripts/package-xhs.mjs",
     "build": "npm run typecheck && npm run build:lib && WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",

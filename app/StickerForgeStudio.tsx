@@ -28,6 +28,7 @@ import {
   faCheck,
   faChevronDown,
   faFont,
+  faPaintbrush,
   faWandMagicSparkles,
   faPlus,
   faRotateLeft,
@@ -87,16 +88,18 @@ import {
   GalleryAddFlight,
   type GalleryAddFlightRect,
 } from "./GalleryAddFlight";
-import { ExportDialog } from "./ExportDialog";
-import { BackgroundRemovalEffect } from "./BackgroundRemovalEffect";
+import { ExportDialog } from "@/app/ExportDialog";
+import { BackgroundRemovalEffect } from "@/app/BackgroundRemovalEffect";
+import { ManualBackgroundRemovalDialog } from "@/app/ManualBackgroundRemovalDialog";
 import {
   SidebarPeelEasterEgg,
   type SidebarPeelPrankPhase,
-} from "./SidebarPeelEasterEgg";
+} from "@/app/SidebarPeelEasterEgg";
 import {
   removeImageBackground,
   type BackgroundRemovalResult,
 } from "@/lib/background-removal";
+import { assetPath } from "@/lib/asset-path";
 import {
   getLaserEffectSettings,
   LASER_PREVIEW_EVENT,
@@ -107,7 +110,6 @@ import { convertHeicToJpeg, isHeicFile } from "@/lib/heic";
 type StickerController = StickerInstance;
 type SourceMode = "text" | "image";
 type Locale = "zh" | "en";
-const PANEL_AUTO_COLLAPSE_QUERY = "(max-width: 960px)";
 const EXPORT_SHEET_MOBILE_BREAKPOINT = 620;
 type BackgroundRemovalPhase =
   | "idle"
@@ -152,7 +154,7 @@ const DEFAULT_INK = "#19191d";
 const DEFAULT_ACCENT = "rgb(36, 126, 245)";
 const DEFAULT_TEXT = "PEEL ME\n@cats_juice";
 const PEEL_PRANK_TEXT = "🤯🤯🤯";
-const DEFAULT_IMAGE_SRC = "/default-image.svg";
+const DEFAULT_IMAGE_SRC = assetPath("default-image.svg");
 const BACKGROUND_REMOVAL_TIP_SEEN_KEY =
   "sticker-forge-background-removal-tip-seen";
 const ADD_TO_GALLERY_FOLDER_STORAGE_KEY =
@@ -246,6 +248,8 @@ const UI = {
     uploadPrompt: "点击选择，或拖到这里",
     localOnly: "仅在浏览器本地处理",
     removeBackground: "移除背景",
+    manualRemoveBackground: "手动移除",
+    manualRemoveBackgroundHint: "手动涂抹要保留的区域",
     tryRemoveBackground: "试试移除背景",
     removeBackgroundHint: "AI 模型在本机运行，图像不会上传",
     loadingRemovalModel: "正在加载抠图模型",
@@ -261,6 +265,7 @@ const UI = {
     imageTooLarge: "图像需要小于 15 MB",
     reading: "正在本地读取",
     decodingHeic: "正在本地解码 HEIC",
+    heicUnsupported: "小红书小工具暂不支持 HEIC，请转换为 PNG 或 JPEG",
     processed: "本地处理完成",
     invalidImage: "这个图像无法读取，请换一个试试",
     uploadFirst: "请先上传一个图像文件",
@@ -347,6 +352,8 @@ const UI = {
     uploadPrompt: "Choose a file or drop it here",
     localOnly: "Processed locally in your browser",
     removeBackground: "Remove background",
+    manualRemoveBackground: "Manual",
+    manualRemoveBackgroundHint: "Paint the area you want to keep",
     tryRemoveBackground: "Try removing the background",
     removeBackgroundHint: "AI runs locally; your image is never uploaded",
     loadingRemovalModel: "Loading cutout model",
@@ -362,6 +369,7 @@ const UI = {
     imageTooLarge: "Images must be smaller than 15 MB",
     reading: "Reading locally",
     decodingHeic: "Decoding HEIC locally",
+    heicUnsupported: "HEIC is unavailable in the XHS build. Use PNG or JPEG",
     processed: "Processed locally",
     invalidImage: "This image could not be read; please try another file",
     uploadFirst: "Upload an image file first",
@@ -832,20 +840,20 @@ const DEFAULT_GALLERY_SEED_KEY = "sticker-forge-gallery-indexeddb-defaults-v5";
 const DEFAULT_GALLERY_SEED_LOCK_KEY = `${DEFAULT_GALLERY_SEED_KEY}-lock`;
 
 const DEFAULT_GALLERY_IMAGE_SOURCES: StickerSource[] = [
-  { type: "image", src: "/default-gallery/vue.svg", name: "Vue" },
-  { type: "image", src: "/default-gallery/react.svg", name: "React" },
-  { type: "image", src: "/default-gallery/claude.svg", name: "Claude" },
-  { type: "image", src: "/default-gallery/chatgpt.svg", name: "ChatGPT" },
-  { type: "image", src: "/default-gallery/affine.svg", name: "AFFiNE" },
-  { type: "image", src: "/default-gallery/vite.svg", name: "Vite" },
+  { type: "image", src: assetPath("default-gallery/vue.svg"), name: "Vue" },
+  { type: "image", src: assetPath("default-gallery/react.svg"), name: "React" },
+  { type: "image", src: assetPath("default-gallery/claude.svg"), name: "Claude" },
+  { type: "image", src: assetPath("default-gallery/chatgpt.svg"), name: "ChatGPT" },
+  { type: "image", src: assetPath("default-gallery/affine.svg"), name: "AFFiNE" },
+  { type: "image", src: assetPath("default-gallery/vite.svg"), name: "Vite" },
 ];
 
 const EVOLUTION_GALLERY_IMAGE_SOURCES: StickerSource[] = [
-  { type: "image", src: "/default-gallery/bridge-1.svg", name: "Bridge 1" },
-  { type: "image", src: "/default-gallery/bridge-2.svg", name: "Bridge 2" },
-  { type: "image", src: "/default-gallery/bridge-3.svg", name: "Bridge 3" },
-  { type: "image", src: "/default-gallery/bridge-4.svg", name: "Bridge 4" },
-  { type: "image", src: "/default-gallery/bridge-5.svg", name: "Bridge 5" },
+  { type: "image", src: assetPath("default-gallery/bridge-1.svg"), name: "Bridge 1" },
+  { type: "image", src: assetPath("default-gallery/bridge-2.svg"), name: "Bridge 2" },
+  { type: "image", src: assetPath("default-gallery/bridge-3.svg"), name: "Bridge 3" },
+  { type: "image", src: assetPath("default-gallery/bridge-4.svg"), name: "Bridge 4" },
+  { type: "image", src: assetPath("default-gallery/bridge-5.svg"), name: "Bridge 5" },
 ];
 
 const EVOLUTION_GALLERY_LAYOUTS: GalleryLayout[] = [
@@ -1530,6 +1538,9 @@ export function StickerForgeStudio() {
     revision: number;
     playing: boolean;
   } | null>(null);
+  const [manualRemovalOpen, setManualRemovalOpen] = useState(false);
+  const [manualRemovalClosing, setManualRemovalClosing] = useState(false);
+  const [manualRemovalEntered, setManualRemovalEntered] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportClosing, setExportClosing] = useState(false);
   const [exportEntered, setExportEntered] = useState(false);
@@ -1600,19 +1611,6 @@ export function StickerForgeStudio() {
   );
 
   useEffect(() => {
-    const query = window.matchMedia(PANEL_AUTO_COLLAPSE_QUERY);
-    const collapseForNarrowViewport = () => {
-      if (query.matches) setIsPanelOpen(false);
-    };
-    const frame = window.requestAnimationFrame(collapseForNarrowViewport);
-    query.addEventListener("change", collapseForNarrowViewport);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      query.removeEventListener("change", collapseForNarrowViewport);
-    };
-  }, []);
-
-  useEffect(() => {
     const query = window.matchMedia("(display-mode: standalone)");
     const updateStandaloneState = () => {
       const iosNavigator = window.navigator as Navigator & {
@@ -1642,8 +1640,22 @@ export function StickerForgeStudio() {
   }, [exportOpen]);
 
   useEffect(() => {
+    if (!manualRemovalOpen) return;
+    let secondFrame = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      secondFrame = window.requestAnimationFrame(() => {
+        setManualRemovalEntered(true);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+    };
+  }, [manualRemovalOpen]);
+
+  useEffect(() => {
     if (
-      !exportOpen ||
+      (!exportOpen && !manualRemovalOpen) ||
       window.innerWidth > EXPORT_SHEET_MOBILE_BREAKPOINT
     ) {
       return;
@@ -1682,7 +1694,7 @@ export function StickerForgeStudio() {
         exportThemeRestoreTimerRef.current = null;
       }, 0);
     };
-  }, [exportOpen]);
+  }, [exportOpen, manualRemovalOpen]);
 
   const t = UI[locale];
   const backgroundRemovalBusy = !["idle", "error"].includes(
@@ -2481,6 +2493,10 @@ export function StickerForgeStudio() {
       const readRevision = ++sourceRevisionRef.current;
       const importRevision = ++imageImportRevisionRef.current;
       const heic = isHeicFile(file);
+      if (heic && __XHS_BUILD__) {
+        setSourceMessage(t.heicUnsupported);
+        return;
+      }
       setImageImportBusy(true);
       setSourceMessage(
         `${file.name} · ${heic ? t.decodingHeic : t.reading}`,
@@ -2509,7 +2525,7 @@ export function StickerForgeStudio() {
           || window.localStorage.getItem(
             BACKGROUND_REMOVAL_TIP_SEEN_KEY,
           ) === "true";
-        if (!backgroundRemovalTipSeen) {
+        if (!__XHS_BUILD__ && !backgroundRemovalTipSeen) {
           const hasTransparency =
             isSvg || await imageSourceHasTransparency(dataUrl);
           if (readRevision !== sourceRevisionRef.current) return;
@@ -2646,6 +2662,71 @@ export function StickerForgeStudio() {
     setBackgroundRemoval({ phase: "idle" });
     setSourceMessage(t.backgroundRemoved);
   }, [t.backgroundRemoved]);
+
+  const stageBackgroundRemovalResult = useCallback(
+    (
+      revision: number,
+      originalSource: string,
+      originalName: string,
+      result: BackgroundRemovalResult,
+    ) => {
+      if (revision !== backgroundRemovalRevisionRef.current) return;
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+      setBackgroundRemoval({ phase: "dissolving" });
+      const nextSource: StickerSource = {
+        type: "image",
+        src: result.dataUrl,
+        name: originalName,
+      };
+      setBackgroundParticles({
+        source: originalSource,
+        result,
+        nextSource,
+        revision,
+        playing: false,
+      });
+    },
+    [],
+  );
+
+  const confirmManualBackgroundRemoval = useCallback(
+    (result: BackgroundRemovalResult) => {
+      setManualRemovalOpen(false);
+      setManualRemovalClosing(false);
+      setManualRemovalEntered(false);
+      const currentImage = currentImageRef.current;
+      if (
+        !currentImage.src
+        || imageImportBusy
+        || galleryEditing
+        || !["idle", "error"].includes(backgroundRemoval.phase)
+      ) {
+        return;
+      }
+      const revision = ++backgroundRemovalRevisionRef.current;
+      preparedBackgroundOutlineRef.current?.source.dispose();
+      preparedBackgroundOutlineRef.current = null;
+      const outline = settingsRef.current.outline;
+      setSourceMessage("");
+      setBackgroundParticles(null);
+      controllerRef.current?.setOptions({
+        outline: { ...outline, width: 0 },
+      });
+      controllerRef.current?.setBackgroundRemovalEffect(false);
+      stageBackgroundRemovalResult(
+        revision,
+        currentImage.src,
+        currentImage.name,
+        result,
+      );
+    },
+    [
+      backgroundRemoval.phase,
+      galleryEditing,
+      imageImportBusy,
+      stageBackgroundRemovalResult,
+    ],
+  );
 
   const removeCurrentImageBackground = useCallback(async () => {
     const currentImage = currentImageRef.current;
@@ -3015,13 +3096,29 @@ export function StickerForgeStudio() {
       data-panel-open={isPanelOpen}
       data-gallery-open={galleryOpen}
       data-gallery-editing={galleryEditing}
-      data-export-active={exportOpen}
-      data-export-open={exportOpen && exportEntered && !exportClosing}
-      data-export-closing={exportClosing}
+      data-export-active={exportOpen || manualRemovalOpen}
+      data-export-open={
+        (
+          (exportOpen && exportEntered)
+          || (manualRemovalOpen && manualRemovalEntered)
+        )
+        && !exportClosing
+        && !manualRemovalClosing
+      }
+      data-export-closing={exportClosing || manualRemovalClosing}
       data-pwa-standalone={isStandalonePwa}
+      data-build-target={__XHS_BUILD__ ? "xhs" : "web"}
     >
       <header className="studio-header">
-        <span className="brand-mark" role="img" aria-label="Sticker Forge" />
+        <span
+          className="brand-mark"
+          role="img"
+          aria-label="Sticker Forge"
+          style={{
+            "--sticker-forge-logo-image":
+              `url("${assetPath("sticker-forge-logo-peel.webp")}")`,
+          } as CSSProperties}
+        />
       </header>
 
       <section className="stage-card" aria-label={t.preview}>
@@ -3086,12 +3183,14 @@ export function StickerForgeStudio() {
           data-open={isPanelOpen}
           aria-label={t.controls}
         >
-          <SidebarPeelEasterEgg
-            panelRef={controlsCardRef}
-            optionsRef={settingsRef}
-            onDetached={() => setIsPanelOpen(false)}
-            onPrankPhaseChange={handleSidebarPeelPrankPhaseChange}
-          />
+          {!__XHS_BUILD__ ? (
+            <SidebarPeelEasterEgg
+              panelRef={controlsCardRef}
+              optionsRef={settingsRef}
+              onDetached={() => setIsPanelOpen(false)}
+              onPrankPhaseChange={handleSidebarPeelPrankPhaseChange}
+            />
+          ) : null}
           <button
             className="controls-drag-region"
             type="button"
@@ -3125,16 +3224,18 @@ export function StickerForgeStudio() {
                 >
                   <FontAwesomeIcon icon={faRotateLeft} />
                 </button>
-                <a
-                  className="icon-button"
-                  href={GITHUB_URL}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={t.github}
-                  title={t.github}
-                >
-                  <FontAwesomeIcon icon={faGithub} />
-                </a>
+                {!__XHS_BUILD__ ? (
+                  <a
+                    className="icon-button"
+                    href={GITHUB_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={t.github}
+                    title={t.github}
+                  >
+                    <FontAwesomeIcon icon={faGithub} />
+                  </a>
+                ) : null}
                 <div className="language-picker">
                   <button
                     className="icon-button language-button"
@@ -3443,48 +3544,75 @@ export function StickerForgeStudio() {
                     <input
                       className="sr-only"
                       type="file"
-                      accept="image/*,.heic,.heif"
+                      accept={
+                        __XHS_BUILD__
+                          ? "image/png,image/jpeg,image/gif,image/webp,image/svg+xml"
+                          : "image/*,.heic,.heif"
+                      }
                       onChange={(event) => void loadImageFile(event.target.files?.[0])}
                     />
                   </label>
-                  <div className="background-removal-control">
-                    <div
-                      className="background-removal-action"
-                      onPointerEnter={() =>
-                        setShowBackgroundRemovalTip(false)
-                      }
-                    >
-                      {showBackgroundRemovalTip ? (
-                        <BackgroundRemovalTip
-                          anchor={backgroundRemovalButtonRef}
-                          label={t.tryRemoveBackground}
-                        />
-                      ) : null}
+                  <div
+                    className="background-removal-control"
+                    data-manual-only={__XHS_BUILD__ || undefined}
+                  >
+                    <div className="background-removal-actions">
                       <button
-                        ref={backgroundRemovalButtonRef}
-                        className="background-removal-button"
+                        className="background-removal-button background-removal-manual-button"
                         type="button"
-                        data-phase={backgroundRemoval.phase}
                         disabled={
                           backgroundRemovalBusy
                           || imageImportBusy
                           || galleryEditing
                         }
-                        aria-busy={backgroundRemovalBusy || imageImportBusy}
-                        aria-describedby={
-                          showBackgroundRemovalTip
-                            ? "background-removal-tip"
-                            : undefined
-                        }
-                        onPointerEnter={() =>
-                          setShowBackgroundRemovalTip(false)
-                        }
-                        onFocus={() => setShowBackgroundRemovalTip(false)}
                         onClick={() => {
                           setShowBackgroundRemovalTip(false);
-                          void removeCurrentImageBackground();
+                          setManualRemovalClosing(false);
+                          setManualRemovalEntered(false);
+                          setManualRemovalOpen(true);
                         }}
                       >
+                        <FontAwesomeIcon icon={faPaintbrush} aria-hidden="true" />
+                        <span>{t.manualRemoveBackground}</span>
+                      </button>
+                      {!__XHS_BUILD__ ? (
+                        <div
+                          className="background-removal-action"
+                          onPointerEnter={() =>
+                            setShowBackgroundRemovalTip(false)
+                          }
+                        >
+                          {showBackgroundRemovalTip ? (
+                            <BackgroundRemovalTip
+                              anchor={backgroundRemovalButtonRef}
+                              label={t.tryRemoveBackground}
+                            />
+                          ) : null}
+                          <button
+                            ref={backgroundRemovalButtonRef}
+                            className="background-removal-button"
+                            type="button"
+                            data-phase={backgroundRemoval.phase}
+                            disabled={
+                              backgroundRemovalBusy
+                              || imageImportBusy
+                              || galleryEditing
+                            }
+                            aria-busy={backgroundRemovalBusy || imageImportBusy}
+                            aria-describedby={
+                              showBackgroundRemovalTip
+                                ? "background-removal-tip"
+                                : undefined
+                            }
+                            onPointerEnter={() =>
+                              setShowBackgroundRemovalTip(false)
+                            }
+                            onFocus={() => setShowBackgroundRemovalTip(false)}
+                            onClick={() => {
+                              setShowBackgroundRemovalTip(false);
+                              void removeCurrentImageBackground();
+                            }}
+                          >
                         <FontAwesomeIcon icon={faWandMagicSparkles} aria-hidden="true" />
                         <span>{backgroundRemovalLabel}</span>
                         {backgroundRemoval.phase === "loading" ? (
@@ -3496,16 +3624,24 @@ export function StickerForgeStudio() {
                             aria-hidden="true"
                           />
                         ) : null}
-                      </button>
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                    <small
+                    {!__XHS_BUILD__ ? (
+                      <small
                       className="background-removal-caption"
                       data-error={backgroundRemoval.phase === "error"}
-                    >
-                      {backgroundRemoval.phase === "error"
-                        ? t.backgroundRemovalFailed
-                        : t.removeBackgroundHint}
-                    </small>
+                      >
+                        {backgroundRemoval.phase === "error"
+                          ? t.backgroundRemovalFailed
+                          : t.removeBackgroundHint}
+                      </small>
+                    ) : (
+                      <small className="background-removal-caption">
+                        {t.manualRemoveBackgroundHint}
+                      </small>
+                    )}
                   </div>
                   <span className="sr-only" aria-live="polite">
                     {backgroundRemovalBusy ? backgroundRemovalLabel : ""}
@@ -4011,20 +4147,22 @@ export function StickerForgeStudio() {
                 <FontAwesomeIcon icon={faChevronDown} />
               </button>
             </div>
-            <button
-              className="primary-button export-button"
-              type="button"
-              onClick={() => {
-                setExportSource(sourceRef.current);
-                setExportOptions(settingsRef.current);
-                setExportClosing(false);
-                setExportEntered(false);
-                setExportOpen(true);
-              }}
-            >
-              <FontAwesomeIcon icon={faArrowUpFromBracket} />
-              <span>{t.export}</span>
-            </button>
+            {!__XHS_BUILD__ ? (
+              <button
+                className="primary-button export-button"
+                type="button"
+                onClick={() => {
+                  setExportSource(sourceRef.current);
+                  setExportOptions(settingsRef.current);
+                  setExportClosing(false);
+                  setExportEntered(false);
+                  setExportOpen(true);
+                }}
+              >
+                <FontAwesomeIcon icon={faArrowUpFromBracket} />
+                <span>{t.export}</span>
+              </button>
+            ) : null}
           </div>
         </aside>
       {galleryAddMenuOpen && galleryAddMenuPosition
@@ -4072,7 +4210,25 @@ export function StickerForgeStudio() {
             document.body,
           )
         : null}
-      {exportOpen && typeof document !== "undefined"
+      {manualRemovalOpen && typeof document !== "undefined"
+        ? createPortal(
+            <ManualBackgroundRemovalDialog
+              source={imageDataUrl}
+              locale={locale}
+              entered={manualRemovalEntered}
+              standalonePwa={isStandalonePwa}
+              onClosing={() => setManualRemovalClosing(true)}
+              onCancel={() => {
+                setManualRemovalOpen(false);
+                setManualRemovalClosing(false);
+                setManualRemovalEntered(false);
+              }}
+              onConfirm={confirmManualBackgroundRemoval}
+            />,
+            document.body,
+          )
+        : null}
+      {!__XHS_BUILD__ && exportOpen && typeof document !== "undefined"
         ? createPortal(
             <ExportDialog
               source={exportSource}
@@ -4139,6 +4295,7 @@ export function StickerForgeStudio() {
             setGalleryEditing(true);
             setCollapseGalleryPreviewsImmediately(true);
           }}
+          exportEnabled={!__XHS_BUILD__}
           interactionBlocked={exportOpen}
           onExport={(asset) => {
             setExportSource(asset.source);
@@ -4187,6 +4344,7 @@ export function StickerForgeStudio() {
         />
       ) : null}
       <GalleryFolderDock
+        transferEnabled={!__XHS_BUILD__}
         receivingFolderRef={galleryFolderRef}
         receivingFolderId={
           addToGalleryFolder?.id ?? DEFAULT_GALLERY_FOLDER_ID

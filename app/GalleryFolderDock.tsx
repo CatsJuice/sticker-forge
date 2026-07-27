@@ -26,11 +26,13 @@ import {
 import {
   createGalleryFolder,
   deleteGalleryFolder,
-  exportGalleryFolders,
-  importGalleryArchive,
   reorderGalleryFolders,
   updateGalleryFolderColor,
 } from "@/lib/gallery-storage";
+import {
+  downloadGallerySelection,
+  importGallerySelection,
+} from "@/lib/gallery-transfer";
 import {
   DEFAULT_GALLERY_FOLDER_ID,
   type GalleryFolderRecord,
@@ -45,6 +47,7 @@ import { useSpringValue } from "./gallery-spring";
 import { ColorPicker } from "./ColorPicker";
 
 type GalleryFolderDockProps = {
+  transferEnabled?: boolean;
   folders: GalleryFolderRecord[];
   items: GalleryItem[];
   locale: "zh" | "en";
@@ -450,6 +453,7 @@ function FolderEditMenu({
 }
 
 export function GalleryFolderDock({
+  transferEnabled = true,
   folders,
   items,
   locale,
@@ -472,6 +476,7 @@ export function GalleryFolderDock({
   onFolderDeleted,
 }: GalleryFolderDockProps) {
   const t = COPY[locale];
+  const galleryTransferEnabled = transferEnabled && !__XHS_BUILD__;
   const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState<"edit" | "share" | null>(null);
   const [editFolderId, setEditFolderId] = useState<string | null>(null);
@@ -686,18 +691,12 @@ export function GalleryFolderDock({
 
   const downloadSelection = async () => {
     if (shareSelection.size === 0) return;
-    const blob = await exportGalleryFolders([...shareSelection]);
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `sticker-forge-gallery-${new Date().toISOString().slice(0, 10)}.stickerforge`;
-    anchor.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    await downloadGallerySelection([...shareSelection]);
     closeMenu();
   };
 
   const importArchive = async (file: File) => {
-    const imported = await importGalleryArchive(file);
+    const imported = await importGallerySelection(file);
     onFoldersChange([...folders, ...imported.folders]);
     onItemsChange([...items, ...imported.items]);
   };
@@ -878,18 +877,32 @@ export function GalleryFolderDock({
               </defs>
             </svg>
             <div className="gallery-folder-menu-goo-layer" aria-hidden="true">
-              {[0, 1, 2, 3].map((delayIndex) => (
+              {(galleryTransferEnabled ? [0, 1, 2, 3] : [0, 1]).map((delayIndex) => (
                 <DockGooBlob key={delayIndex} delayIndex={delayIndex} />
               ))}
             </div>
-            <DockAction kind="edit" label={t.edit} delayIndex={3} onClick={() => setMode("edit")} />
-            <DockAction kind="create" label={t.create} delayIndex={2} onClick={() => void createFolder()} />
-            <DockAction kind="share" label={t.share} delayIndex={1} onClick={() => setMode("share")} />
-            <DockAction kind="import" label={t.import} delayIndex={0} onClick={() => fileInputRef.current?.click()} />
+            <DockAction
+              kind="edit"
+              label={t.edit}
+              delayIndex={galleryTransferEnabled ? 3 : 1}
+              onClick={() => setMode("edit")}
+            />
+            <DockAction
+              kind="create"
+              label={t.create}
+              delayIndex={galleryTransferEnabled ? 2 : 0}
+              onClick={() => void createFolder()}
+            />
+            {galleryTransferEnabled ? (
+              <>
+                <DockAction kind="share" label={t.share} delayIndex={1} onClick={() => setMode("share")} />
+                <DockAction kind="import" label={t.import} delayIndex={0} onClick={() => fileInputRef.current?.click()} />
+              </>
+            ) : null}
           </div>
         ) : null}
 
-        {mode === "share" ? (
+        {galleryTransferEnabled && mode === "share" ? (
           <div className="gallery-folder-share-actions">
             <button type="button" disabled={shareSelection.size === 0} onClick={() => void downloadSelection()}>
               {t.confirmShare}
@@ -911,17 +924,19 @@ export function GalleryFolderDock({
             <FontAwesomeIcon icon={faPlus} />
           </span>
         </button>
-        <input
-          ref={fileInputRef}
-          className="sr-only"
-          type="file"
-          accept=".stickerforge,.json,application/json"
-          onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) void importArchive(file);
-            event.currentTarget.value = "";
-          }}
-        />
+        {galleryTransferEnabled ? (
+          <input
+            ref={fileInputRef}
+            className="sr-only"
+            type="file"
+            accept=".stickerforge,.json,application/json"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void importArchive(file);
+              event.currentTarget.value = "";
+            }}
+          />
+        ) : null}
       </div>
     </div>
   );

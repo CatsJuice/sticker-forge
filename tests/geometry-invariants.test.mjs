@@ -149,6 +149,14 @@ test("reverses the gallery flight before unmounting the shared canvas", async ()
   assert.match(studio, /galleryOpen \? \([\s\S]*?<GalleryCanvas[\s\S]*?\) : null\}[\s\S]*?<GalleryFolder/);
   assert.match(styles, /--studio-canvas-background:/);
   assert.match(styles, /\.gallery-folder \{[^}]*z-index: 120;/s);
+  assert.match(
+    styles,
+    /html\.xhs-build \.gallery-header \{[^}]*44px \+ var\(--safe-area-inset-top/s,
+  );
+  assert.match(
+    styles,
+    /html\.xhs-build \.controls-footer \{[^}]*grid-template-columns: minmax\(0, 1fr\)/s,
+  );
 });
 
 test("keeps repeated delete clicks on the inline Keep action", async () => {
@@ -263,15 +271,8 @@ test("moves an immutable gallery sticker into the editor through a Spring transi
   assert.match(folderDock, /menu\.dataset\.expandDirection/);
   assert.match(folderDock, /stage\?\.getBoundingClientRect\(\)\.right/);
   assert.match(studio, /data-gallery-open=\{galleryOpen\}/);
-  assert.match(
-    studio,
-    /PANEL_AUTO_COLLAPSE_QUERY = "\(max-width: 960px\)"/,
-  );
-  assert.match(studio, /query\.matches\) setIsPanelOpen\(false\)/);
-  assert.match(
-    studio,
-    /query\.addEventListener\("change", collapseForNarrowViewport\)/,
-  );
+  assert.doesNotMatch(studio, /PANEL_AUTO_COLLAPSE_QUERY/);
+  assert.doesNotMatch(studio, /collapseForNarrowViewport/);
   assert.match(
     styles,
     /\.gallery-folder-dock\[data-direct-close="true"\] \.gallery-folder-scroll \{\s*overflow: visible;/,
@@ -657,6 +658,7 @@ test("supports uploaded images and derives transparent silhouettes from alpha", 
   assert.match(types, /export interface StickerImageSource/);
   assert.match(types, /type: "image";\s*\/\*\*[^]*?src: string/);
   assert.match(source, /function imageHasTransparency\(image: HTMLImageElement\)/);
+  assert.ok(source.includes("|\\.\\.?\\/)/i.test(src)"));
   assert.match(source, /if \(pixels\[index\] < 255\) return true/);
   assert.match(source, /source\.type === "image"\s*\? await renderImageSource\(source\)/);
   assert.match(source, /const canvas = addOutline\(sourceCanvas, outline\)/);
@@ -666,7 +668,7 @@ test("supports uploaded images and derives transparent silhouettes from alpha", 
     /sourcePixels\[pixel \* 4 \+ 3\] >= VISIBLE_ALPHA_THRESHOLD/,
   );
   assert.match(studio, /type SourceMode = "text" \| "image"/);
-  assert.match(studio, /accept="image\/\*,\.heic,\.heif"/);
+  assert.match(studio, /__XHS_BUILD__[\s\S]*?"image\/\*,\.heic,\.heif"/);
   assert.match(studio, /\{ type: "image", src: dataUrl, name: file\.name \}/);
   assert.match(declarations, /export interface StickerImageSource/);
 });
@@ -680,7 +682,10 @@ test("uses the bundled image artwork before a user uploads a replacement", async
     new URL("../public/default-image.svg", import.meta.url),
   );
 
-  assert.match(studio, /const DEFAULT_IMAGE_SRC = "\/default-image\.svg"/);
+  assert.match(
+    studio,
+    /const DEFAULT_IMAGE_SRC = assetPath\("default-image\.svg"\)/,
+  );
   assert.match(studio, /useState\(DEFAULT_IMAGE_SRC\)/);
   assert.match(studio, /updateCurrentImage\(DEFAULT_IMAGE_SRC, ""\)/);
   assert.ok(asset.size > 1_000);

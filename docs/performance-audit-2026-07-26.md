@@ -102,7 +102,7 @@ bytes of final JS growth is reported rather than hidden: the harness
 deliberately stores every lightweight destroyed public handle and three
 prepared-source handle wrappers per cycle. The public handle severs its
 renderer reference in `finally`; native geometry, texture, render-target, and
-canvas backing storage is released, the WebGL context is explicitly lost, and
+canvas backing storage are released, the WebGL context is explicitly lost, and
 DOM/listener growth is zero.
 
 Invalid-source and injected attach/ResizeObserver failures both reached zero

@@ -3,8 +3,17 @@ import path from "node:path";
 
 const isGitHubPages = process.env.GITHUB_PAGES === "true";
 
-const pagesWebpackConfig: Pick<NextConfig, "webpack"> = {
-  webpack(config) {
+const nextConfig: NextConfig = {
+  output: isGitHubPages ? "export" : undefined,
+  trailingSlash: isGitHubPages,
+  webpack(config, { webpack }) {
+    config.plugins.push(
+      new webpack.DefinePlugin({
+        __BUILD_TARGET__: JSON.stringify("web"),
+        __XHS_BUILD__: JSON.stringify(false),
+      }),
+    );
+    if (!isGitHubPages) return config;
     config.resolve.fallback = {
       ...config.resolve.fallback,
       module: false,
@@ -21,12 +30,6 @@ const pagesWebpackConfig: Pick<NextConfig, "webpack"> = {
     });
     return config;
   },
-};
-
-const nextConfig: NextConfig = {
-  output: isGitHubPages ? "export" : undefined,
-  trailingSlash: isGitHubPages,
-  ...(isGitHubPages ? pagesWebpackConfig : {}),
 };
 
 export default nextConfig;

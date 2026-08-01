@@ -1,5 +1,6 @@
 import defaultPeelSoundUrl from "./assets/elevenlabs-sticker-peel-foley.mp3?inline";
 import reappearSoundUrl from "./assets/sticker-reappear.wav?inline";
+import { loadAudioSource } from "@/lib/audio-source";
 
 export const DEFAULT_PEEL_SOUND_URL = defaultPeelSoundUrl;
 export const DEFAULT_REAPPEAR_SOUND_URL = reappearSoundUrl;
@@ -315,13 +316,7 @@ function acquireAudioBuffer(
       invalidated: false,
       settled: false,
     };
-    const promise = fetch(src, { signal: load.controller.signal })
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error(`Peel audio request failed with ${response.status}.`);
-        }
-        return response.arrayBuffer();
-      })
+    const promise = loadAudioSource(src, load.controller.signal)
       .then((encoded) => {
         if (load.invalidated) {
           throw audioDecodeAbortError();

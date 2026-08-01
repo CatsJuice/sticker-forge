@@ -219,7 +219,16 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   const t = COPY[locale];
   const isExit = variant === "exit";
   const [hovered, setHovered] = useState(false);
+  const [touchPinned, setTouchPinned] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const artRef = useRef<HTMLSpanElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartRef = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+  } | null>(null);
+  const suppressClickUntilRef = useRef(0);
   const [renderedDropPreview, setRenderedDropPreview] =
     useState<RelativeDropPreview | null>(null);
   const previewRefs = useRef(new Map<string, HTMLImageElement>());
@@ -376,7 +385,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   }, [receiving]);
 
   useEffect(() => {
-    if (!hovered) return;
+    if (!hovered || touchPinned) return;
     const handlePointerMove = (event: PointerEvent) => {
       const art = artRef.current;
       const target = event.target;
@@ -387,7 +396,35 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
     return () => {
       window.removeEventListener("pointermove", handlePointerMove, true);
     };
-  }, [hovered]);
+  }, [hovered, touchPinned]);
+
+  useEffect(() => {
+    if (!touchPinned) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        buttonRef.current?.contains(target)
+      ) {
+        return;
+      }
+      setTouchPinned(false);
+      setHovered(false);
+    };
+    window.addEventListener("pointerdown", handleOutsidePointerDown, true);
+    return () => {
+      window.removeEventListener("pointerdown", handleOutsidePointerDown, true);
+    };
+  }, [touchPinned]);
+
+  useEffect(
+    () => () => {
+      if (longPressTimerRef.current !== null) {
+        clearTimeout(longPressTimerRef.current);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (
@@ -403,6 +440,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
   }, [onReceiveClosed, openProgress, openSettled, receiving]);
 
   const handleBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    if (touchPinned) return;
     const nextTarget = event.relatedTarget;
     if (
       !(nextTarget instanceof Node) ||
@@ -414,6 +452,7 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
 
   const handleOpen = () => {
     if (loading) return;
+    setTouchPinned(false);
     setHovered(false);
     const origins: Record<string, GalleryEntryOrigin> = {};
     for (const item of previews) {
@@ -432,7 +471,14 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
 
   return (
     <button
-      ref={forwardedRef}
+      ref={(node) => {
+        buttonRef.current = node;
+        if (typeof forwardedRef === "function") {
+          forwardedRef(node);
+        } else if (forwardedRef) {
+          forwardedRef.current = node;
+        }
+      }}
       className="gallery-folder"
       type="button"
       disabled={loading}
@@ -444,18 +490,98 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
       data-receiving={receiving}
       aria-label={isExit ? t.exit : t.open}
       title={isExit ? t.exit : t.open}
-      onPointerEnter={() => {
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch") return;
         if (!loading && !interactionDisabled) setHovered(true);
       }}
-      onPointerMove={() => {
+      onPointerDown={(event) => {
+        if (
+          event.pointerType !== "touch" ||
+          loading ||
+          interactionDisabled ||
+          touchPinned
+        ) {
+          return;
+        }
+        if (longPressTimerRef.current !== null) {
+          clearTimeout(longPressTimerRef.current);
+        }
+        touchStartRef.current = {
+          pointerId: event.pointerId,
+          x: event.clientX,
+          y: event.clientY,
+        };
+        longPressTimerRef.current = setTimeout(() => {
+          longPressTimerRef.current = null;
+          touchStartRef.current = null;
+          suppressClickUntilRef.current = performance.now() + 700;
+          setHovered(true);
+          setTouchPinned(true);
+        }, 500);
+      }}
+      onPointerMove={(event) => {
+        if (event.pointerType === "touch") {
+          const start = touchStartRef.current;
+          if (!start || start.pointerId !== event.pointerId) return;
+          if (
+            Math.hypot(
+              event.clientX - start.x,
+              event.clientY - start.y,
+            ) <= 10
+          ) {
+            return;
+          }
+          if (longPressTimerRef.current !== null) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+          touchStartRef.current = null;
+          return;
+        }
         if (!loading && !interactionDisabled) setHovered(true);
       }}
-      onPointerLeave={() => setHovered(false)}
+      onPointerUp={(event) => {
+        if (
+          event.pointerType === "touch" &&
+          touchStartRef.current?.pointerId === event.pointerId
+        ) {
+          if (longPressTimerRef.current !== null) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+          touchStartRef.current = null;
+        }
+      }}
+      onPointerCancel={(event) => {
+        if (
+          event.pointerType === "touch" &&
+          touchStartRef.current?.pointerId === event.pointerId
+        ) {
+          if (longPressTimerRef.current !== null) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+          touchStartRef.current = null;
+        }
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === "touch" || touchPinned) return;
+        setHovered(false);
+      }}
       onFocus={() => {
         if (!loading && !interactionDisabled) setHovered(true);
       }}
       onBlur={handleBlur}
-      onClick={() => {
+      onContextMenu={(event) => {
+        if (touchPinned || event.timeStamp < suppressClickUntilRef.current) {
+          event.preventDefault();
+        }
+      }}
+      onClick={(event) => {
+        if (event.timeStamp < suppressClickUntilRef.current) {
+          event.preventDefault();
+          return;
+        }
         if (!interactionDisabled) handleOpen();
       }}
     >
@@ -490,8 +616,9 @@ export const GalleryFolder = forwardRef<HTMLButtonElement, GalleryFolderProps>(f
           onPointerEnter={() => {
             if (!loading && !interactionDisabled) setHovered(true);
           }}
-          onPointerLeave={(event) => {
-            const nextTarget = event.relatedTarget;
+              onPointerLeave={(event) => {
+                if (touchPinned) return;
+                const nextTarget = event.relatedTarget;
             const folder = event.currentTarget.closest(".gallery-folder");
             if (
               nextTarget instanceof Node &&

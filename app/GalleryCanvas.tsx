@@ -87,6 +87,7 @@ type GalleryCanvasProps = {
   onSurfaceReady: () => void;
   onEditStart: () => void;
   onExport: (asset: GalleryAsset) => void;
+  exportEnabled?: boolean;
   interactionBlocked?: boolean;
   resolveEditTarget: (item: GalleryItem) => GalleryEntryOrigin | null;
   onEditComplete: (asset: GalleryAsset) => Promise<void>;
@@ -488,6 +489,7 @@ function GalleryItemView({
   editing,
   onEdit,
   onExport,
+  exportEnabled,
   exportLabel,
   onMovePointer,
   onMoveDrop,
@@ -514,6 +516,7 @@ function GalleryItemView({
   editing: boolean;
   onEdit: (layout: GalleryLayout) => void;
   onExport: () => void;
+  exportEnabled: boolean;
   exportLabel: string;
   onMovePointer: (
     id: string,
@@ -786,20 +789,22 @@ function GalleryItemView({
               <FontAwesomeIcon icon={faPenToSquare} />
             </button>
           </div>
-          <div className="gallery-export-control" data-gallery-control>
-            <button
-              className="gallery-export-button"
-              type="button"
-              aria-label={exportLabel}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                onExport();
-              }}
-            >
-              <FontAwesomeIcon icon={faArrowUpFromBracket} />
-            </button>
-          </div>
+          {exportEnabled ? (
+            <div className="gallery-export-control" data-gallery-control>
+              <button
+                className="gallery-export-button"
+                type="button"
+                aria-label={exportLabel}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onExport();
+                }}
+              >
+                <FontAwesomeIcon icon={faArrowUpFromBracket} />
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1094,6 +1099,7 @@ export function GalleryCanvas({
   onSurfaceReady,
   onEditStart,
   onExport,
+  exportEnabled = true,
   interactionBlocked = false,
   resolveEditTarget,
   onEditComplete,
@@ -1101,6 +1107,7 @@ export function GalleryCanvas({
   onClose,
 }: GalleryCanvasProps) {
   const t = COPY[locale];
+  const galleryExportEnabled = exportEnabled && !__XHS_BUILD__;
   const { ref: viewportRef, size: viewport } = useElementSize<HTMLDivElement>();
   const [items, setItems] = useState(initialItems);
   const itemsRef = useRef(items);
@@ -2229,6 +2236,7 @@ export function GalleryCanvas({
               editing={Boolean(editTransition)}
               onEdit={(layout) => handleEdit({ ...item, layout })}
               onExport={() => handleExport(item)}
+              exportEnabled={galleryExportEnabled}
               exportLabel={t.exportSticker}
               onMovePointer={handleMovePointer}
               onMoveDrop={handleMoveDrop}

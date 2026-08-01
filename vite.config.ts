@@ -44,6 +44,10 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: {
+      __BUILD_TARGET__: JSON.stringify("web"),
+      __XHS_BUILD__: "false",
+    },
     // Prebundle the worker's ML runtime at startup. Otherwise Vite discovers it
     // on the first background-removal click and reloads the page mid-request.
     optimizeDeps: {
